@@ -1,0 +1,22 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "project_research": {
+      "path": "./graphs/project_research.py:graph",
+      "description": "Research a mining project via Exa, extract all fields, geocode, validate, then save to Supabase after human review."
+    },
+    "analog_finder": {
+      "path": "./graphs/analog_finder.py:graph",
+      "description": "Find 5-10 comparable projects from DB and Exa, score them for relevance, pause for human review, then save approved analogs."
+    },
+    "report_generator": {
+      "path": "./graphs/report_generator.py:graph",
+      "description": "Build resource models using analogs and rules, pause for human model review, then generate the full MiningReport JSON and save to Supabase."
+    },
+    "project_discovery": {
+      "path": "./graphs/project_discovery.py:graph",
+      "description": "Scheduled background graph: discover new mining projects via Exa and save them as draft records in Supabase."
+    }
+  },
+  "env": ".env"
+}

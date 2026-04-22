@@ -1,0 +1,33 @@
+# Mining Intellect Backend v2 — Dependencies
+
+# LangGraph / LangChain
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-community>=0.3.0
+langsmith>=0.1.0
+
+# LLM Providers
+langchain-xai>=0.1.0          # Grok (primary LLM)
+langchain-anthropic>=0.3.0    # Claude (fallback)
+openai>=1.0.0                 # OpenAI-compatible Grok calls
+
+# Supabase (replaces SQLite + SQLAlchemy)
+supabase>=2.4.0
+
+# Data / Validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# HTTP
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Geocoding (for lat/lng from location names)
+geopy>=2.4.0
+
+# Config / Utilities
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
