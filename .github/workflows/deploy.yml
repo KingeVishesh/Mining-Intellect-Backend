@@ -1,0 +1,35 @@
+name: Deploy to LangGraph Cloud
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Trigger LangGraph Cloud redeploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger deployment revision
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.smith.langchain.com/api/v1/deployments/trigger" \
+            -H "x-api-key: ${{ secrets.LANGCHAIN_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "deployment_url": "https://vishesh-mi-backend-960260026e5555ce9409bc144c51efc8.us.langgraph.app"
+            }')
+
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          echo "Response: $BODY"
+          echo "HTTP status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ge 400 ]; then
+            echo "::warning::Deployment trigger returned $HTTP_STATUS — check LangGraph Cloud dashboard manually"
+            echo "Tip: smith.langchain.com → Deployments → your deployment → Revisions → New Revision"
+          else
+            echo "Deployment triggered successfully"
+          fi
