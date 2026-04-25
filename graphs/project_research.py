@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
-from langgraph.types import interrupt
 
 from nodes import exa_search, field_extractor, geocoder, supabase_ops
 
@@ -150,27 +149,11 @@ def validate_node(state: ResearchState) -> ResearchState:
 
 def human_review_node(state: ResearchState) -> ResearchState:
     """
-    INTERRUPT: pause and return extracted data to the human for review.
-    The frontend calls /threads/{thread_id}/state with the approved data to resume.
+    Runs after the interrupt_before pause is resumed.
+    The frontend updated state with human_approved + human_edits before triggering this run.
     """
-    review_payload = {
-        "extracted_fields": state.get("extracted_fields", {}),
-        "field_statuses": state.get("field_statuses", {}),
-        "validation_errors": state.get("validation_errors", []),
-        "exa_sources": state.get("exa_sources", []),
-        "message": (
-            f"Please review the extracted data for '{state['project_name']}'. "
-            "Correct any errors and approve to save."
-        ),
-    }
-
-    # This pauses the graph and sends review_payload back to the caller.
-    # The caller resumes by POSTing to /threads/{thread_id}/state with:
-    #   { "values": { "human_approved": true, "human_edits": { ...field overrides... } } }
-    human_response = interrupt(review_payload)
-
-    approved = human_response.get("human_approved", False)
-    edits = human_response.get("human_edits", {})
+    approved = state.get("human_approved", False)
+    edits = state.get("human_edits", {})
     return {"human_approved": approved, "human_edits": edits}
 
 

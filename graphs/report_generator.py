@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
-from langgraph.types import interrupt
 
 from nodes import supabase_ops, rules_engine, model_builder
 from schemas.report import MiningReport, ResourceEstimates, ComparisonTableRow
@@ -138,26 +137,11 @@ def build_model_2_node(state: ReportState) -> ReportState:
 
 def human_review_model_node(state: ReportState) -> ReportState:
     """
-    INTERRUPT: present model numbers to the human before generating the full narrative.
-    Human can adjust key numbers before the full report is written.
-    Resume by POSTing:
-      { "values": { "human_approved": true, "human_model_edits": { ...overrides... } } }
+    Runs after the interrupt_before pause is resumed.
+    The frontend updated state with human_approved + human_model_edits before triggering this run.
     """
-    review_payload = {
-        "model_1": state.get("model_1"),
-        "model_2": state.get("model_2"),
-        "official_mre": state.get("official_mre_row"),
-        "activated_rules_count": len(state.get("activated_rules", [])),
-        "analogs_used": [a.get("name") for a in state.get("analogs", [])],
-        "message": (
-            f"Please review the resource model numbers for '{state['project']['name']}' "
-            "before the full report is generated. Approve or adjust key values."
-        ),
-    }
-    human_response = interrupt(review_payload)
-
-    approved = human_response.get("human_approved", False)
-    edits = human_response.get("human_model_edits", {})
+    approved = state.get("human_approved", False)
+    edits = state.get("human_model_edits", {})
     return {"human_approved": approved, "human_model_edits": edits}
 
 

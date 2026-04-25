@@ -27,8 +27,8 @@ def get_client() -> Client:
 # ── Projects ──────────────────────────────────────────────────────────────────
 
 def get_project(project_id: str) -> Optional[Dict]:
-    """Fetch a single project by ID."""
-    res = get_client().table("projects").select("*").eq("id", project_id).single().execute()
+    """Fetch a single project by ID. Returns None if not found."""
+    res = get_client().table("projects").select("*").eq("id", project_id).maybe_single().execute()
     return res.data
 
 

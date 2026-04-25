@@ -13,7 +13,6 @@ import logging
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
-from langgraph.types import interrupt
 
 from nodes import exa_search, field_extractor, supabase_ops
 
@@ -174,26 +173,11 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
 
 def human_review_analog_node(state: AnalogState) -> AnalogState:
     """
-    INTERRUPT: present scored analogs to the human.
-    Human can remove irrelevant ones and add notes before resuming.
-    Resume by POSTing:
-      { "values": { "human_approved": true, "approved_analogs": [...filtered list...] } }
+    Runs after the interrupt_before pause is resumed.
+    The frontend updated state with human_approved + approved_analogs before triggering this run.
     """
-    review_payload = {
-        "scored_analogs": state.get("scored_analogs", []),
-        "total_candidates": len(state.get("all_candidates", [])),
-        "message": (
-            f"Please review the analog projects found for '{state['project']['name']}'. "
-            "Remove irrelevant analogs and approve the final list."
-        ),
-    }
-    human_response = interrupt(review_payload)
-
-    approved = human_response.get("human_approved", False)
-    # Human may provide a filtered list; default to all scored analogs
-    approved_analogs = human_response.get(
-        "approved_analogs", state.get("scored_analogs", [])
-    )
+    approved = state.get("human_approved", False)
+    approved_analogs = state.get("approved_analogs", state.get("scored_analogs", []))
     return {"human_approved": approved, "approved_analogs": approved_analogs}
 
 
