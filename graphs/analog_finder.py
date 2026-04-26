@@ -172,13 +172,9 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
 
 
 def human_review_analog_node(state: AnalogState) -> AnalogState:
-    """
-    Runs after the interrupt_before pause is resumed.
-    The frontend updated state with human_approved + approved_analogs before triggering this run.
-    """
-    approved = state.get("human_approved", False)
-    approved_analogs = state.get("approved_analogs", state.get("scored_analogs", []))
-    return {"human_approved": approved, "approved_analogs": approved_analogs}
+    """Auto-approve all scored analogs — no human interrupt."""
+    approved_analogs = state.get("scored_analogs", [])
+    return {"human_approved": True, "approved_analogs": approved_analogs}
 
 
 def save_analogs_node(state: AnalogState) -> AnalogState:
@@ -227,4 +223,4 @@ builder.add_edge("score_analogs", "human_review")
 builder.add_edge("human_review", "save_analogs")
 builder.add_edge("save_analogs", END)
 
-graph = builder.compile(interrupt_before=["human_review"])
+graph = builder.compile()

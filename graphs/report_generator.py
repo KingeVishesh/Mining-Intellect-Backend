@@ -139,13 +139,8 @@ def build_model_2_node(state: ReportState) -> ReportState:
 
 
 def human_review_model_node(state: ReportState) -> ReportState:
-    """
-    Runs after the interrupt_before pause is resumed.
-    The frontend updated state with human_approved + human_model_edits before triggering this run.
-    """
-    approved = state.get("human_approved", False)
-    edits = state.get("human_model_edits", {})
-    return {"human_approved": approved, "human_model_edits": edits}
+    """Auto-approve models — no human interrupt."""
+    return {"human_approved": True, "human_model_edits": {}}
 
 
 def generate_report_node(state: ReportState) -> ReportState:
@@ -308,4 +303,4 @@ builder.add_edge("generate_report", "generate_pdf")
 builder.add_edge("generate_pdf", "save_report")
 builder.add_edge("save_report", END)
 
-graph = builder.compile(interrupt_before=["human_review_model"])
+graph = builder.compile()
