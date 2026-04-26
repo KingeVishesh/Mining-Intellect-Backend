@@ -94,11 +94,9 @@ def upload_pdf(project_id: str, report_id: str, pdf_bytes: bytes) -> str:
         pdf_bytes,
         file_options={"content-type": "application/pdf", "upsert": "true"},
     )
-    # Use a signed URL (valid 10 years) since bucket may be private
-    signed = client.storage.from_(bucket).create_signed_url(path, expires_in=315360000)
-    url = signed.get("signedURL") or signed.get("signed_url") or ""
-    logger.info(f"[Storage] PDF uploaded: {url}")
-    return url
+    # Return the storage path — frontend generates signed URLs on demand
+    logger.info(f"[Storage] PDF uploaded: {path}")
+    return path
 
 
 def save_report(
