@@ -101,27 +101,33 @@ def _subsection(pdf: MIPdf, title: str) -> None:
 
 
 def _body(pdf: MIPdf, text: str) -> None:
+    pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*DARK_TEXT)
     pdf.multi_cell(0, 5, _s(text))
+    pdf.set_x(pdf.l_margin)
     pdf.ln(2)
 
 
 def _kv(pdf: MIPdf, label: str, value, label_w: int = 52) -> None:
+    pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*NAVY)
     pdf.cell(label_w, 5, _s(label) + ":", ln=False)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*DARK_TEXT)
     pdf.multi_cell(0, 5, _s(value))
+    pdf.set_x(pdf.l_margin)
 
 
 def _bullet(pdf: MIPdf, text: str, indent: int = 4) -> None:
+    pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(indent, 5, "", ln=False)
     pdf.cell(5, 5, "\x95", ln=False)  # bullet character
     pdf.multi_cell(0, 5, _s(text))
+    pdf.set_x(pdf.l_margin)
 
 
 def _table_header(pdf: MIPdf, cols: List[str], widths: List[int]) -> None:
@@ -804,6 +810,7 @@ def _render_recommendations(pdf: MIPdf, report_json: Dict) -> None:
         text_c, bg_c = priority_colors.get(priority, (NAVY, LIGHT_BG))
 
         # Priority badge + recommendation
+        pdf.set_x(pdf.l_margin)
         pdf.set_fill_color(*bg_c)
         pdf.set_text_color(*text_c)
         pdf.set_font("Helvetica", "B", 9)
@@ -814,10 +821,12 @@ def _render_recommendations(pdf: MIPdf, report_json: Dict) -> None:
         pdf.cell(0, 6, f"  {_s(rec.get('recommendation',''))}", fill=True, ln=True)
 
         if rec.get("rationale"):
+            pdf.set_x(pdf.l_margin)
             pdf.set_font("Helvetica", "", 8)
             pdf.set_text_color(*GRAY_TEXT)
             pdf.cell(6, 5, "", ln=False)
             pdf.multi_cell(0, 5, _s(rec["rationale"]))
+            pdf.set_x(pdf.l_margin)
             pdf.set_text_color(*DARK_TEXT)
 
         details = []
@@ -826,6 +835,7 @@ def _render_recommendations(pdf: MIPdf, report_json: Dict) -> None:
         if rec.get("timeline"):
             details.append(f"Timeline: {rec['timeline']}")
         if details:
+            pdf.set_x(pdf.l_margin)
             pdf.set_font("Helvetica", "I", 8)
             pdf.set_text_color(*GRAY_TEXT)
             pdf.cell(6, 4, "", ln=False)
@@ -846,23 +856,27 @@ def _render_strengths_uncertainties(pdf: MIPdf, report_json: Dict) -> None:
     if strengths:
         _subsection(pdf, "Strengths")
         for s in strengths:
+            pdf.set_x(pdf.l_margin)
             pdf.set_text_color(*GREEN)
             pdf.set_font("Helvetica", "B", 9)
             pdf.cell(6, 5, "+", ln=False)
             pdf.set_text_color(*DARK_TEXT)
             pdf.set_font("Helvetica", "", 9)
             pdf.multi_cell(0, 5, _s(s))
+            pdf.set_x(pdf.l_margin)
         pdf.ln(2)
 
     if uncertainties:
         _subsection(pdf, "Uncertainties & Risks")
         for u in uncertainties:
+            pdf.set_x(pdf.l_margin)
             pdf.set_text_color(*AMBER)
             pdf.set_font("Helvetica", "B", 9)
             pdf.cell(6, 5, "!", ln=False)
             pdf.set_text_color(*DARK_TEXT)
             pdf.set_font("Helvetica", "", 9)
             pdf.multi_cell(0, 5, _s(u))
+            pdf.set_x(pdf.l_margin)
         pdf.ln(2)
 
     if lessons:
@@ -909,10 +923,12 @@ def _render_acquisition_analysis(pdf: MIPdf, report_json: Dict) -> None:
         pdf.set_text_color(*DARK_TEXT)
 
         if summary:
+            pdf.set_x(pdf.l_margin)
             pdf.set_font("Helvetica", "I", 8)
             pdf.set_text_color(*GRAY_TEXT)
             pdf.cell(6, 5, "", ln=False)
             pdf.multi_cell(0, 5, _s(summary))
+            pdf.set_x(pdf.l_margin)
             pdf.set_text_color(*DARK_TEXT)
 
         items = tier_data.get("items", [])
@@ -946,6 +962,7 @@ def _render_key_terms(pdf: MIPdf, report_json: Dict) -> None:
     _section_header(pdf, "12. Key Terms Glossary")
 
     for i, item in enumerate(terms):
+        pdf.set_x(pdf.l_margin)
         fill = ALT_ROW if i % 2 == 0 else WHITE
         pdf.set_fill_color(*fill)
         pdf.set_font("Helvetica", "B", 9)
@@ -953,9 +970,8 @@ def _render_key_terms(pdf: MIPdf, report_json: Dict) -> None:
         pdf.cell(55, 6, _s(item.get("term","")), fill=True, ln=False)
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(*DARK_TEXT)
-        # Use multi_cell for definition but keep on same line
-        x_after = pdf.get_x()
         pdf.multi_cell(0, 6, _s(item.get("definition","")), fill=True)
+        pdf.set_x(pdf.l_margin)
     pdf.ln(2)
 
 
