@@ -25,6 +25,9 @@ aiohttp>=3.9.0
 # Geocoding (for lat/lng from location names)
 geopy>=2.4.0
 
+# PDF Generation
+fpdf2>=2.7.0
+
 # Config / Utilities
 python-dotenv>=1.0.0
 

@@ -14,9 +14,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
+from uuid import uuid4
+
 from langgraph.graph import StateGraph, END
 
-from nodes import supabase_ops, rules_engine, model_builder
+from nodes import supabase_ops, rules_engine, model_builder, pdf_generator
 from schemas.report import MiningReport, ResourceEstimates, ComparisonTableRow
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class ReportState(TypedDict, total=False):
     # Report
     report_json: Optional[Dict]
     report_id: Optional[str]
+    pdf_url: Optional[str]
 
     # Output
     saved: bool
@@ -217,8 +220,27 @@ def generate_report_node(state: ReportState) -> ReportState:
     return {"report_json": report_json}
 
 
+def generate_pdf_node(state: ReportState) -> ReportState:
+    """Generate PDF from the report JSON and upload to Supabase Storage."""
+    if not state.get("report_json"):
+        return {}
+
+    report_id = str(uuid4())
+    project_name = state["project"].get("name", "Unknown Project")
+
+    try:
+        pdf_bytes = pdf_generator.generate_pdf(state["report_json"], project_name)
+        pdf_url = supabase_ops.upload_pdf(state["project_id"], report_id, pdf_bytes)
+        logger.info(f"[generate_pdf] Uploaded PDF for report {report_id}")
+        return {"report_id": report_id, "pdf_url": pdf_url}
+    except Exception as e:
+        logger.error(f"[generate_pdf] PDF generation/upload failed: {e}")
+        # Non-fatal — continue without PDF
+        return {"report_id": report_id, "pdf_url": None}
+
+
 def save_report_node(state: ReportState) -> ReportState:
-    """Save the report to Supabase."""
+    """Save the report JSON and PDF URL to Supabase."""
     report_json = state.get("report_json")
     if not report_json:
         return {"saved": False}
@@ -231,7 +253,13 @@ def save_report_node(state: ReportState) -> ReportState:
     }
 
     try:
-        report_id = supabase_ops.save_report(state["project_id"], report_json, meta)
+        report_id = supabase_ops.save_report(
+            state["project_id"],
+            report_json,
+            meta,
+            report_id=state.get("report_id"),
+            pdf_url=state.get("pdf_url"),
+        )
 
         # Update project to mark models as built
         supabase_ops.upsert_project({
@@ -262,6 +290,7 @@ builder.add_node("build_model_1", build_model_1_node)
 builder.add_node("build_model_2", build_model_2_node)
 builder.add_node("human_review_model", human_review_model_node)
 builder.add_node("generate_report", generate_report_node)
+builder.add_node("generate_pdf", generate_pdf_node)
 builder.add_node("save_report", save_report_node)
 
 builder.set_entry_point("load_project_and_analogs")
@@ -275,7 +304,8 @@ builder.add_edge("activate_rules", "build_model_1")
 builder.add_edge("build_model_1", "build_model_2")
 builder.add_edge("build_model_2", "human_review_model")
 builder.add_edge("human_review_model", "generate_report")
-builder.add_edge("generate_report", "save_report")
+builder.add_edge("generate_report", "generate_pdf")
+builder.add_edge("generate_pdf", "save_report")
 builder.add_edge("save_report", END)
 
 graph = builder.compile(interrupt_before=["human_review_model"])

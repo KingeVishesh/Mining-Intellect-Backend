@@ -32,6 +32,9 @@ dependencies = [
     # Geocoding
     "geopy>=2.4.0",
 
+    # PDF generation
+    "fpdf2>=2.7.0",
+
     # Config
     "python-dotenv>=1.0.0",
 ]

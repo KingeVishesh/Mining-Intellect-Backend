@@ -80,12 +80,38 @@ def get_report(project_id: str) -> Optional[Dict]:
     return res.data[0] if res.data else None
 
 
-def save_report(project_id: str, report_json: Dict, meta: Dict) -> str:
+def upload_pdf(project_id: str, report_id: str, pdf_bytes: bytes) -> str:
+    """
+    Upload a PDF to Supabase Storage bucket 'reports'.
+    Returns the public URL.
+    """
+    bucket = "reports"
+    path = f"{project_id}/{report_id}.pdf"
+    client = get_client()
+
+    client.storage.from_(bucket).upload(
+        path,
+        pdf_bytes,
+        file_options={"content-type": "application/pdf", "upsert": "true"},
+    )
+    url = client.storage.from_(bucket).get_public_url(path)
+    logger.info(f"[Storage] PDF uploaded: {url}")
+    return url
+
+
+def save_report(
+    project_id: str,
+    report_json: Dict,
+    meta: Dict,
+    report_id: Optional[str] = None,
+    pdf_url: Optional[str] = None,
+) -> str:
     """
     Save a report to the `reports` table.
-    Returns the new report id.
+    Returns the report id.
     """
-    report_id = str(uuid4())
+    if not report_id:
+        report_id = str(uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
     # Extract top-level conviction/model numbers for indexed columns
@@ -102,6 +128,7 @@ def save_report(project_id: str, report_json: Dict, meta: Dict) -> str:
         "deposit_type": meta.get("deposit_type"),
         "status": "published",
         "content_json": report_json,
+        "file_path": pdf_url,
         "model_1_tonnage": m1.get("total_tonnage_kt"),
         "model_1_grade": m1.get("total_grade_pct"),
         "model_1_conviction": resource.get("independent_analysis", {}).get("confidence_pct"),
