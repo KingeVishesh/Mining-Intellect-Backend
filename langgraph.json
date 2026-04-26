@@ -16,6 +16,10 @@
     "project_discovery": {
       "path": "./graphs/project_discovery.py:graph",
       "description": "Scheduled background graph: discover new mining projects via Exa and save them as draft records in Supabase."
+    },
+    "geocode_project": {
+      "path": "./graphs/geocode_project.py:graph",
+      "description": "Lightweight geocoder: uses Exa Answer API to get GPS coordinates for a mining project, falls back to Nominatim, then saves lat/lng to Supabase."
     }
   },
   "env": ".env"

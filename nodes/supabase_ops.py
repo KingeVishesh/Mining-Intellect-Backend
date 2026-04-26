@@ -196,6 +196,41 @@ def get_compiled_rules(material: str) -> List[Dict]:
     return res.data or []
 
 
+# ── Geocoding ─────────────────────────────────────────────────────────────────
+
+def save_coords(
+    project_id: str,
+    latitude: float,
+    longitude: float,
+    method: str,
+    source_url: Optional[str],
+    existing_data_sources: Optional[Dict],
+) -> bool:
+    """
+    UPDATE projects SET latitude, longitude, data_sources, updated_at.
+    Merges coord_source metadata into existing data_sources JSON.
+    Does NOT touch enrichment_status.
+    """
+    data_sources = dict(existing_data_sources) if isinstance(existing_data_sources, dict) else {}
+    data_sources["coord_source"] = {
+        "method": method,
+        "source_url": source_url,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        get_client().table("projects").update({
+            "latitude": latitude,
+            "longitude": longitude,
+            "data_sources": data_sources,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", project_id).execute()
+        logger.info(f"[DB] Coords saved for {project_id}: lat={latitude}, lng={longitude}, method={method}")
+        return True
+    except Exception as e:
+        logger.error(f"[DB] save_coords failed for {project_id}: {e}")
+        return False
+
+
 # ── Workflow State ─────────────────────────────────────────────────────────────
 
 def log_workflow_state(
