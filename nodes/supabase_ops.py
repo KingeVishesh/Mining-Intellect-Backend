@@ -85,7 +85,7 @@ def upload_pdf(project_id: str, report_id: str, pdf_bytes: bytes) -> str:
     Upload a PDF to Supabase Storage bucket 'reports'.
     Returns the public URL.
     """
-    bucket = "reports"
+    bucket = "Project Reports"
     path = f"{project_id}/{report_id}.pdf"
     client = get_client()
 
@@ -94,7 +94,9 @@ def upload_pdf(project_id: str, report_id: str, pdf_bytes: bytes) -> str:
         pdf_bytes,
         file_options={"content-type": "application/pdf", "upsert": "true"},
     )
-    url = client.storage.from_(bucket).get_public_url(path)
+    # Use a signed URL (valid 10 years) since bucket may be private
+    signed = client.storage.from_(bucket).create_signed_url(path, expires_in=315360000)
+    url = signed.get("signedURL") or signed.get("signed_url") or ""
     logger.info(f"[Storage] PDF uploaded: {url}")
     return url
 

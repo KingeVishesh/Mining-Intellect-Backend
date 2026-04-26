@@ -282,12 +282,12 @@ def save_report_node(state: ReportState) -> ReportState:
             pdf_url=state.get("pdf_url"),
         )
 
-        # Update project to mark models as built
-        supabase_ops.upsert_project({
-            "id": state["project_id"],
+        # Update project to mark models as built (use update, not upsert, to avoid NOT NULL issues)
+        from nodes.supabase_ops import get_client as _get_client
+        _get_client().table("projects").update({
             "has_model_1": state.get("model_1") is not None,
             "has_model_2": state.get("model_2") is not None,
-        })
+        }).eq("id", state["project_id"]).execute()
 
         logger.info(f"[save_report] Saved report {report_id}")
         return {"report_id": report_id, "saved": True, "error": None}
