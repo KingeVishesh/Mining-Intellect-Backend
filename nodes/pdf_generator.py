@@ -608,8 +608,10 @@ def _render_resource_models(pdf: MIPdf, report_json: Dict) -> None:
         pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(*GRAY_TEXT)
         for line in compliance:
+            pdf.set_x(pdf.l_margin)
             pdf.cell(4, 4, "", ln=False)
             pdf.multi_cell(0, 4, _s(line))
+            pdf.set_x(pdf.l_margin)
         pdf.set_text_color(*DARK_TEXT)
 
 
