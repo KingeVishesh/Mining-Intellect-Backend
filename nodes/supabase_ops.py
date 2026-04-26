@@ -154,7 +154,7 @@ def save_analogs(project_id: str, analogs: List[Dict]) -> None:
     row = {
         "id": str(uuid4()),
         "project_id": project_id,
-        "phase": "analog_finder",
+        "phase": "analogs_found",
         "phase_number": 2,
         "status": "complete",
         "analogs_json": analogs,
@@ -172,7 +172,7 @@ def get_analogs(project_id: str) -> List[Dict]:
         .table("workflow_states")
         .select("analogs_json")
         .eq("project_id", project_id)
-        .eq("phase", "analog_finder")
+        .eq("phase", "analogs_found")
         .order("created_at", desc=True)
         .limit(1)
         .execute()
