@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 class ReportState(TypedDict, total=False):
     # Input
     project_id: str
+    sections: Optional[List[str]]   # which sections to include; None = all
 
     # Intermediate
     project: Optional[Dict]
@@ -42,7 +43,7 @@ class ReportState(TypedDict, total=False):
     model_2: Optional[Dict]
     official_mre_row: Optional[Dict]
 
-    # Human review
+    # Human review (auto-approved)
     human_approved: bool
     human_model_edits: Dict
 
@@ -155,13 +156,7 @@ def generate_report_node(state: ReportState) -> ReportState:
     model_1 = state.get("model_1", {})
     model_2 = state.get("model_2")
     official_mre_row = state.get("official_mre_row")
-    human_edits = state.get("human_model_edits", {})
-
-    # Apply any human corrections to model 1
-    if human_edits.get("model_1"):
-        model_1.update(human_edits["model_1"])
-    if human_edits.get("model_2") and model_2:
-        model_2.update(human_edits["model_2"])
+    sections = state.get("sections")  # None = all sections
 
     # Build comparison table
     comparison_table = [model_1]
@@ -170,18 +165,41 @@ def generate_report_node(state: ReportState) -> ReportState:
     if official_mre_row:
         comparison_table.append(official_mre_row)
 
-    # Generate LLM narrative
+    # Generate LLM narrative (all sections)
     narrative = model_builder.generate_report_narrative(
-        project, model_1, model_2, analogs, activated_rules
+        project, model_1, model_2, analogs, activated_rules, sections=sections
     )
 
-    # Assemble final report
+    # Compute sensitivity analysis deterministically
+    sensitivity = model_builder.compute_sensitivity_analysis(model_1, project)
+
+    # Build analogs comparison list from the analogs used in the model
+    analogs_comparison = [
+        {
+            "name": a.get("name", "Unknown"),
+            "tonnage_mt": a.get("tonnage_mt"),
+            "grade_value": a.get("grade_value"),
+            "grade_unit": a.get("grade_unit") or project.get("grade_unit", "%"),
+            "deposit_type": a.get("deposit_type"),
+            "country": a.get("country"),
+            "similarity_score": a.get("similarity_score", 0),
+            "source": a.get("source", "database"),
+            "source_url": a.get("source_url"),
+        }
+        for a in analogs
+    ]
+
+    # Assemble final report with all sections
     report = MiningReport(
         metadata={
             "project_name": project.get("name"),
             "material": project.get("material"),
+            "deposit_type": project.get("deposit_type"),
+            "country": project.get("country"),
+            "project_stage": project.get("project_stage"),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "report_type": "full",
+            "sections_included": sections or "all",
         },
         executive_summary=narrative.get("executive_summary", {}),
         project_overview=narrative.get("project_overview", {}),
@@ -208,10 +226,18 @@ def generate_report_node(state: ReportState) -> ReportState:
             ),
         },
         key_uncertainties_and_strengths=narrative.get("key_uncertainties_and_strengths", {}),
+        # Extended sections
+        analogs_comparison=analogs_comparison if analogs_comparison else None,
+        sensitivity_analysis=sensitivity,
+        risk_matrix=narrative.get("risk_matrix"),
+        exploration_strategy=narrative.get("exploration_strategy"),
+        economic_assumptions=narrative.get("economic_assumptions"),
+        key_terms=narrative.get("key_terms"),
+        acquisition_analysis=narrative.get("acquisition_analysis"),
     )
 
     report_json = report.model_dump()
-    logger.info(f"[generate_report] Report assembled for {project.get('name')}")
+    logger.info(f"[generate_report] Full report assembled for {project.get('name')}")
     return {"report_json": report_json}
 
 
