@@ -28,6 +28,13 @@ class Settings(BaseSettings):
         alias="LANGCHAIN_ENDPOINT",
     )
 
+    # LangGraph Cloud (used by pipeline_orchestrator to start child graphs)
+    langgraph_api_key: Optional[str] = Field(default=None, alias="LANGGRAPH_API_KEY")
+    langgraph_base_url: str = Field(
+        default="https://vishesh-mi-backend-960260026e5555ce9409bc144c51efc8.us.langgraph.app",
+        alias="LANGGRAPH_BASE_URL",
+    )
+
     # App
     environment: str = Field(default="development", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

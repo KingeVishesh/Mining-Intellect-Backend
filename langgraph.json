@@ -20,6 +20,10 @@
     "geocode_project": {
       "path": "./graphs/geocode_project.py:graph",
       "description": "Lightweight geocoder: uses Exa Answer API to get GPS coordinates for a mining project, falls back to Nominatim, then saves lat/lng to Supabase."
+    },
+    "pipeline_orchestrator": {
+      "path": "./graphs/pipeline_orchestrator.py:graph",
+      "description": "Master pipeline: chains project_research → analog_finder → report_generator via LangGraph Cloud API calls. Interrupts for human analog review between steps 2 and 3. Child graphs remain independently callable."
     }
   },
   "env": ".env"

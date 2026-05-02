@@ -138,8 +138,29 @@ def exa_analog_search_node(state: AnalogState) -> AnalogState:
     return {"exa_analogs": exa_analogs}
 
 
+def _filter_analog_candidates(
+    candidates: list,
+    target_material: str,
+    target_tonnage: float,
+) -> list:
+    """Hard-filter candidates before LLM scoring to remove obviously wrong analogs."""
+    out = []
+    for c in candidates:
+        # Same commodity required
+        if (c.get("material") or "").lower() != (target_material or "").lower():
+            continue
+        # Tonnage within 10x (guards against 1 Mt project vs 5 000 Mt project)
+        c_tonnage = c.get("tonnage_mt") or 0
+        if c_tonnage > 0 and target_tonnage > 0:
+            ratio = max(c_tonnage, target_tonnage) / min(c_tonnage, target_tonnage)
+            if ratio > 10:
+                continue
+        out.append(c)
+    return out
+
+
 def score_analogs_node(state: AnalogState) -> AnalogState:
-    """Combine DB + Exa analogs, score them with LLM, take top 10."""
+    """Combine DB + Exa analogs, validate, score with LLM, take top 10."""
     if state.get("error"):
         return {}
 
@@ -147,6 +168,15 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
     db_analogs = state.get("db_analogs", [])
     exa_analogs = state.get("exa_analogs", [])
     all_candidates = db_analogs + exa_analogs
+
+    if not all_candidates:
+        return {"all_candidates": [], "scored_analogs": []}
+
+    # Hard-filter before expensive LLM scoring
+    target_material = project.get("material", "")
+    target_tonnage = project.get("tonnage_mt") or 0
+    all_candidates = _filter_analog_candidates(all_candidates, target_material, target_tonnage)
+    logger.info(f"[score] {len(all_candidates)} candidates after validation filter")
 
     if not all_candidates:
         return {"all_candidates": [], "scored_analogs": []}

@@ -231,6 +231,134 @@ def save_coords(
         return False
 
 
+# ── Pipeline Orchestrator ──────────────────────────────────────────────────────
+
+def save_pipeline_state(
+    project_id: str,
+    orchestrator_stage: str,
+    orchestrator_thread_id: Optional[str] = None,
+    research_thread_id: Optional[str] = None,
+    analogs_thread_id: Optional[str] = None,
+    report_thread_id: Optional[str] = None,
+) -> None:
+    """Upsert pipeline orchestrator tracking row in workflow_states."""
+    state_update: Dict = {"stage": orchestrator_stage}
+    if orchestrator_thread_id:
+        state_update["orchestrator_thread_id"] = orchestrator_thread_id
+    if research_thread_id:
+        state_update["research_thread_id"] = research_thread_id
+    if analogs_thread_id:
+        state_update["analogs_thread_id"] = analogs_thread_id
+    if report_thread_id:
+        state_update["report_thread_id"] = report_thread_id
+
+    existing = (
+        get_client()
+        .table("workflow_states")
+        .select("id, state_json")
+        .eq("project_id", project_id)
+        .eq("phase", "pipeline_orchestrator")
+        .maybe_single()
+        .execute()
+    )
+
+    if existing.data:
+        merged = {**(existing.data.get("state_json") or {}), **state_update}
+        get_client().table("workflow_states").update({
+            "status": orchestrator_stage,
+            "state_json": merged,
+        }).eq("id", existing.data["id"]).execute()
+    else:
+        get_client().table("workflow_states").insert({
+            "id": str(uuid4()),
+            "project_id": project_id,
+            "phase": "pipeline_orchestrator",
+            "phase_number": 0,
+            "status": orchestrator_stage,
+            "state_json": state_update,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    logger.info(f"[DB] Pipeline state → {orchestrator_stage} for project {project_id}")
+
+
+def get_analogs_for_review(project_id: str) -> List[Dict]:
+    """Return the most recently saved analog list for a project (for human review)."""
+    return get_analogs(project_id)
+
+
+def save_approved_analogs(project_id: str, approved_analogs: List[Dict]) -> None:
+    """
+    Insert a new workflow_states row with the human-approved analog list.
+    Because get_analogs orders by created_at DESC, this supersedes the previous list.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    get_client().table("workflow_states").insert({
+        "id": str(uuid4()),
+        "project_id": project_id,
+        "phase": "analogs_found",
+        "phase_number": 2,
+        "status": "approved",
+        "analogs_json": approved_analogs,
+        "analogs_count": len(approved_analogs),
+        "created_at": now,
+    }).execute()
+    logger.info(f"[DB] {len(approved_analogs)} approved analogs saved for project {project_id}")
+
+
+def save_report_analogs(
+    report_id: str,
+    project_id: str,
+    approved: List[Dict],
+    rejected: List[Dict],
+) -> None:
+    """Insert approved and rejected analogs into the report_analogs table."""
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+
+    for a in approved:
+        rows.append({
+            "report_id": report_id,
+            "project_id": project_id,
+            "analog_name": a.get("name") or a.get("project_name") or "Unknown",
+            "analog_material": a.get("material"),
+            "analog_deposit_type": a.get("deposit_type"),
+            "analog_country": a.get("country"),
+            "analog_tonnage_mt": a.get("tonnage_mt"),
+            "analog_grade_value": a.get("grade_value"),
+            "analog_grade_unit": a.get("grade_unit"),
+            "similarity_score": a.get("similarity_score"),
+            "source": a.get("source"),
+            "source_url": a.get("source_url"),
+            "status": "approved",
+            "created_at": now,
+        })
+
+    for a in rejected:
+        rows.append({
+            "report_id": report_id,
+            "project_id": project_id,
+            "analog_name": a.get("name") or a.get("project_name") or "Unknown",
+            "analog_material": a.get("material"),
+            "analog_deposit_type": a.get("deposit_type"),
+            "analog_country": a.get("country"),
+            "analog_tonnage_mt": a.get("tonnage_mt"),
+            "analog_grade_value": a.get("grade_value"),
+            "analog_grade_unit": a.get("grade_unit"),
+            "similarity_score": a.get("similarity_score"),
+            "source": a.get("source"),
+            "source_url": a.get("source_url"),
+            "status": "rejected",
+            "created_at": now,
+        })
+
+    if rows:
+        get_client().table("report_analogs").insert(rows).execute()
+        logger.info(
+            f"[DB] report_analogs: {len(approved)} approved + {len(rejected)} rejected "
+            f"for report {report_id}"
+        )
+
+
 # ── Workflow State ─────────────────────────────────────────────────────────────
 
 def log_workflow_state(
