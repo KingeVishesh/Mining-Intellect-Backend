@@ -47,8 +47,11 @@ class PipelineState(TypedDict, total=False):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _lg_headers() -> Dict:
+    # LANGGRAPH_API_KEY if explicitly set; fall back to LANGCHAIN_API_KEY which
+    # LangGraph Cloud injects automatically into every deployed graph's environment.
+    key = settings.langgraph_api_key or settings.langchain_api_key or ""
     return {
-        "X-Api-Key": settings.langgraph_api_key or "",
+        "X-Api-Key": key,
         "Content-Type": "application/json",
     }
 
