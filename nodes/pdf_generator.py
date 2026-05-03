@@ -130,6 +130,79 @@ def _bullet(pdf: MIPdf, text: str, indent: int = 4) -> None:
     pdf.set_x(pdf.l_margin)
 
 
+def _count_lines(pdf: MIPdf, text: str, width: float) -> int:
+    """Return the number of lines text will occupy when wrapped to width."""
+    if not text:
+        return 1
+    try:
+        # fpdf2 >= 2.5: split_only returns lines without rendering
+        return max(1, len(pdf.multi_cell(width, 5, _s(text), split_only=True)))
+    except TypeError:
+        # Fallback: manual word-wrap estimate
+        total = 0
+        for para in _s(text).split("\n"):
+            words = para.split()
+            if not words:
+                total += 1
+                continue
+            lc, lw = 1, 0.0
+            for word in words:
+                ww = pdf.get_string_width(word + " ")
+                if lw + ww > width and lw > 0:
+                    lc += 1
+                    lw = ww
+                else:
+                    lw += ww
+            total += lc
+        return max(1, total)
+
+
+def _mc_row(pdf: MIPdf, cells: List[Dict]) -> None:
+    """
+    Draw one table row where every cell auto-sizes its height to fit wrapped text.
+
+    Each cell dict:
+      val (str), width (int), align (str "L"|"C"|"R"),
+      fill (RGB tuple | None), text_color (RGB tuple | None),
+      font_style (str, default ""), font_size (int, default 8)
+    """
+    LINE_H = 5
+    PAD    = 2   # left + right text padding inside cell
+
+    # Pass 1 — measure: find the tallest cell to set a uniform row height
+    row_h = LINE_H + PAD
+    for c in cells:
+        pdf.set_font("Helvetica", c.get("font_style", ""), c.get("font_size", 8))
+        n = _count_lines(pdf, _s(c.get("val", "")), c["width"] - PAD * 2)
+        needed = n * LINE_H + PAD
+        if needed > row_h:
+            row_h = needed
+
+    # Pass 2 — draw: render every cell at the shared height
+    x0, y0 = pdf.get_x(), pdf.get_y()
+    x = x0
+    for c in cells:
+        w = c["width"]
+        fill = c.get("fill")
+        if fill:
+            pdf.set_fill_color(*fill)
+            pdf.rect(x, y0, w, row_h, style="F")
+        pdf.set_draw_color(0, 0, 0)
+        pdf.set_line_width(0.2)
+        pdf.rect(x, y0, w, row_h, style="D")
+        pdf.set_xy(x + PAD, y0 + 1)
+        pdf.set_font("Helvetica", c.get("font_style", ""), c.get("font_size", 8))
+        pdf.set_text_color(*(c.get("text_color") or DARK_TEXT))
+        pdf.multi_cell(
+            w - PAD * 2, LINE_H, _s(c.get("val", "")),
+            border=0, align=c.get("align", "L"), fill=False,
+        )
+        x += w
+
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.set_xy(pdf.l_margin, y0 + row_h)
+
+
 def _table_header(pdf: MIPdf, cols: List[str], widths: List[int]) -> None:
     pdf.set_fill_color(*NAVY)
     pdf.set_text_color(*WHITE)
@@ -142,12 +215,10 @@ def _table_header(pdf: MIPdf, cols: List[str], widths: List[int]) -> None:
 
 def _table_row(pdf: MIPdf, vals: List[str], widths: List[int], aligns: List[str],
                fill_color=None, font_style: str = "") -> None:
-    if fill_color:
-        pdf.set_fill_color(*fill_color)
-    pdf.set_font("Helvetica", font_style, 8)
-    for v, w, a in zip(vals, widths, aligns):
-        pdf.cell(w, 6, _s(v), border=1, fill=bool(fill_color), align=a)
-    pdf.ln()
+    _mc_row(pdf, [
+        {"val": v, "width": w, "align": a, "fill": fill_color, "font_style": font_style}
+        for v, w, a in zip(vals, widths, aligns)
+    ])
 
 
 # ── Metric highlight boxes ──────────────────────────────────────────────────────
@@ -514,39 +585,21 @@ def _render_analogs(pdf: MIPdf, report_json: Dict) -> None:
 
     for i, a in enumerate(analogs):
         score = float(a.get("similarity_score", 0))
-        if score > 1:
-            score_norm = score  # already 0-100
-        else:
-            score_norm = score * 100
-
-        # Colour-code similarity
-        if score_norm >= 70:
-            sim_bg = GREEN_BG
-        elif score_norm >= 40:
-            sim_bg = AMBER_BG
-        else:
-            sim_bg = RED_BG
-
-        fill = ALT_ROW if i % 2 == 0 else WHITE
-        tonnage = _num(a.get("tonnage_mt"), "{:,.1f}")
-        grade_val = a.get("grade_value")
+        score_norm = score if score > 1 else score * 100
+        sim_bg = GREEN_BG if score_norm >= 70 else (AMBER_BG if score_norm >= 40 else RED_BG)
+        fill   = ALT_ROW if i % 2 == 0 else WHITE
+        tonnage    = _num(a.get("tonnage_mt"), "{:,.1f}")
+        grade_val  = a.get("grade_value")
         grade_unit = a.get("grade_unit", "%")
-        grade_str = f"{grade_val:.3f} {grade_unit}" if grade_val is not None else "N/A"
-
-        # Draw each cell; similarity cell gets special colour
-        pdf.set_fill_color(*fill)
-        pdf.set_font("Helvetica", "", 8)
-        row_vals  = [a.get("name",""), a.get("country",""), a.get("deposit_type",""), tonnage, grade_str]
-        row_widths = widths[:-1]
-        row_aligns = aligns[:-1]
-        for v, w, al in zip(row_vals, row_widths, row_aligns):
-            pdf.cell(w, 6, _s(v), border=1, fill=True, align=al)
-
-        # Similarity cell
-        pdf.set_fill_color(*sim_bg)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(widths[-1], 6, f"{score_norm:.0f}%", border=1, fill=True, align="C")
-        pdf.ln()
+        grade_str  = f"{grade_val:.3f} {grade_unit}" if grade_val is not None else "N/A"
+        _mc_row(pdf, [
+            {"val": a.get("name",""),        "width": widths[0], "align": "L", "fill": fill},
+            {"val": a.get("country",""),     "width": widths[1], "align": "L", "fill": fill},
+            {"val": a.get("deposit_type",""),"width": widths[2], "align": "L", "fill": fill},
+            {"val": tonnage,                 "width": widths[3], "align": "R", "fill": fill},
+            {"val": grade_str,               "width": widths[4], "align": "R", "fill": fill},
+            {"val": f"{score_norm:.0f}%",    "width": widths[5], "align": "C", "fill": sim_bg, "font_style": "B"},
+        ])
 
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(*GRAY_TEXT)
@@ -736,34 +789,21 @@ def _render_risk_matrix(pdf: MIPdf, report_json: Dict) -> None:
     aligns = ["L", "C", "C", "L"]
     _table_header(pdf, cols, widths)
 
+    def _label_color(txt: str):
+        if "High" in txt:    return RED_RISK
+        if "Moderate" in txt: return AMBER
+        return GREEN
+
     for risk in risks:
         prob   = str(risk.get("probability", ""))
         impact = str(risk.get("impact", ""))
         fill   = _risk_color(impact, prob)
-        pdf.set_fill_color(*fill)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(widths[0], 6, _s(risk.get("risk_factor","")), border=1, fill=True, align="L")
-        # Probability with color text
-        if "High" in prob:
-            pdf.set_text_color(*RED_RISK)
-        elif "Moderate" in prob:
-            pdf.set_text_color(*AMBER)
-        else:
-            pdf.set_text_color(*GREEN)
-        pdf.set_font("Helvetica", "B", 7)
-        pdf.cell(widths[1], 6, _s(prob), border=1, fill=True, align="C")
-        # Impact
-        if "High" in impact:
-            pdf.set_text_color(*RED_RISK)
-        elif "Moderate" in impact:
-            pdf.set_text_color(*AMBER)
-        else:
-            pdf.set_text_color(*GREEN)
-        pdf.cell(widths[2], 6, _s(impact), border=1, fill=True, align="C")
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(widths[3], 6, _s(risk.get("mitigation","")), border=1, fill=True, align="L")
-        pdf.ln()
+        _mc_row(pdf, [
+            {"val": risk.get("risk_factor",""),  "width": widths[0], "align": "L", "fill": fill, "font_style": "B", "font_size": 8},
+            {"val": prob,                        "width": widths[1], "align": "C", "fill": fill, "font_style": "B", "font_size": 7, "text_color": _label_color(prob)},
+            {"val": impact,                      "width": widths[2], "align": "C", "fill": fill, "font_style": "B", "font_size": 7, "text_color": _label_color(impact)},
+            {"val": risk.get("mitigation",""),   "width": widths[3], "align": "L", "fill": fill, "font_style": "",  "font_size": 8},
+        ])
 
     pdf.set_text_color(*DARK_TEXT)
     pdf.ln(2)
@@ -788,20 +828,14 @@ def _render_exploration_strategy(pdf: MIPdf, report_json: Dict) -> None:
     priority_fills = {"High": RED_BG, "Medium": AMBER_BG, "Low": GREEN_BG}
     for i, phase in enumerate(strategy):
         fill = ALT_ROW if i % 2 == 0 else WHITE
-        prio = str(phase.get("priority","Medium"))
-        pdf.set_fill_color(*fill)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(widths[0], 6, _s(phase.get("activity","")), border=1, fill=True, align="L")
-        pdf.cell(widths[1], 6, _s(phase.get("cost_estimate","")), border=1, fill=True, align="R")
-        pdf.cell(widths[2], 6, _s(phase.get("timeline","")), border=1, fill=True, align="C")
-        # Priority cell
-        pdf.set_fill_color(*priority_fills.get(prio, AMBER_BG))
-        pdf.set_font("Helvetica", "B", 7)
-        pdf.cell(widths[3], 6, _s(prio), border=1, fill=True, align="C")
-        pdf.set_fill_color(*fill)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(widths[4], 6, _s(phase.get("expected_outcome","")), border=1, fill=True, align="L")
-        pdf.ln()
+        prio = str(phase.get("priority", "Medium"))
+        _mc_row(pdf, [
+            {"val": phase.get("activity",""),         "width": widths[0], "align": "L", "fill": fill},
+            {"val": phase.get("cost_estimate",""),    "width": widths[1], "align": "R", "fill": fill},
+            {"val": phase.get("timeline",""),         "width": widths[2], "align": "C", "fill": fill},
+            {"val": prio,                             "width": widths[3], "align": "C", "fill": priority_fills.get(prio, AMBER_BG), "font_style": "B", "font_size": 7},
+            {"val": phase.get("expected_outcome",""), "width": widths[4], "align": "L", "fill": fill},
+        ])
 
     pdf.set_text_color(*DARK_TEXT)
 
@@ -948,20 +982,13 @@ def _render_acquisition_analysis(pdf: MIPdf, report_json: Dict) -> None:
             aligns = ["L", "C", "L"]
             _table_header(pdf, cols, widths)
             for item in items:
-                status = str(item.get("status","amber")).lower()
+                status = str(item.get("status", "amber")).lower()
                 text_c, bg_c = status_styles.get(status, (NAVY, LIGHT_BG))
-                pdf.set_fill_color(*ALT_ROW)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.cell(widths[0], 6, _s(item.get("criterion","")), border=1, fill=True, align="L")
-                pdf.set_fill_color(*bg_c)
-                pdf.set_text_color(*text_c)
-                pdf.set_font("Helvetica", "B", 8)
-                pdf.cell(widths[1], 6, _s(status.upper()), border=1, fill=True, align="C")
-                pdf.set_text_color(*DARK_TEXT)
-                pdf.set_fill_color(*ALT_ROW)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.cell(widths[2], 6, _s(item.get("comment","")), border=1, fill=True, align="L")
-                pdf.ln()
+                _mc_row(pdf, [
+                    {"val": item.get("criterion",""), "width": widths[0], "align": "L", "fill": ALT_ROW},
+                    {"val": status.upper(),           "width": widths[1], "align": "C", "fill": bg_c, "font_style": "B", "text_color": text_c},
+                    {"val": item.get("comment",""),   "width": widths[2], "align": "L", "fill": ALT_ROW},
+                ])
         pdf.ln(4)
 
 
@@ -1059,19 +1086,13 @@ def _render_drilling_efficiency_metrics(pdf: MIPdf, report_json: Dict) -> None:
         assessment_fills = {"Above Peer": GREEN_BG, "In-Line": AMBER_BG, "Below Peer": RED_BG}
         for i, row in enumerate(rows):
             fill = ALT_ROW if i % 2 == 0 else WHITE
-            pdf.set_fill_color(*fill)
-            pdf.set_font("Helvetica", "", 8)
-            for v, w, a in zip(
-                [row.get("metric",""), row.get("project_value",""), row.get("peer_range","")],
-                widths[:-1], aligns[:-1]
-            ):
-                pdf.cell(w, 6, _s(v), border=1, fill=True, align=a)
             assessment = str(row.get("assessment", "In-Line"))
-            pdf.set_fill_color(*assessment_fills.get(assessment, AMBER_BG))
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.cell(widths[-1], 6, _s(assessment), border=1, fill=True, align="C")
-            pdf.ln()
-        pdf.set_text_color(*DARK_TEXT)
+            _mc_row(pdf, [
+                {"val": row.get("metric",""),        "width": widths[0], "align": "L", "fill": fill},
+                {"val": row.get("project_value",""), "width": widths[1], "align": "L", "fill": fill},
+                {"val": row.get("peer_range",""),    "width": widths[2], "align": "L", "fill": fill},
+                {"val": assessment,                  "width": widths[3], "align": "C", "fill": assessment_fills.get(assessment, AMBER_BG), "font_style": "B", "font_size": 7},
+            ])
         pdf.ln(2)
     for label, key in [
         ("Shareholder Dilution Efficiency", "shareholder_dilution_efficiency"),
@@ -1096,16 +1117,12 @@ def _render_geophysical_integration(pdf: MIPdf, report_json: Dict) -> None:
         priority_fills = {"High": RED_BG, "Medium": AMBER_BG, "Low": GREEN_BG}
         for i, s in enumerate(surveys):
             fill = ALT_ROW if i % 2 == 0 else WHITE
-            pdf.set_fill_color(*fill)
-            pdf.set_font("Helvetica", "", 8)
-            pdf.cell(widths[0], 6, _s(s.get("survey_type","")), border=1, fill=True, align="L")
-            pdf.cell(widths[1], 6, _s(s.get("rationale","")), border=1, fill=True, align="L")
-            prio = str(s.get("priority","Medium"))
-            pdf.set_fill_color(*priority_fills.get(prio, AMBER_BG))
-            pdf.set_font("Helvetica", "B", 7)
-            pdf.cell(widths[2], 6, _s(prio), border=1, fill=True, align="C")
-            pdf.ln()
-        pdf.set_text_color(*DARK_TEXT)
+            prio = str(s.get("priority", "Medium"))
+            _mc_row(pdf, [
+                {"val": s.get("survey_type",""), "width": widths[0], "align": "L", "fill": fill},
+                {"val": s.get("rationale",""),   "width": widths[1], "align": "L", "fill": fill},
+                {"val": prio,                    "width": widths[2], "align": "C", "fill": priority_fills.get(prio, AMBER_BG), "font_style": "B", "font_size": 7},
+            ])
         pdf.ln(2)
     for label, key in [
         ("Continuity Thresholds", "continuity_thresholds"),
