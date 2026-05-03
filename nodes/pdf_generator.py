@@ -130,6 +130,18 @@ def _bullet(pdf: MIPdf, text: str, indent: int = 4) -> None:
     pdf.set_x(pdf.l_margin)
 
 
+def _grade_fmt(grade_pct: float, material: str = "") -> str:
+    """Format a grade value. Adds ppm equivalent when grade < 2% for base metals."""
+    mat = (material or "").lower()
+    precious = any(m in mat for m in ("gold", "au", "silver", "ag", "platinum", "palladium", "pgm"))
+    if precious:
+        return f"{grade_pct:.2f} g/t"
+    if 0 < grade_pct < 2.0:
+        ppm = int(round(grade_pct * 10_000))
+        return f"{grade_pct:.3f}% ({ppm:,} ppm)"
+    return f"{grade_pct:.3f}%"
+
+
 def _count_lines(pdf: MIPdf, text: str, width: float) -> int:
     """Return the number of lines text will occupy when wrapped to width."""
     if not text:
@@ -610,28 +622,28 @@ def _render_analogs(pdf: MIPdf, report_json: Dict) -> None:
 def _render_resource_models(pdf: MIPdf, report_json: Dict) -> None:
     res_est = report_json.get("resource_estimates", {})
     _section_header(pdf, "5. Resource Models")
+    material = report_json.get("metadata", {}).get("material", "")
 
     comp_table = res_est.get("comparison_table", [])
     if comp_table:
         cols   = ["Model", "M&I Tonnage (kt)", "M&I Grade", "Inf Tonnage (kt)", "Inf Grade", "Total (kt)", "Total Grade"]
-        widths = [44, 24, 18, 24, 18, 24, 30]
+        widths = [44, 24, 22, 24, 22, 24, 22]
         aligns = ["L", "R", "R", "R", "R", "R", "R"]
         _table_header(pdf, cols, widths)
 
         for i, row in enumerate(comp_table):
             is_official = "Official" in str(row.get("model", ""))
-            is_m2       = "Model 2" in str(row.get("model", ""))
             fill = (255, 250, 220) if is_official else (ALT_ROW if i % 2 == 0 else WHITE)
             font_style = "B" if is_official else ""
 
             vals = [
                 row.get("model", ""),
                 _num(row.get("mi_tonnage_kt"), "{:,.0f}"),
-                f"{row.get('mi_grade_pct', 0):.3f}%",
+                _grade_fmt(row.get("mi_grade_pct", 0), material),
                 _num(row.get("inferred_tonnage_kt"), "{:,.0f}"),
-                f"{row.get('inferred_grade_pct', 0):.3f}%",
+                _grade_fmt(row.get("inferred_grade_pct", 0), material),
                 _num(row.get("total_tonnage_kt"), "{:,.0f}"),
-                f"{row.get('total_grade_pct', 0):.3f}%",
+                _grade_fmt(row.get("total_grade_pct", 0), material),
             ]
             _table_row(pdf, vals, widths, aligns, fill_color=fill, font_style=font_style)
 

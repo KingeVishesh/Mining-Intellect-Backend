@@ -159,6 +159,37 @@ def _filter_analog_candidates(
     return out
 
 
+def _proximity_score(project: dict, analog: dict) -> float:
+    """
+    Deterministic 0-100 similarity score based on numeric proximity.
+    Used as fallback when LLM scoring fails (returns default 50).
+    Ensures different projects weight the same analog pool differently.
+    """
+    score = 35.0  # base: passed commodity + tonnage hard filter
+
+    p_ton = float(project.get("tonnage_mt") or 0)
+    a_ton = float(analog.get("tonnage_mt") or 0)
+    if p_ton > 0 and a_ton > 0:
+        ratio = max(p_ton, a_ton) / min(p_ton, a_ton)
+        # ratio 1→30pts, ratio 2→24pts, ratio 5→12pts, ratio 10→0pts
+        score += max(0.0, 30.0 - (ratio - 1.0) * 3.3)
+
+    p_grade = float(project.get("grade_value") or 0)
+    a_grade = float(analog.get("grade_value") or 0)
+    if p_grade > 0 and a_grade > 0:
+        ratio = max(p_grade, a_grade) / min(p_grade, a_grade)
+        # ratio 1→20pts, ratio 2→15pts, ratio 5→5pts
+        score += max(0.0, 20.0 - (ratio - 1.0) * 2.5)
+
+    if (project.get("deposit_type") or "").lower() == (analog.get("deposit_type") or "").lower() != "":
+        score += 10.0
+
+    if (project.get("mining_method") or "").lower() == (analog.get("mining_method") or "").lower() != "":
+        score += 5.0
+
+    return min(100.0, round(score, 1))
+
+
 def score_analogs_node(state: AnalogState) -> AnalogState:
     """Combine DB + Exa analogs, validate, score with LLM, take top 4."""
     if state.get("error"):
@@ -195,9 +226,22 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
     }
 
     scored = field_extractor.score_analogs(target_summary, all_candidates)
-    top_4 = sorted(scored, key=lambda x: x.get("similarity_score", 0), reverse=True)[:4]
 
-    logger.info(f"[score] Top analog: {top_4[0].get('name') if top_4 else 'none'}")
+    # Replace LLM default-50 scores with deterministic proximity scores so different
+    # projects weight the same analog pool differently (fixes identical report numbers).
+    for a in scored:
+        if a.get("similarity_score") == 50:
+            a["similarity_score"] = _proximity_score(project, a)
+
+    ranked = sorted(scored, key=lambda x: x.get("similarity_score", 0), reverse=True)
+
+    # Keep only well-matched analogs (≥62); fall back to best available if too few pass.
+    MIN_SCORE = 62
+    above = [a for a in ranked if a.get("similarity_score", 0) >= MIN_SCORE]
+    top_4 = (above if len(above) >= 2 else ranked)[:4]
+
+    logger.info(f"[score] Top analog: {top_4[0].get('name') if top_4 else 'none'} "
+                f"(score={top_4[0].get('similarity_score') if top_4 else 'n/a'})")
     return {"all_candidates": all_candidates, "scored_analogs": top_4}
 
 
