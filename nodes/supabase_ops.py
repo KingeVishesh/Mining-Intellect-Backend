@@ -252,22 +252,23 @@ def save_pipeline_state(
     if report_thread_id:
         state_update["report_thread_id"] = report_thread_id
 
-    existing = (
+    existing_res = (
         get_client()
         .table("workflow_states")
         .select("id, state_json")
         .eq("project_id", project_id)
         .eq("phase", "pipeline_orchestrator")
-        .maybe_single()
+        .limit(1)
         .execute()
     )
+    existing_row = existing_res.data[0] if existing_res.data else None
 
-    if existing.data:
-        merged = {**(existing.data.get("state_json") or {}), **state_update}
+    if existing_row:
+        merged = {**(existing_row.get("state_json") or {}), **state_update}
         get_client().table("workflow_states").update({
             "status": orchestrator_stage,
             "state_json": merged,
-        }).eq("id", existing.data["id"]).execute()
+        }).eq("id", existing_row["id"]).execute()
     else:
         get_client().table("workflow_states").insert({
             "id": str(uuid4()),
