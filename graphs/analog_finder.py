@@ -160,7 +160,7 @@ def _filter_analog_candidates(
 
 
 def score_analogs_node(state: AnalogState) -> AnalogState:
-    """Combine DB + Exa analogs, validate, score with LLM, take top 10."""
+    """Combine DB + Exa analogs, validate, score with LLM, take top 4."""
     if state.get("error"):
         return {}
 
@@ -195,10 +195,10 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
     }
 
     scored = field_extractor.score_analogs(target_summary, all_candidates)
-    top_10 = sorted(scored, key=lambda x: x.get("similarity_score", 0), reverse=True)[:10]
+    top_4 = sorted(scored, key=lambda x: x.get("similarity_score", 0), reverse=True)[:4]
 
-    logger.info(f"[score] Top analog: {top_10[0].get('name') if top_10 else 'none'}")
-    return {"all_candidates": all_candidates, "scored_analogs": top_10}
+    logger.info(f"[score] Top analog: {top_4[0].get('name') if top_4 else 'none'}")
+    return {"all_candidates": all_candidates, "scored_analogs": top_4}
 
 
 def human_review_analog_node(state: AnalogState) -> AnalogState:
