@@ -49,6 +49,7 @@ class ReportState(TypedDict, total=False):
 
     # Report
     report_json: Optional[Dict]
+    extended_sections: Optional[Dict]
     report_id: Optional[str]
     pdf_url: Optional[str]
 
@@ -234,11 +235,51 @@ def generate_report_node(state: ReportState) -> ReportState:
         economic_assumptions=narrative.get("economic_assumptions"),
         key_terms=narrative.get("key_terms"),
         acquisition_analysis=narrative.get("acquisition_analysis"),
+        # Deep-dive sections — populated by generate_extended_sections_node
+        geological_framework=None,
+        drilling_and_sampling=None,
+        drilling_efficiency_metrics=None,
+        geophysical_integration=None,
+        geostatistical_modeling=None,
+        validation_and_qc=None,
+        conclusion=None,
+        appendices=None,
     )
 
     report_json = report.model_dump()
     logger.info(f"[generate_report] Full report assembled for {project.get('name')}")
     return {"report_json": report_json}
+
+
+def generate_extended_sections_node(state: ReportState) -> ReportState:
+    """Generate 8 deep-dive sections via a second independent LLM call."""
+    report_json = state.get("report_json")
+    if not report_json:
+        return {}
+
+    try:
+        det_vals = model_builder.compute_extended_deterministic(
+            state["model_1"], state["project"]
+        )
+        extended = model_builder.generate_extended_narrative(
+            state["project"],
+            state["model_1"],
+            state.get("model_2"),
+            state.get("analogs", []),
+            state.get("activated_rules", []),
+            det_vals,
+        )
+    except Exception as e:
+        logger.error(f"[extended_sections] Failed: {e}")
+        return {"extended_sections": None}
+
+    report_json.update({k: extended.get(k) for k in [
+        "geological_framework", "drilling_and_sampling", "drilling_efficiency_metrics",
+        "geophysical_integration", "geostatistical_modeling", "validation_and_qc",
+        "conclusion", "appendices",
+    ]})
+    logger.info("[extended_sections] Deep-dive sections merged into report_json")
+    return {"report_json": report_json, "extended_sections": extended}
 
 
 def generate_pdf_node(state: ReportState) -> ReportState:
@@ -311,6 +352,7 @@ builder.add_node("build_model_1", build_model_1_node)
 builder.add_node("build_model_2", build_model_2_node)
 builder.add_node("human_review_model", human_review_model_node)
 builder.add_node("generate_report", generate_report_node)
+builder.add_node("generate_extended_sections", generate_extended_sections_node)
 builder.add_node("generate_pdf", generate_pdf_node)
 builder.add_node("save_report", save_report_node)
 
@@ -325,7 +367,8 @@ builder.add_edge("activate_rules", "build_model_1")
 builder.add_edge("build_model_1", "build_model_2")
 builder.add_edge("build_model_2", "human_review_model")
 builder.add_edge("human_review_model", "generate_report")
-builder.add_edge("generate_report", "generate_pdf")
+builder.add_edge("generate_report", "generate_extended_sections")
+builder.add_edge("generate_extended_sections", "generate_pdf")
 builder.add_edge("generate_pdf", "save_report")
 builder.add_edge("save_report", END)
 

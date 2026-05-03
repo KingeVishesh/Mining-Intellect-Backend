@@ -67,3 +67,39 @@ class MiningReport(BaseModel):
     #   mid_tier: { verdict, score_summary, items: [...] },
     #   major: { verdict, score_summary, items: [...] },
     #   comparable_transactions: [...] }
+
+    # ── Deep-dive sections (LLM-generated, added by generate_extended_sections_node) ─
+    geological_framework: Optional[dict] = None
+    # { regional_setting, deposit_characteristics, mineralization_description,
+    #   structural_complexity, geological_continuity, logistics_and_infrastructure,
+    #   mineral_zones: [{zone_name, description, grade_range}] }
+
+    drilling_and_sampling: Optional[dict] = None
+    # { drillhole_strategy, total_holes_estimated, assay_qa_qc,
+    #   xrf_geochemical_notes, cost_efficiency_notes, data_quality_assessment }
+
+    drilling_efficiency_metrics: Optional[dict] = None
+    # { narrative, metrics_table: [{metric, project_value, peer_range, assessment}],
+    #   shareholder_dilution_efficiency, cost_per_meter_vs_peers }
+
+    geophysical_integration: Optional[dict] = None
+    # { survey_types_recommended: [{survey_type, rationale, priority}],
+    #   continuity_thresholds, validation_triggers, existing_data_notes }
+
+    geostatistical_modeling: Optional[dict] = None
+    # { variography_narrative, variogram_parameters: [{zone, nugget, sill, range_major_m, range_minor_m, anisotropy_ratio}],
+    #   grade_capping_method, extension_ranges, byproduct_modeling, estimation_method }
+
+    validation_and_qc: Optional[dict] = None
+    # { check_assay_protocol, monte_carlo_summary,
+    #   p10_tonnage_kt, p90_tonnage_kt, p10_grade, p90_grade,
+    #   statistical_reconciliation, audit_trail_notes }
+
+    conclusion: Optional[dict] = None
+    # { conclusion_text, headline_finding, next_milestone, investment_readiness }
+
+    appendices: Optional[dict] = None
+    # { input_weighting_table: [{analog_name, weight_pct, key_rationale}],
+    #   variogram_parameters_table: [{zone, nugget, sill, range_major_m, range_minor_m}],
+    #   drilling_summary_table: [{hole_type, count, avg_depth_m, purpose}],
+    #   references: [str] }

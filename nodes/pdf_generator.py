@@ -386,18 +386,26 @@ def _toc_page(pdf: MIPdf, report_json: Dict) -> None:
     _section_header(pdf, "Table of Contents")
 
     sections = [
-        ("1", "Executive Summary"),
-        ("2", "Project Overview"),
-        ("3", "Analog Comparison"),
-        ("4", "Resource Models"),
-        ("5", "Economic Assumptions"),
-        ("6", "Sensitivity Analysis"),
-        ("7", "Risk Matrix"),
-        ("8", "Exploration Strategy"),
-        ("9", "Actionable Recommendations"),
-        ("10", "Strengths & Uncertainties"),
-        ("11", "Acquisition Analysis"),
-        ("12", "Key Terms Glossary"),
+        ("1",  "Executive Summary"),
+        ("2",  "Project Overview"),
+        ("3",  "Geological Framework"),
+        ("4",  "Analog Comparison"),
+        ("5",  "Resource Models"),
+        ("6",  "Drilling & Sampling Data"),
+        ("7",  "Drilling Efficiency Metrics"),
+        ("8",  "Geophysical Integration"),
+        ("9",  "Geostatistical Modeling"),
+        ("10", "Validation & Quality Control"),
+        ("11", "Economic Assumptions"),
+        ("12", "Sensitivity Analysis"),
+        ("13", "Risk Matrix"),
+        ("14", "Exploration Strategy"),
+        ("15", "Actionable Recommendations"),
+        ("16", "Strengths & Uncertainties"),
+        ("17", "Acquisition Analysis"),
+        ("18", "Conclusion"),
+        ("19", "Key Terms Glossary"),
+        ("20", "Appendices"),
     ]
     pdf.set_font("Helvetica", "", 10)
     for num, title in sections:
@@ -492,7 +500,7 @@ def _render_analogs(pdf: MIPdf, report_json: Dict) -> None:
     analogs = report_json.get("analogs_comparison") or []
     if not analogs:
         return
-    _section_header(pdf, "3. Analog Comparison")
+    _section_header(pdf, "4. Analog Comparison")
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*GRAY_TEXT)
     pdf.cell(0, 5, f"  {len(analogs)} comparable projects used to calibrate the resource model.", ln=True)
@@ -548,7 +556,7 @@ def _render_analogs(pdf: MIPdf, report_json: Dict) -> None:
 
 def _render_resource_models(pdf: MIPdf, report_json: Dict) -> None:
     res_est = report_json.get("resource_estimates", {})
-    _section_header(pdf, "4. Resource Models")
+    _section_header(pdf, "5. Resource Models")
 
     comp_table = res_est.get("comparison_table", [])
     if comp_table:
@@ -619,7 +627,7 @@ def _render_economic_assumptions(pdf: MIPdf, report_json: Dict) -> None:
     econ = report_json.get("economic_assumptions")
     if not econ:
         return
-    _section_header(pdf, "5. Economic Assumptions")
+    _section_header(pdf, "11. Economic Assumptions")
 
     fields = [
         ("CuEq Formula", econ.get("cueq_formula")),
@@ -652,7 +660,7 @@ def _render_sensitivity(pdf: MIPdf, report_json: Dict) -> None:
     sens = report_json.get("sensitivity_analysis")
     if not sens:
         return
-    _section_header(pdf, "6. Sensitivity Analysis")
+    _section_header(pdf, "12. Sensitivity Analysis")
 
     # Cut-off grade table
     ct = sens.get("cutoff_table", [])
@@ -721,7 +729,7 @@ def _render_risk_matrix(pdf: MIPdf, report_json: Dict) -> None:
     risks = report_json.get("risk_matrix") or []
     if not risks:
         return
-    _section_header(pdf, "7. Risk Matrix")
+    _section_header(pdf, "13. Risk Matrix")
 
     cols   = ["Risk Factor", "Probability", "Impact", "Mitigation Strategy"]
     widths = [46, 30, 22, 84]
@@ -770,7 +778,7 @@ def _render_exploration_strategy(pdf: MIPdf, report_json: Dict) -> None:
     strategy = report_json.get("exploration_strategy") or []
     if not strategy:
         return
-    _section_header(pdf, "8. Exploration Strategy & Timeline")
+    _section_header(pdf, "14. Exploration Strategy & Timeline")
 
     cols   = ["Activity", "Cost Estimate", "Timeline", "Priority", "Expected Outcome"]
     widths = [44, 26, 22, 18, 72]
@@ -802,7 +810,7 @@ def _render_recommendations(pdf: MIPdf, report_json: Dict) -> None:
     recs = report_json.get("actionable_recommendations") or []
     if not recs:
         return
-    _section_header(pdf, "9. Actionable Recommendations")
+    _section_header(pdf, "15. Actionable Recommendations")
 
     priority_colors = {"High": (RED_RISK, RED_BG), "Medium": (AMBER, AMBER_BG), "Low": (GREEN, GREEN_BG)}
     for i, rec in enumerate(recs):
@@ -853,7 +861,7 @@ def _render_strengths_uncertainties(pdf: MIPdf, report_json: Dict) -> None:
     uncertainties = uands.get("uncertainties", [])
     if not strengths and not uncertainties:
         return
-    _section_header(pdf, "10. Strengths & Uncertainties")
+    _section_header(pdf, "16. Strengths & Uncertainties")
 
     if strengths:
         _subsection(pdf, "Strengths")
@@ -889,7 +897,7 @@ def _render_acquisition_analysis(pdf: MIPdf, report_json: Dict) -> None:
     acq = report_json.get("acquisition_analysis")
     if not acq:
         return
-    _section_header(pdf, "11. Strategic Acquisition Analysis")
+    _section_header(pdf, "17. Strategic Acquisition Analysis")
 
     tiers = [
         ("Junior / Emerging Producer", acq.get("junior", {})),
@@ -961,7 +969,7 @@ def _render_key_terms(pdf: MIPdf, report_json: Dict) -> None:
     terms = report_json.get("key_terms") or []
     if not terms:
         return
-    _section_header(pdf, "12. Key Terms Glossary")
+    _section_header(pdf, "19. Key Terms Glossary")
 
     for i, item in enumerate(terms):
         pdf.set_x(pdf.l_margin)
@@ -975,6 +983,317 @@ def _render_key_terms(pdf: MIPdf, report_json: Dict) -> None:
         pdf.multi_cell(0, 6, _s(item.get("definition","")), fill=True)
         pdf.set_x(pdf.l_margin)
     pdf.ln(2)
+
+
+def _render_geological_framework(pdf: MIPdf, report_json: Dict) -> None:
+    geo = report_json.get("geological_framework")
+    if not geo:
+        return
+    _section_header(pdf, "3. Geological Framework")
+    _body(pdf, geo.get("regional_setting", ""))
+    for label, key in [
+        ("Deposit Characteristics", "deposit_characteristics"),
+        ("Mineralisation Description", "mineralization_description"),
+        ("Structural Complexity", "structural_complexity"),
+        ("Geological Continuity", "geological_continuity"),
+        ("Logistics & Infrastructure", "logistics_and_infrastructure"),
+    ]:
+        if geo.get(key):
+            _subsection(pdf, label)
+            _body(pdf, geo[key])
+
+    zones = geo.get("mineral_zones", [])
+    if zones:
+        _subsection(pdf, "Mineral Zones")
+        cols   = ["Zone Name", "Description", "Grade Range"]
+        widths = [40, 100, 42]
+        aligns = ["L", "L", "C"]
+        _table_header(pdf, cols, widths)
+        for i, z in enumerate(zones):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            _table_row(pdf, [z.get("zone_name",""), z.get("description",""), z.get("grade_range","")],
+                       widths, aligns, fill_color=fill)
+
+
+def _render_drilling_and_sampling(pdf: MIPdf, report_json: Dict) -> None:
+    ds = report_json.get("drilling_and_sampling")
+    if not ds:
+        return
+    _section_header(pdf, "6. Drilling & Sampling Data")
+    if ds.get("total_holes_estimated"):
+        _kv(pdf, "Estimated Drilling", ds["total_holes_estimated"])
+    if ds.get("drillhole_strategy"):
+        _body(pdf, ds["drillhole_strategy"])
+    for label, key in [
+        ("Assay QA/QC Protocol", "assay_qa_qc"),
+        ("XRF & Geochemical Notes", "xrf_geochemical_notes"),
+        ("Cost Efficiency", "cost_efficiency_notes"),
+    ]:
+        if ds.get(key):
+            _subsection(pdf, label)
+            _body(pdf, ds[key])
+    if ds.get("data_quality_assessment"):
+        _subsection(pdf, "Data Quality Assessment")
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(*GRAY_TEXT)
+        pdf.multi_cell(0, 5, _s(ds["data_quality_assessment"]))
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.ln(2)
+
+
+def _render_drilling_efficiency_metrics(pdf: MIPdf, report_json: Dict) -> None:
+    dm = report_json.get("drilling_efficiency_metrics")
+    if not dm:
+        return
+    _section_header(pdf, "7. Drilling Efficiency Metrics")
+    if dm.get("narrative"):
+        _body(pdf, dm["narrative"])
+    rows = dm.get("metrics_table", [])
+    if rows:
+        cols   = ["Metric", "Project Value", "Peer Range", "Assessment"]
+        widths = [58, 40, 40, 24]
+        aligns = ["L", "L", "L", "C"]
+        _table_header(pdf, cols, widths)
+        assessment_fills = {"Above Peer": GREEN_BG, "In-Line": AMBER_BG, "Below Peer": RED_BG}
+        for i, row in enumerate(rows):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            pdf.set_fill_color(*fill)
+            pdf.set_font("Helvetica", "", 8)
+            for v, w, a in zip(
+                [row.get("metric",""), row.get("project_value",""), row.get("peer_range","")],
+                widths[:-1], aligns[:-1]
+            ):
+                pdf.cell(w, 6, _s(v), border=1, fill=True, align=a)
+            assessment = str(row.get("assessment", "In-Line"))
+            pdf.set_fill_color(*assessment_fills.get(assessment, AMBER_BG))
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.cell(widths[-1], 6, _s(assessment), border=1, fill=True, align="C")
+            pdf.ln()
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.ln(2)
+    for label, key in [
+        ("Shareholder Dilution Efficiency", "shareholder_dilution_efficiency"),
+        ("Cost per Meter vs. Peers", "cost_per_meter_vs_peers"),
+    ]:
+        if dm.get(key):
+            _subsection(pdf, label)
+            _body(pdf, dm[key])
+
+
+def _render_geophysical_integration(pdf: MIPdf, report_json: Dict) -> None:
+    gp = report_json.get("geophysical_integration")
+    if not gp:
+        return
+    _section_header(pdf, "8. Geophysical Integration")
+    surveys = gp.get("survey_types_recommended", [])
+    if surveys:
+        cols   = ["Survey Type", "Rationale", "Priority"]
+        widths = [44, 108, 20]
+        aligns = ["L", "L", "C"]
+        _table_header(pdf, cols, widths)
+        priority_fills = {"High": RED_BG, "Medium": AMBER_BG, "Low": GREEN_BG}
+        for i, s in enumerate(surveys):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            pdf.set_fill_color(*fill)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(widths[0], 6, _s(s.get("survey_type","")), border=1, fill=True, align="L")
+            pdf.cell(widths[1], 6, _s(s.get("rationale","")), border=1, fill=True, align="L")
+            prio = str(s.get("priority","Medium"))
+            pdf.set_fill_color(*priority_fills.get(prio, AMBER_BG))
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.cell(widths[2], 6, _s(prio), border=1, fill=True, align="C")
+            pdf.ln()
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.ln(2)
+    for label, key in [
+        ("Continuity Thresholds", "continuity_thresholds"),
+        ("Validation Triggers", "validation_triggers"),
+        ("Existing Data Notes", "existing_data_notes"),
+    ]:
+        if gp.get(key):
+            _subsection(pdf, label)
+            _body(pdf, gp[key])
+
+
+def _render_geostatistical_modeling(pdf: MIPdf, report_json: Dict) -> None:
+    gm = report_json.get("geostatistical_modeling")
+    if not gm:
+        return
+    _section_header(pdf, "9. Geostatistical Modeling")
+    if gm.get("variography_narrative"):
+        _body(pdf, gm["variography_narrative"])
+    if gm.get("estimation_method"):
+        _kv(pdf, "Estimation Method", gm["estimation_method"])
+        pdf.ln(2)
+    params = gm.get("variogram_parameters", [])
+    if params:
+        _subsection(pdf, "Variogram Parameters by Zone")
+        cols   = ["Zone", "Nugget", "Sill", "Range Major (m)", "Range Minor (m)", "Anisotropy"]
+        widths = [38, 20, 20, 30, 30, 24]
+        aligns = ["L", "C", "C", "C", "C", "C"]
+        _table_header(pdf, cols, widths)
+        for i, p in enumerate(params):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            _table_row(pdf, [
+                p.get("zone",""), p.get("nugget",""), p.get("sill",""),
+                p.get("range_major_m",""), p.get("range_minor_m",""), p.get("anisotropy_ratio",""),
+            ], widths, aligns, fill_color=fill)
+        pdf.ln(2)
+    for label, key in [
+        ("Grade Capping Method", "grade_capping_method"),
+        ("Extension Ranges", "extension_ranges"),
+        ("By-Product Modeling", "byproduct_modeling"),
+    ]:
+        if gm.get(key):
+            _subsection(pdf, label)
+            _body(pdf, gm[key])
+
+
+def _render_validation_and_qc(pdf: MIPdf, report_json: Dict) -> None:
+    vq = report_json.get("validation_and_qc")
+    if not vq:
+        return
+    _section_header(pdf, "10. Validation & Quality Control")
+    if vq.get("check_assay_protocol"):
+        _subsection(pdf, "Check Assay Protocol")
+        _body(pdf, vq["check_assay_protocol"])
+    if vq.get("monte_carlo_summary"):
+        _subsection(pdf, "Monte Carlo Simulation")
+        _body(pdf, vq["monte_carlo_summary"])
+
+    p10t = vq.get("p10_tonnage_kt", 0)
+    p90t = vq.get("p90_tonnage_kt", 0)
+    p10g = vq.get("p10_grade", 0)
+    p90g = vq.get("p90_grade", 0)
+    if any([p10t, p90t, p10g, p90g]):
+        _metric_row(pdf, [
+            ("P10 Tonnage", _num(p10t, "{:,.0f}"), "kt"),
+            ("P90 Tonnage", _num(p90t, "{:,.0f}"), "kt"),
+            (f"P10 Grade", f"{p10g:.4f}", ""),
+            (f"P90 Grade", f"{p90g:.4f}", ""),
+        ])
+        pdf.ln(2)
+
+    for label, key, italic in [
+        ("Statistical Reconciliation", "statistical_reconciliation", False),
+        ("Audit Trail Notes", "audit_trail_notes", True),
+    ]:
+        if vq.get(key):
+            _subsection(pdf, label)
+            if italic:
+                pdf.set_x(pdf.l_margin)
+                pdf.set_font("Helvetica", "I", 9)
+                pdf.set_text_color(*GRAY_TEXT)
+                pdf.multi_cell(0, 5, _s(vq[key]))
+                pdf.set_x(pdf.l_margin)
+                pdf.set_text_color(*DARK_TEXT)
+                pdf.ln(2)
+            else:
+                _body(pdf, vq[key])
+
+
+def _render_conclusion(pdf: MIPdf, report_json: Dict) -> None:
+    con = report_json.get("conclusion")
+    if not con:
+        return
+    _section_header(pdf, "18. Conclusion")
+    headline = con.get("headline_finding", "")
+    if headline:
+        # Gold-bordered callout box
+        pdf.set_fill_color(*LIGHT_BG)
+        pdf.set_draw_color(*GOLD)
+        pdf.set_line_width(0.8)
+        box_y = pdf.get_y()
+        pdf.rect(14, box_y, 182, 14, style="FD")
+        pdf.set_line_width(0.2)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.set_xy(18, box_y + 3)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*NAVY)
+        pdf.multi_cell(174, 5, _s(headline))
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.ln(4)
+    if con.get("conclusion_text"):
+        _body(pdf, con["conclusion_text"])
+    if con.get("next_milestone"):
+        _kv(pdf, "Next Milestone", con["next_milestone"])
+    readiness = con.get("investment_readiness", "")
+    if readiness:
+        readiness_colors = {
+            "Development-ready": (GREEN, GREEN_BG),
+            "Resource-stage":    (AMBER, AMBER_BG),
+            "Pre-resource":      (RED_RISK, RED_BG),
+        }
+        text_c, bg_c = readiness_colors.get(readiness, (NAVY, LIGHT_BG))
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*NAVY)
+        pdf.cell(52, 5, "Investment Readiness:", ln=False)
+        pdf.set_fill_color(*bg_c)
+        pdf.set_text_color(*text_c)
+        pdf.cell(50, 5, f"  {_s(readiness)}  ", fill=True, ln=True)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.ln(2)
+
+
+def _render_appendices(pdf: MIPdf, report_json: Dict) -> None:
+    app = report_json.get("appendices")
+    if not app:
+        return
+    _section_header(pdf, "20. Appendices")
+
+    # Appendix A: Analog Input Weighting
+    rows_a = app.get("input_weighting_table", [])
+    if rows_a:
+        _subsection(pdf, "Appendix A: Analog Input Weighting")
+        cols   = ["Analog", "Weight (%)", "Key Rationale"]
+        widths = [60, 22, 100]
+        aligns = ["L", "C", "L"]
+        _table_header(pdf, cols, widths)
+        for i, r in enumerate(rows_a):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            _table_row(pdf, [r.get("analog_name",""), r.get("weight_pct",""), r.get("key_rationale","")],
+                       widths, aligns, fill_color=fill)
+        pdf.ln(3)
+
+    # Appendix B: Variogram Parameters
+    rows_b = app.get("variogram_parameters_table", [])
+    if rows_b:
+        _subsection(pdf, "Appendix B: Variogram Parameters")
+        cols   = ["Zone", "Nugget", "Sill", "Range Major (m)", "Range Minor (m)"]
+        widths = [46, 24, 24, 30, 30]
+        aligns = ["L", "C", "C", "C", "C"]
+        _table_header(pdf, cols, widths)
+        for i, r in enumerate(rows_b):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            _table_row(pdf, [r.get("zone",""), r.get("nugget",""), r.get("sill",""),
+                             r.get("range_major_m",""), r.get("range_minor_m","")],
+                       widths, aligns, fill_color=fill)
+        pdf.ln(3)
+
+    # Appendix C: Drilling Summary
+    rows_c = app.get("drilling_summary_table", [])
+    if rows_c:
+        _subsection(pdf, "Appendix C: Drilling Summary")
+        cols   = ["Hole Type", "Count", "Avg Depth (m)", "Purpose"]
+        widths = [36, 22, 34, 90]
+        aligns = ["L", "C", "C", "L"]
+        _table_header(pdf, cols, widths)
+        for i, r in enumerate(rows_c):
+            fill = ALT_ROW if i % 2 == 0 else WHITE
+            _table_row(pdf, [r.get("hole_type",""), r.get("count",""), r.get("avg_depth_m",""), r.get("purpose","")],
+                       widths, aligns, fill_color=fill)
+        pdf.ln(3)
+
+    # Appendix D: References
+    refs = app.get("references", [])
+    if refs:
+        _subsection(pdf, "Appendix D: References")
+        for ref in refs:
+            _bullet(pdf, str(ref))
+        pdf.ln(2)
 
 
 def _render_disclaimer_page(pdf: MIPdf) -> None:
@@ -1037,12 +1356,35 @@ def generate_pdf(report_json: Dict, project_name: str) -> bytes:
     pdf.add_page()
     _render_project_overview(pdf, report_json)
 
+    if report_json.get("geological_framework"):
+        pdf.add_page()
+        _render_geological_framework(pdf, report_json)
+
     if report_json.get("analogs_comparison"):
         pdf.add_page()
         _render_analogs(pdf, report_json)
 
     pdf.add_page()
     _render_resource_models(pdf, report_json)
+
+    if report_json.get("drilling_and_sampling"):
+        pdf.add_page()
+        _render_drilling_and_sampling(pdf, report_json)
+
+    if report_json.get("drilling_efficiency_metrics"):
+        _render_drilling_efficiency_metrics(pdf, report_json)
+
+    if report_json.get("geophysical_integration"):
+        pdf.add_page()
+        _render_geophysical_integration(pdf, report_json)
+
+    if report_json.get("geostatistical_modeling"):
+        pdf.add_page()
+        _render_geostatistical_modeling(pdf, report_json)
+
+    if report_json.get("validation_and_qc"):
+        pdf.add_page()
+        _render_validation_and_qc(pdf, report_json)
 
     if report_json.get("economic_assumptions"):
         _render_economic_assumptions(pdf, report_json)
@@ -1066,9 +1408,17 @@ def generate_pdf(report_json: Dict, project_name: str) -> bytes:
         pdf.add_page()
         _render_acquisition_analysis(pdf, report_json)
 
+    if report_json.get("conclusion"):
+        pdf.add_page()
+        _render_conclusion(pdf, report_json)
+
     if report_json.get("key_terms"):
         pdf.add_page()
         _render_key_terms(pdf, report_json)
+
+    if report_json.get("appendices"):
+        pdf.add_page()
+        _render_appendices(pdf, report_json)
 
     pdf.add_page()
     _render_disclaimer_page(pdf)
