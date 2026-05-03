@@ -81,11 +81,23 @@ def _canonical(name: str) -> str:
     return " ".join(cleaned.split()).lower()
 
 
+def _fetch_all_companies() -> List[Dict]:
+    """Fetch all company rows, paginating past the 1000-row default limit."""
+    rows, offset = [], 0
+    while True:
+        res = get_client().table("companies").select("id, name").range(offset, offset + 999).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    return rows
+
+
 def find_company_by_name(name: str) -> Optional[Dict]:
     """Find a company by exact canonical match or fuzzy name similarity (>=0.85)."""
     normalized = _canonical(name)
-    res = get_client().table("companies").select("id, name").execute()
-    for row in (res.data or []):
+    for row in _fetch_all_companies():
         row_canonical = _canonical(row["name"])
         if row_canonical == normalized:
             return row
@@ -101,14 +113,21 @@ def upsert_company(name: str) -> str:
         logger.debug(f"[Company] Matched '{name}' → existing id={existing['id']}")
         return existing["id"]
     now = datetime.now(timezone.utc).isoformat()
-    res = get_client().table("companies").insert({
-        "name": name.strip(),
-        "created_at": now,
-        "updated_at": now,
-    }).execute()
-    new_id = res.data[0]["id"]
-    logger.info(f"[Company] Created '{name.strip()}' id={new_id}")
-    return new_id
+    try:
+        res = get_client().table("companies").insert({
+            "name": name.strip(),
+            "created_at": now,
+            "updated_at": now,
+        }).execute()
+        new_id = res.data[0]["id"]
+        logger.info(f"[Company] Created '{name.strip()}' id={new_id}")
+        return new_id
+    except Exception:
+        # Unique constraint race: another process just created this company — re-fetch
+        refetch = find_company_by_name(name)
+        if refetch:
+            return refetch["id"]
+        raise
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────

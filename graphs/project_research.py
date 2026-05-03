@@ -180,8 +180,11 @@ def save_to_supabase_node(state: ResearchState) -> ResearchState:
     }
 
     try:
-        if row.get("company_name"):
-            row["company_id"] = supabase_ops.upsert_company(row["company_name"])
+        # Use extracted company_name; fall back to the caller-supplied company input
+        company_name = row.get("company_name") or state.get("company")
+        if company_name:
+            row["company_name"] = company_name
+            row["company_id"] = supabase_ops.upsert_company(company_name)
         supabase_ops.upsert_project(row)
         logger.info(f"[save] Project {state['project_id']} saved to Supabase")
         return {"saved": True, "error": None}
