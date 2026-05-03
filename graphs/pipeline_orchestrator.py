@@ -228,7 +228,6 @@ graph = builder.compile(
     interrupt_before=[
         "start_analogs",
         "load_analogs_for_review",
-        "analog_review",
         "finalize",
     ]
 )
