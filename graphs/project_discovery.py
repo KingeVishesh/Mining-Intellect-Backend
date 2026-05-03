@@ -76,14 +76,14 @@ def filter_new_node(state: DiscoveryState) -> DiscoveryState:
 
     # Fetch all existing project names from Supabase
     try:
-        res = supabase_ops.get_client().table("projects").select("name, material").execute()
-        existing = {
-            (r["name"].lower().strip(), r.get("material", "").lower())
+        res = supabase_ops.get_client().table("projects").select("name, material, company_name").execute()
+        existing = [
+            (r["name"].lower().strip(), r.get("material", "").lower(), (r.get("company_name") or "").lower())
             for r in (res.data or [])
-        }
+        ]
     except Exception as e:
         logger.error(f"[filter] Could not fetch existing projects: {e}")
-        existing = set()
+        existing = []
 
     filtered = []
     for p in discovered:
@@ -91,11 +91,10 @@ def filter_new_node(state: DiscoveryState) -> DiscoveryState:
         material = (p.get("material") or "").lower()
         if not name:
             continue
-        # Simple exact + partial match (skip if name already in DB)
+        # Skip if name+material already in DB (exact or partial name match)
         already_exists = any(
-            name in ex_name or ex_name in name
-            for ex_name, ex_mat in existing
-            if ex_mat == material
+            (name in ex_name or ex_name in name) and ex_mat == material
+            for ex_name, ex_mat, _ in existing
         )
         if not already_exists:
             filtered.append(p)
@@ -116,11 +115,20 @@ def extract_basic_fields_node(state: DiscoveryState) -> DiscoveryState:
     extracted = []
 
     for p in filtered:
+        company_name = p.get("company_name")
+        company_id = None
+        if company_name:
+            try:
+                company_id = supabase_ops.upsert_company(company_name)
+            except Exception as e:
+                logger.warning(f"[extract] Could not upsert company '{company_name}': {e}")
+
         extracted.append({
             "id": str(uuid4()),
             "name": p.get("name", "Unknown Project"),
             "material": p.get("material", "unknown"),
-            "company_name": p.get("company_name"),
+            "company_name": company_name,
+            "company_id": company_id,
             "country": p.get("country"),
             "project_stage": p.get("project_stage"),
             "description": p.get("description"),

@@ -5,7 +5,9 @@ Uses supabase-py (REST API) — no SQLAlchemy, no SQLite.
 """
 from __future__ import annotations
 import logging
+import re
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -62,6 +64,51 @@ def search_projects_by_criteria(
         q = q.lte("grade_value", max_grade)
     res = q.limit(limit).execute()
     return res.data or []
+
+
+# ── Companies ─────────────────────────────────────────────────────────────────
+
+_LEGAL_SUFFIXES = re.compile(
+    r'\b(Ltd\.?|Limited|Inc\.?|Corp\.?|Corporation|LLC|L\.L\.C\.?|'
+    r'Plc\.?|PLC|NL|AG|SA|S\.A\.|BV|B\.V\.|Co\.?|Company|Group|Holdings?)\b',
+    re.IGNORECASE,
+)
+
+
+def _canonical(name: str) -> str:
+    """Strip legal suffixes and normalize whitespace for fuzzy comparison."""
+    cleaned = _LEGAL_SUFFIXES.sub("", name)
+    return " ".join(cleaned.split()).lower()
+
+
+def find_company_by_name(name: str) -> Optional[Dict]:
+    """Find a company by exact canonical match or fuzzy name similarity (>=0.85)."""
+    normalized = _canonical(name)
+    res = get_client().table("companies").select("id, name").execute()
+    for row in (res.data or []):
+        row_canonical = _canonical(row["name"])
+        if row_canonical == normalized:
+            return row
+        if SequenceMatcher(None, row_canonical, normalized).ratio() >= 0.85:
+            return row
+    return None
+
+
+def upsert_company(name: str) -> str:
+    """Find an existing company by name or create a new one. Returns company_id (UUID string)."""
+    existing = find_company_by_name(name)
+    if existing:
+        logger.debug(f"[Company] Matched '{name}' → existing id={existing['id']}")
+        return existing["id"]
+    now = datetime.now(timezone.utc).isoformat()
+    res = get_client().table("companies").insert({
+        "name": name.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }).execute()
+    new_id = res.data[0]["id"]
+    logger.info(f"[Company] Created '{name.strip()}' id={new_id}")
+    return new_id
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────
