@@ -28,6 +28,13 @@ GREEN_BG  = (220, 245, 220)
 AMBER_BG  = (255, 244, 204)
 RED_BG    = (252, 225, 225)
 
+# ── Design B layout constants ──────────────────────────────────────────────────
+SIDEBAR_X  = 140        # sidebar left edge (mm from page left)
+SIDEBAR_W  = 55         # sidebar column width (mm)
+CONTENT_W  = 124        # main text column width when sidebar is active (mm)
+FULL_W     = 182        # full usable width when no sidebar (mm)
+GOLD_BAR_H = 8          # thin gold bar height on cover (mm)
+
 
 def _s(value, default="N/A") -> str:
     """Safe string — coerce to str, strip non-latin-1."""
@@ -46,22 +53,26 @@ def _num(value, fmt="{:,.0f}", default="N/A") -> str:
 class MIPdf(FPDF):
     def __init__(self, project_name: str, material: str, generated_date: str):
         super().__init__()
-        self._proj = _s(project_name)
-        self._mat  = _s(material)
-        self._date = _s(generated_date)
+        self._proj         = _s(project_name)
+        self._mat          = _s(material)
+        self._date         = _s(generated_date)
+        self._section_name = ""  # updated by each renderer before add_page()
 
     def header(self):
         if self.page_no() == 1:
-            return  # cover page has its own design
-        # Running header
+            return  # cover page manages its own layout
+        # Design B running header: "PROJECT | RESOURCE MODELING REPORT  SECTION"
+        section_suffix = f"  {self._section_name}" if self._section_name else ""
+        left_text = f"{self._proj}  |  RESOURCE MODELING REPORT{section_suffix}"
         self.set_font("Helvetica", "B", 7)
         self.set_text_color(*NAVY)
-        self.cell(130, 6, self._proj, ln=False)
-        self.set_text_color(*GRAY_TEXT)
+        self.set_xy(14, 10)
+        self.cell(140, 5, left_text, ln=False)
         self.set_font("Helvetica", "", 7)
-        self.cell(0, 6, f"Mining Intellect Resource Report  |  {self._date}", align="R", ln=True)
+        self.set_text_color(*GRAY_TEXT)
+        self.cell(42, 5, self._date, align="R", ln=True)
         self.set_draw_color(*GOLD)
-        self.set_line_width(0.5)
+        self.set_line_width(0.6)
         self.line(14, self.get_y(), 196, self.get_y())
         self.set_line_width(0.2)
         self.set_draw_color(0, 0, 0)
@@ -81,14 +92,45 @@ class MIPdf(FPDF):
 # ── Section helpers ─────────────────────────────────────────────────────────────
 
 def _section_header(pdf: MIPdf, title: str) -> None:
-    """Navy section header bar with white text."""
+    """
+    Design B section header: large section number left, title right, gold rule below.
+    Parses section number from title string like "1. Executive Summary" → "01".
+    """
     pdf.ln(4)
-    pdf.set_fill_color(*NAVY)
-    pdf.set_text_color(*WHITE)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 9, f"  {_s(title)}", ln=True, fill=True)
+    parts = title.split(".", 1)
+    num_str = parts[0].strip()
+    if num_str.isdigit():
+        section_num  = num_str.zfill(2)
+        section_text = title
+    else:
+        section_num  = ""
+        section_text = title
+
+    if section_num:
+        # Large "01" in navy, left-aligned
+        pdf.set_font("Helvetica", "B", 24)
+        pdf.set_text_color(*NAVY)
+        pdf.set_x(14)
+        pdf.cell(20, 10, section_num, ln=False)
+        # Section title to the right, vertically aligned to lower half of number
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_xy(34, pdf.get_y() + 3)
+        pdf.cell(CONTENT_W - 20, 8, _s(section_text), ln=True)
+    else:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(*NAVY)
+        pdf.set_x(14)
+        pdf.cell(FULL_W, 8, _s(section_text), ln=True)
+
+    # Gold horizontal rule
+    rule_y = pdf.get_y() + 1
+    pdf.set_draw_color(*GOLD)
+    pdf.set_line_width(0.8)
+    pdf.line(14, rule_y, 196, rule_y)
+    pdf.set_line_width(0.2)
+    pdf.set_draw_color(0, 0, 0)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.ln(2)
+    pdf.ln(5)
 
 
 def _subsection(pdf: MIPdf, title: str) -> None:
@@ -127,6 +169,41 @@ def _bullet(pdf: MIPdf, text: str, indent: int = 4) -> None:
     pdf.cell(indent, 5, "", ln=False)
     pdf.cell(5, 5, "\x95", ln=False)  # bullet character
     pdf.multi_cell(0, 5, _s(text))
+    pdf.set_x(pdf.l_margin)
+
+
+# ── Narrow variants for sidebar-aware pages ──────────────────────────────────
+
+def _body_narrow(pdf: MIPdf, text: str, width: float = CONTENT_W) -> None:
+    """Like _body but constrained to width (leaves room for right sidebar)."""
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.multi_cell(width, 5, _s(text))
+    pdf.set_x(pdf.l_margin)
+    pdf.ln(2)
+
+
+def _kv_narrow(pdf: MIPdf, label: str, value, label_w: int = 44, width: float = CONTENT_W) -> None:
+    """Like _kv but value column constrained to width."""
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(label_w, 5, _s(label) + ":", ln=False)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.multi_cell(width - label_w, 5, _s(value))
+    pdf.set_x(pdf.l_margin)
+
+
+def _bullet_narrow(pdf: MIPdf, text: str, indent: int = 4, width: float = CONTENT_W) -> None:
+    """Like _bullet but constrained to width."""
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(indent, 5, "", ln=False)
+    pdf.cell(5, 5, "\x95", ln=False)
+    pdf.multi_cell(width - indent - 5, 5, _s(text))
     pdf.set_x(pdf.l_margin)
 
 
@@ -307,6 +384,102 @@ def _metric_row(pdf: MIPdf, metrics: List[tuple]) -> None:
 
 # ── Risk colour helper ──────────────────────────────────────────────────────────
 
+# ── Design B right-column sidebar ──────────────────────────────────────────────
+
+def _sidebar_metric_box(
+    pdf: MIPdf,
+    label: str,
+    value: str,
+    unit: str = "",
+    sub_label: str = "",
+    x: float = None,
+    y: float = None,
+    primary: bool = False,
+) -> float:
+    """
+    Draw one stacked sidebar metric box at absolute (x, y).
+    Returns the bottom y of the box so callers can chain boxes vertically.
+    primary=True → navy bg, white text, taller box (hero metric).
+    """
+    if x is None:
+        x = SIDEBAR_X
+    if y is None:
+        y = pdf.get_y()
+
+    w      = SIDEBAR_W - 2   # 1mm gutter each side
+    box_h  = 30 if primary else 22
+
+    if primary:
+        bg          = NAVY
+        val_color   = WHITE
+        unit_color  = GOLD
+        label_color = (180, 200, 230)
+        val_size    = 18
+    else:
+        bg          = LIGHT_BG
+        val_color   = NAVY
+        unit_color  = GRAY_TEXT
+        label_color = GRAY_TEXT
+        val_size    = 13
+
+    # Background + border
+    pdf.set_fill_color(*bg)
+    pdf.set_draw_color(*GOLD)
+    pdf.set_line_width(0.5)
+    pdf.rect(x, y, w, box_h, style="FD")
+    pdf.set_line_width(0.2)
+    pdf.set_draw_color(0, 0, 0)
+
+    # Label (top small caps)
+    pdf.set_font("Helvetica", "B", 6)
+    pdf.set_text_color(*label_color)
+    pdf.set_xy(x, y + 2)
+    pdf.cell(w, 4, _s(label).upper(), align="C")
+
+    # Value (large number)
+    pdf.set_font("Helvetica", "B", val_size)
+    pdf.set_text_color(*val_color)
+    pdf.set_xy(x, y + 7)
+    pdf.cell(w, 8, _s(value), align="C")
+
+    # Unit
+    if unit:
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(*unit_color)
+        pdf.set_xy(x, y + 15)
+        pdf.cell(w, 4, _s(unit), align="C")
+
+    # Secondary label (e.g. "175 Mt @ 1.5 g/t")
+    if sub_label:
+        pdf.set_font("Helvetica", "I", 6)
+        pdf.set_text_color(*label_color)
+        pdf.set_xy(x, y + box_h - 5)
+        pdf.cell(w, 4, _s(sub_label), align="C")
+
+    pdf.set_text_color(*DARK_TEXT)
+    return y + box_h + 1   # next available y (1mm gap between boxes)
+
+
+def _draw_sidebar(pdf: MIPdf, metrics: list, start_y: float) -> None:
+    """
+    Render a stacked column of sidebar metric boxes at SIDEBAR_X.
+    Uses absolute positioning — does NOT move the main content cursor.
+    metrics: list of dicts with keys: label, value, unit, sub_label (opt), primary (opt bool).
+    """
+    current_y = start_y
+    for m in metrics:
+        current_y = _sidebar_metric_box(
+            pdf,
+            label     = m.get("label", ""),
+            value     = m.get("value", ""),
+            unit      = m.get("unit", ""),
+            sub_label = m.get("sub_label", ""),
+            x         = SIDEBAR_X,
+            y         = current_y,
+            primary   = m.get("primary", False),
+        )
+
+
 def _risk_color(impact: str, probability: str):
     """Return background RGB for risk cell."""
     h = str(impact).lower()
@@ -321,6 +494,7 @@ def _risk_color(impact: str, probability: str):
 # ── Cover page ──────────────────────────────────────────────────────────────────
 
 def _cover_page(pdf: MIPdf, report_json: Dict, project_name: str) -> None:
+    """Design B cover: white page, gold top bar, left content column, right sidebar."""
     meta   = report_json.get("metadata", {})
     exec_s = report_json.get("executive_summary", {})
     material     = _s(meta.get("material", ""))
@@ -330,124 +504,160 @@ def _cover_page(pdf: MIPdf, report_json: Dict, project_name: str) -> None:
     date_str     = _s(str(meta.get("generated_at", ""))[:10])
     assessment   = exec_s.get("overall_assessment", "Cautious")
 
-    # Full navy background (top third)
-    pdf.set_fill_color(*NAVY)
-    pdf.rect(0, 0, 210, 90, style="F")
+    # ── 1. White background ────────────────────────────────────────────────────
+    pdf.set_fill_color(*WHITE)
+    pdf.rect(0, 0, 210, 297, style="F")
 
-    # MI branding in white
-    pdf.set_xy(14, 16)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*GOLD)
-    pdf.cell(0, 7, "MINING INTELLECT", ln=True)
-    pdf.set_xy(14, 23)
-    pdf.set_font("Helvetica", "", 8)
+    # ── 2. Thin gold top bar ──────────────────────────────────────────────────
+    pdf.set_fill_color(*GOLD)
+    pdf.rect(0, 0, 210, GOLD_BAR_H, style="F")
+    pdf.set_xy(14, 1.5)
+    pdf.set_font("Helvetica", "B", 7)
     pdf.set_text_color(*WHITE)
-    pdf.cell(0, 5, "Resource Modeling & Analytics Platform", ln=True)
+    pdf.cell(0, GOLD_BAR_H - 3, "MINING INTELLECT AI PLATFORM", ln=True)
 
-    # Report label
-    pdf.set_xy(14, 36)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*GOLD)
-    pdf.cell(0, 6, "RESOURCE MODELING REPORT", ln=True)
+    # ── 3. Left column (x=14, w=122) ──────────────────────────────────────────
+    left_y = GOLD_BAR_H + 7
 
-    # Gold separator line
+    # Date | description small gray
+    pdf.set_xy(14, left_y)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*GRAY_TEXT)
+    pdf.cell(122, 5, f"{date_str}  |  AI-Powered Resource Analysis", ln=True)
+
+    # "RESOURCE MODELING REPORT"
+    pdf.set_xy(14, pdf.get_y() + 2)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(122, 8, "RESOURCE MODELING REPORT", ln=True)
+
+    # Gold rule (left column only)
+    sep_y = pdf.get_y() + 1
     pdf.set_draw_color(*GOLD)
     pdf.set_line_width(1.0)
-    pdf.line(14, 43, 140, 43)
-    pdf.set_line_width(0.2)
-
-    # Project name
-    pdf.set_xy(14, 47)
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.set_text_color(*WHITE)
-    # Long names need to wrap
-    pdf.multi_cell(175, 10, _s(project_name))
-
-    # Meta tags
-    meta_line = "  |  ".join(filter(None, [material, deposit_type, country, stage]))
-    pdf.set_xy(14, 76)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(200, 215, 235)
-    pdf.cell(0, 6, meta_line, ln=True)
-
-    # White content area
-    pdf.set_fill_color(*WHITE)
-    pdf.rect(0, 90, 210, 207, style="F")
-
-    # Date and assessment badge
-    pdf.set_xy(14, 96)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*GRAY_TEXT)
-    pdf.cell(80, 6, f"Generated: {date_str}", ln=False)
-
-    # Assessment badge
-    badge_colors = {
-        "Positive":  (GREEN, GREEN_BG),
-        "Cautious":  (AMBER, AMBER_BG),
-        "Negative":  (RED_RISK, RED_BG),
-    }
-    badge_text_c, badge_bg_c = badge_colors.get(assessment, (NAVY, LIGHT_BG))
-    pdf.set_fill_color(*badge_bg_c)
-    pdf.set_text_color(*badge_text_c)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(50, 6, f"  Assessment: {assessment}  ", fill=True, ln=True, align="C")
-    pdf.set_text_color(*DARK_TEXT)
-
-    # Gold separator under date
-    pdf.set_draw_color(*GOLD)
-    pdf.set_line_width(0.5)
-    pdf.line(14, 104, 196, 104)
+    pdf.line(14, sep_y, 136, sep_y)
     pdf.set_line_width(0.2)
     pdf.set_draw_color(0, 0, 0)
 
-    # Executive key takeaway
+    # Project name (22pt bold navy)
+    pdf.set_xy(14, sep_y + 4)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(*NAVY)
+    pdf.multi_cell(122, 10, _s(project_name))
+
+    # Meta tags
+    meta_line = "  |  ".join(filter(None, [material, deposit_type, country, stage]))
+    pdf.set_x(14)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*GRAY_TEXT)
+    pdf.multi_cell(122, 5, meta_line)
+
+    # Assessment badge
+    badge_colors = {
+        "Positive": (GREEN, GREEN_BG),
+        "Cautious":  (AMBER, AMBER_BG),
+        "Negative": (RED_RISK, RED_BG),
+    }
+    badge_text_c, badge_bg_c = badge_colors.get(assessment, (NAVY, LIGHT_BG))
+    pdf.set_x(14)
+    pdf.set_fill_color(*badge_bg_c)
+    pdf.set_text_color(*badge_text_c)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(50, 6, f"  Assessment: {assessment}  ", fill=True, ln=True, align="C")
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.ln(4)
+
+    # Compact table of contents on cover
+    toc_y = pdf.get_y()
+    pdf.set_x(14)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(122, 5, "CONTENTS", ln=True)
+    pdf.set_draw_color(*GOLD)
+    pdf.set_line_width(0.3)
+    pdf.line(14, pdf.get_y(), 136, pdf.get_y())
+    pdf.set_line_width(0.2)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.ln(1)
+
+    toc_sections = [
+        ("01", "Executive Summary"),
+        ("02", "Project Overview"),
+        ("03", "Geological Framework"),
+        ("04", "Analog Comparison"),
+        ("05", "Resource Models"),
+        ("06", "Drilling & Sampling"),
+        ("07", "Sensitivity Analysis"),
+        ("08", "Risk Matrix"),
+        ("09", "Recommendations"),
+        ("10", "Acquisition Analysis"),
+        ("11", "Conclusion"),
+        ("12", "Disclaimer"),
+    ]
+    for num, name in toc_sections:
+        pdf.set_x(14)
+        pdf.set_text_color(*NAVY)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(12, 5, num, ln=False)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.cell(110, 5, name, ln=True)
+
+    # Key takeaway below TOC
     key_takeaway = exec_s.get("key_takeaway", "")
     if key_takeaway:
-        pdf.set_xy(14, 108)
-        pdf.set_font("Helvetica", "I", 10)
+        pdf.ln(3)
+        pdf.set_x(14)
+        pdf.set_font("Helvetica", "I", 9)
         pdf.set_text_color(*NAVY)
-        pdf.multi_cell(182, 6, f'"{_s(key_takeaway)}"')
+        pdf.multi_cell(122, 5, f'"{_s(key_takeaway)}"')
 
-    # Metric boxes — pull from resource estimates
+    # ── 4. Right sidebar metric boxes (absolute positioning) ──────────────────
     comp_table = (report_json.get("resource_estimates") or {}).get("comparison_table", [])
     best_model = next((r for r in comp_table if "Model 1" in str(r.get("model",""))), None)
     if not best_model and comp_table:
         best_model = comp_table[0]
+    ind = (report_json.get("resource_estimates") or {}).get("independent_analysis", {})
+    upd = (report_json.get("resource_estimates") or {}).get("updated_analysis", {})
 
-    pdf.set_xy(14, 122)
-    metrics = []
+    sb_y = GOLD_BAR_H + 5
+
     if best_model:
-        total_kt = best_model.get("total_tonnage_kt", 0)
-        grade    = best_model.get("total_grade_pct", 0)
-        metal    = best_model.get("total_contained_mlb", 0)
-        metal_label = "Contained (Mlb)" if material.lower() not in {"gold","silver","platinum","palladium"} else "Contained (Moz)"
-        metrics = [
-            ("Total Tonnage", _num(total_kt), "kt"),
-            ("Grade", f"{grade:.3f}", material[:2].upper() + "%"),
-            (metal_label, _num(metal, "{:,.1f}"), "Mlb/Moz"),
-        ]
-        ind = (report_json.get("resource_estimates") or {}).get("independent_analysis", {})
-        conv = ind.get("confidence_pct", 0)
-        metrics.append(("MI Conviction", f"{conv:.0f}%", "confidence"))
+        total_kt  = float(best_model.get("total_tonnage_kt", 0) or 0)
+        total_mt  = total_kt / 1000
+        mi_kt     = float(best_model.get("mi_tonnage_kt", 0) or 0)
+        mi_mt     = mi_kt / 1000
+        mi_grade  = float(best_model.get("mi_grade_pct", 0) or 0)
+        conv_pct  = float(ind.get("confidence_pct", 0) or 0)
+        conv2_pct = float(upd.get("confidence_pct", 0) or conv_pct)
 
-    if metrics:
-        _metric_row(pdf, metrics)
+        sb_y = _sidebar_metric_box(pdf, "TOTAL RESOURCE",
+            f"{total_mt:.1f}", "Mt", x=SIDEBAR_X, y=sb_y, primary=True)
+        sb_y = _sidebar_metric_box(pdf, "CONFIDENCE",
+            f"{conv_pct:.0f}", "%", x=SIDEBAR_X, y=sb_y)
+        hg_sub = f"@ {_grade_fmt(mi_grade, material)}" if mi_grade else ""
+        sb_y = _sidebar_metric_box(pdf, "HIGH-GRADE (M&I)",
+            f"{mi_mt:.0f}", "Mt", sub_label=hg_sub, x=SIDEBAR_X, y=sb_y)
+        sb_y = _sidebar_metric_box(pdf, "MI CONVICTION",
+            f"{conv2_pct:.0f}", "%", x=SIDEBAR_X, y=sb_y)
 
-    # Summary text excerpt
-    sum_text = exec_s.get("summary_text", "")
-    if sum_text:
-        excerpt = sum_text[:400] + ("..." if len(sum_text) > 400 else "")
-        pdf.set_xy(14, pdf.get_y() + 2)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.multi_cell(182, 5, _s(excerpt))
+        # Prepared by stamp at bottom of sidebar
+        stamp_y = sb_y + 4
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.set_text_color(*NAVY)
+        pdf.set_xy(SIDEBAR_X, stamp_y)
+        pdf.cell(SIDEBAR_W - 2, 4, "Prepared by:", align="C")
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(*GRAY_TEXT)
+        pdf.set_xy(SIDEBAR_X, stamp_y + 4)
+        pdf.cell(SIDEBAR_W - 2, 4, "Mining Intellect AI Platform", align="C")
 
-    # Disclaimer box at bottom of cover
+    # ── 5. Disclaimer amber box at bottom ─────────────────────────────────────
     pdf.set_xy(14, 258)
     pdf.set_fill_color(255, 248, 220)
     pdf.set_draw_color(*AMBER)
     pdf.set_line_width(0.4)
-    pdf.rect(14, 258, 182, 20, style="FD")
+    pdf.rect(14, 258, 182, 22, style="FD")
     pdf.set_line_width(0.2)
     pdf.set_xy(16, 260)
     pdf.set_font("Helvetica", "B", 7)
@@ -466,81 +676,78 @@ def _cover_page(pdf: MIPdf, report_json: Dict, project_name: str) -> None:
 # ── Table of Contents ───────────────────────────────────────────────────────────
 
 def _toc_page(pdf: MIPdf, report_json: Dict) -> None:
-    _section_header(pdf, "Table of Contents")
-
-    sections = [
-        ("1",  "Executive Summary"),
-        ("2",  "Project Overview"),
-        ("3",  "Geological Framework"),
-        ("4",  "Analog Comparison"),
-        ("5",  "Resource Models"),
-        ("6",  "Drilling & Sampling Data"),
-        ("7",  "Drilling Efficiency Metrics"),
-        ("8",  "Geophysical Integration"),
-        ("9",  "Geostatistical Modeling"),
-        ("10", "Validation & Quality Control"),
-        ("11", "Economic Assumptions"),
-        ("12", "Sensitivity Analysis"),
-        ("13", "Risk Matrix"),
-        ("14", "Exploration Strategy"),
-        ("15", "Actionable Recommendations"),
-        ("16", "Strengths & Uncertainties"),
-        ("17", "Acquisition Analysis"),
-        ("18", "Conclusion"),
-        ("19", "Key Terms Glossary"),
-        ("20", "Appendices"),
-    ]
-    pdf.set_font("Helvetica", "", 10)
-    for num, title in sections:
-        pdf.set_text_color(*NAVY)
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(12, 7, num + ".", ln=False)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.cell(0, 7, title, ln=True)
-        # Dotted separator
-        pdf.set_draw_color(200, 200, 200)
-        pdf.set_line_width(0.2)
-        pdf.line(14, pdf.get_y(), 196, pdf.get_y())
-    pdf.set_text_color(*DARK_TEXT)
+    """Design B: TOC is embedded on the cover page — this is a no-op."""
+    pass
 
 
 # ── Section renderers ───────────────────────────────────────────────────────────
 
 def _render_executive_summary(pdf: MIPdf, report_json: Dict) -> None:
-    exec_s = report_json.get("executive_summary", {})
+    exec_s   = report_json.get("executive_summary", {})
+    res_est  = report_json.get("resource_estimates", {})
+    material = report_json.get("metadata", {}).get("material", "")
+
+    pdf._section_name = "EXECUTIVE SUMMARY"
     _section_header(pdf, "1. Executive Summary")
 
+    content_start_y = pdf.get_y()
+
+    # Build and draw sidebar first (absolute positioning, no cursor movement)
+    comp_table = res_est.get("comparison_table", [])
+    best_model = next((r for r in comp_table if "Model 1" in str(r.get("model",""))), None)
+    if not best_model and comp_table:
+        best_model = comp_table[0]
+    ind = res_est.get("independent_analysis", {})
+
+    if best_model:
+        total_mt  = float(best_model.get("total_tonnage_kt", 0) or 0) / 1000
+        grade     = float(best_model.get("total_grade_pct", 0) or 0)
+        mi_mt     = float(best_model.get("mi_tonnage_kt", 0) or 0) / 1000
+        mi_grade  = float(best_model.get("mi_grade_pct", 0) or 0)
+        conv_pct  = float(ind.get("confidence_pct", 0) or 0)
+        contained = float(best_model.get("total_contained_mlb", 0) or 0)
+        _draw_sidebar(pdf, [
+            {"label": "TOTAL RESOURCE", "value": f"{total_mt:.1f}", "unit": "Mt", "primary": True},
+            {"label": "GRADE",          "value": _grade_fmt(grade, material), "unit": ""},
+            {"label": "HIGH-GRADE M&I", "value": f"{mi_mt:.0f}", "unit": "Mt",
+             "sub_label": f"@ {_grade_fmt(mi_grade, material)}" if mi_grade else ""},
+            {"label": "CONTAINED",      "value": _num(contained, "{:,.1f}"), "unit": "Mlb/Moz"},
+            {"label": "CONVICTION",     "value": f"{conv_pct:.0f}", "unit": "%"},
+        ], content_start_y)
+
+    # Main content (constrained to CONTENT_W to stay left of sidebar)
     assessment = exec_s.get("overall_assessment", "Cautious")
     badge_colors = {"Positive": (GREEN, GREEN_BG), "Cautious": (AMBER, AMBER_BG), "Negative": (RED_RISK, RED_BG)}
     badge_text_c, badge_bg_c = badge_colors.get(assessment, (NAVY, LIGHT_BG))
 
-    # Assessment + key takeaway side by side
+    pdf.set_xy(14, content_start_y)
     if assessment:
         pdf.set_fill_color(*badge_bg_c)
         pdf.set_text_color(*badge_text_c)
         pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(60, 7, f"  Overall: {assessment}", fill=True, ln=False)
+        pdf.cell(55, 7, f"  Overall: {assessment}", fill=True, ln=False)
         pdf.set_text_color(*DARK_TEXT)
-        pdf.cell(5, 7, "", ln=False)
+        pdf.ln()
 
+    pdf.ln(2)
     key_takeaway = exec_s.get("key_takeaway", "")
     if key_takeaway:
+        pdf.set_x(14)
         pdf.set_font("Helvetica", "I", 9)
         pdf.set_text_color(*NAVY)
-        pdf.multi_cell(0, 7, _s(key_takeaway))
-    else:
-        pdf.ln()
+        pdf.multi_cell(CONTENT_W, 6, f'"{_s(key_takeaway)}"')
+        pdf.set_text_color(*DARK_TEXT)
 
     pdf.ln(2)
     sum_text = exec_s.get("summary_text", "")
     if sum_text:
-        _body(pdf, sum_text)
+        _body_narrow(pdf, sum_text, CONTENT_W)
 
 
 def _render_project_overview(pdf: MIPdf, report_json: Dict) -> None:
     overview = report_json.get("project_overview", {})
     meta     = report_json.get("metadata", {})
+    pdf._section_name = "PROJECT OVERVIEW"
     _section_header(pdf, "2. Project Overview")
 
     # Quick facts table
@@ -583,6 +790,7 @@ def _render_analogs(pdf: MIPdf, report_json: Dict) -> None:
     analogs = report_json.get("analogs_comparison") or []
     if not analogs:
         return
+    pdf._section_name = "ANALOG COMPARISON"
     _section_header(pdf, "4. Analog Comparison")
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*GRAY_TEXT)
@@ -620,70 +828,98 @@ def _render_analogs(pdf: MIPdf, report_json: Dict) -> None:
 
 
 def _render_resource_models(pdf: MIPdf, report_json: Dict) -> None:
-    res_est = report_json.get("resource_estimates", {})
-    _section_header(pdf, "5. Resource Models")
+    res_est  = report_json.get("resource_estimates", {})
     material = report_json.get("metadata", {}).get("material", "")
+    pdf._section_name = "RESOURCE MODELS"
+    _section_header(pdf, "5. Resource Models")
 
+    content_start_y = pdf.get_y()
+
+    # Build sidebar
     comp_table = res_est.get("comparison_table", [])
+    best_model = next((r for r in comp_table if "Model 1" in str(r.get("model",""))), None)
+    if not best_model and comp_table:
+        best_model = comp_table[0]
+    ind = res_est.get("independent_analysis", {})
+    upd = res_est.get("updated_analysis", {})
+
+    if best_model:
+        mi_kt     = float(best_model.get("mi_tonnage_kt", 0) or 0)
+        mi_mt     = mi_kt / 1000
+        mi_grade  = float(best_model.get("mi_grade_pct", 0) or 0)
+        inf_kt    = float(best_model.get("inferred_tonnage_kt", 0) or 0)
+        inf_mt    = inf_kt / 1000
+        total_kt  = float(best_model.get("total_tonnage_kt", 0) or 0)
+        total_mt  = total_kt / 1000
+        contained = float(best_model.get("total_contained_mlb", 0) or 0)
+        conv_pct  = float(ind.get("confidence_pct", 0) or 0)
+        conv2_pct = float(upd.get("confidence_pct", 0) or conv_pct)
+        _draw_sidebar(pdf, [
+            {"label": "M&I TONNAGE",     "value": f"{mi_mt:.1f}",  "unit": "Mt", "primary": True},
+            {"label": "M&I GRADE",       "value": _grade_fmt(mi_grade, material), "unit": ""},
+            {"label": "INFERRED",        "value": f"{inf_mt:.1f}", "unit": "Mt"},
+            {"label": "TOTAL RESOURCE",  "value": f"{total_mt:.1f}", "unit": "Mt"},
+            {"label": "CONTAINED METAL", "value": _num(contained, "{:,.1f}"), "unit": "Mlb/Moz"},
+            {"label": "CONVICTION",      "value": f"{conv_pct:.0f}", "unit": "%"},
+        ], content_start_y)
+
+    # Table 1: M&I + Total (split into two tables to fit CONTENT_W)
     if comp_table:
-        cols   = ["Model", "M&I Tonnage (kt)", "M&I Grade", "Inf Tonnage (kt)", "Inf Grade", "Total (kt)", "Total Grade"]
-        widths = [44, 24, 22, 24, 22, 24, 22]
-        aligns = ["L", "R", "R", "R", "R", "R", "R"]
-        _table_header(pdf, cols, widths)
+        _subsection(pdf, "Model Comparison — Tonnage & Grade")
+        # Table 1: Model | M&I Ton | M&I Grade | Total Ton | Total Grade
+        t1_cols   = ["Model", "M&I Ton (kt)", "M&I Grade", "Total (kt)", "Total Grade"]
+        t1_widths = [42, 22, 22, 22, 22]   # sum = 130 ≈ CONTENT_W + 6 (slight)
+        t1_aligns = ["L", "R", "R", "R", "R"]
+        _table_header(pdf, t1_cols, t1_widths)
 
         for i, row in enumerate(comp_table):
             is_official = "Official" in str(row.get("model", ""))
             fill = (255, 250, 220) if is_official else (ALT_ROW if i % 2 == 0 else WHITE)
-            font_style = "B" if is_official else ""
-
-            vals = [
+            fs   = "B" if is_official else ""
+            _table_row(pdf, [
                 row.get("model", ""),
                 _num(row.get("mi_tonnage_kt"), "{:,.0f}"),
                 _grade_fmt(row.get("mi_grade_pct", 0), material),
-                _num(row.get("inferred_tonnage_kt"), "{:,.0f}"),
-                _grade_fmt(row.get("inferred_grade_pct", 0), material),
                 _num(row.get("total_tonnage_kt"), "{:,.0f}"),
                 _grade_fmt(row.get("total_grade_pct", 0), material),
-            ]
-            _table_row(pdf, vals, widths, aligns, fill_color=fill, font_style=font_style)
+            ], t1_widths, t1_aligns, fill_color=fill, font_style=fs)
 
-        pdf.ln(2)
-        # Contained metal row
+        pdf.ln(3)
+
+        # Table 2: Contained metal + conviction
+        pdf.set_x(14)
         pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(*GRAY_TEXT)
-        pdf.cell(0, 5, "  Contained metal (Mlb for base metals, Moz for precious):", ln=True)
+        pdf.cell(CONTENT_W, 5, "Contained metal (Mlb base metals / Moz precious) and model conviction:", ln=True)
         pdf.set_text_color(*DARK_TEXT)
 
-        cont_cols   = ["Model", "Total Contained Metal", "Unit", "Description"]
-        cont_widths = [44, 36, 20, 82]
-        cont_aligns = ["L", "R", "C", "L"]
-        _table_header(pdf, cont_cols, cont_widths)
+        t2_cols   = ["Model", "Contained Metal", "Unit", "Conviction %", "Description"]
+        t2_widths = [38, 24, 14, 20, 34]   # sum = 130
+        t2_aligns = ["L", "R", "C", "C", "L"]
+        _table_header(pdf, t2_cols, t2_widths)
+
         for i, row in enumerate(comp_table):
             fill = ALT_ROW if i % 2 == 0 else WHITE
+            is_m1 = "Model 1" in str(row.get("model",""))
+            is_m2 = "Model 2" in str(row.get("model",""))
+            row_conv = (ind.get("confidence_pct") or 0) if is_m1 else ((upd.get("confidence_pct") or 0) if is_m2 else 0)
             _table_row(pdf, [
                 row.get("model",""),
                 _num(row.get("total_contained_mlb"), "{:,.2f}"),
                 "Mlb/Moz",
-                row.get("description",""),
-            ], cont_widths, cont_aligns, fill_color=fill)
+                f"{row_conv:.0f}%" if row_conv else "N/A",
+                row.get("description","")[:45],
+            ], t2_widths, t2_aligns, fill_color=fill)
 
     pdf.ln(3)
-    ind = res_est.get("independent_analysis", {})
-    upd = res_est.get("updated_analysis", {})
-    if ind.get("confidence_pct") is not None:
-        _kv(pdf, "Model 1 Conviction", f"{ind['confidence_pct']:.1f}%  —  key analogs: {', '.join(ind.get('key_factors',[])[:3])}")
-    if upd.get("confidence_pct"):
-        _kv(pdf, "Model 2 Conviction", f"{upd['confidence_pct']:.1f}%")
-
     compliance = res_est.get("compliance_summary", [])
     if compliance:
-        pdf.ln(2)
         pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(*GRAY_TEXT)
         for line in compliance:
             pdf.set_x(pdf.l_margin)
             pdf.cell(4, 4, "", ln=False)
-            pdf.multi_cell(0, 4, _s(line))
+            pdf.multi_cell(CONTENT_W - 4, 4, _s(line))
             pdf.set_x(pdf.l_margin)
         pdf.set_text_color(*DARK_TEXT)
 
@@ -692,6 +928,7 @@ def _render_economic_assumptions(pdf: MIPdf, report_json: Dict) -> None:
     econ = report_json.get("economic_assumptions")
     if not econ:
         return
+    pdf._section_name = "ECONOMIC ASSUMPTIONS"
     _section_header(pdf, "11. Economic Assumptions")
 
     fields = [
@@ -725,6 +962,7 @@ def _render_sensitivity(pdf: MIPdf, report_json: Dict) -> None:
     sens = report_json.get("sensitivity_analysis")
     if not sens:
         return
+    pdf._section_name = "SENSITIVITY ANALYSIS"
     _section_header(pdf, "12. Sensitivity Analysis")
 
     # Cut-off grade table
@@ -794,6 +1032,7 @@ def _render_risk_matrix(pdf: MIPdf, report_json: Dict) -> None:
     risks = report_json.get("risk_matrix") or []
     if not risks:
         return
+    pdf._section_name = "RISK MATRIX"
     _section_header(pdf, "13. Risk Matrix")
 
     cols   = ["Risk Factor", "Probability", "Impact", "Mitigation Strategy"]
@@ -830,6 +1069,7 @@ def _render_exploration_strategy(pdf: MIPdf, report_json: Dict) -> None:
     strategy = report_json.get("exploration_strategy") or []
     if not strategy:
         return
+    pdf._section_name = "EXPLORATION STRATEGY"
     _section_header(pdf, "14. Exploration Strategy & Timeline")
 
     cols   = ["Activity", "Cost Estimate", "Timeline", "Priority", "Expected Outcome"]
@@ -856,6 +1096,7 @@ def _render_recommendations(pdf: MIPdf, report_json: Dict) -> None:
     recs = report_json.get("actionable_recommendations") or []
     if not recs:
         return
+    pdf._section_name = "RECOMMENDATIONS"
     _section_header(pdf, "15. Actionable Recommendations")
 
     priority_colors = {"High": (RED_RISK, RED_BG), "Medium": (AMBER, AMBER_BG), "Low": (GREEN, GREEN_BG)}
@@ -907,6 +1148,7 @@ def _render_strengths_uncertainties(pdf: MIPdf, report_json: Dict) -> None:
     uncertainties = uands.get("uncertainties", [])
     if not strengths and not uncertainties:
         return
+    pdf._section_name = "STRENGTHS & UNCERTAINTIES"
     _section_header(pdf, "16. Strengths & Uncertainties")
 
     if strengths:
@@ -943,6 +1185,7 @@ def _render_acquisition_analysis(pdf: MIPdf, report_json: Dict) -> None:
     acq = report_json.get("acquisition_analysis")
     if not acq:
         return
+    pdf._section_name = "ACQUISITION ANALYSIS"
     _section_header(pdf, "17. Strategic Acquisition Analysis")
 
     tiers = [
@@ -1008,6 +1251,7 @@ def _render_key_terms(pdf: MIPdf, report_json: Dict) -> None:
     terms = report_json.get("key_terms") or []
     if not terms:
         return
+    pdf._section_name = "KEY TERMS"
     _section_header(pdf, "19. Key Terms Glossary")
 
     for i, item in enumerate(terms):
@@ -1028,6 +1272,7 @@ def _render_geological_framework(pdf: MIPdf, report_json: Dict) -> None:
     geo = report_json.get("geological_framework")
     if not geo:
         return
+    pdf._section_name = "GEOLOGICAL FRAMEWORK"
     _section_header(pdf, "3. Geological Framework")
     _body(pdf, geo.get("regional_setting", ""))
     for label, key in [
@@ -1058,6 +1303,7 @@ def _render_drilling_and_sampling(pdf: MIPdf, report_json: Dict) -> None:
     ds = report_json.get("drilling_and_sampling")
     if not ds:
         return
+    pdf._section_name = "DRILLING & SAMPLING"
     _section_header(pdf, "6. Drilling & Sampling Data")
     if ds.get("total_holes_estimated"):
         _kv(pdf, "Estimated Drilling", ds["total_holes_estimated"])
@@ -1086,6 +1332,7 @@ def _render_drilling_efficiency_metrics(pdf: MIPdf, report_json: Dict) -> None:
     dm = report_json.get("drilling_efficiency_metrics")
     if not dm:
         return
+    pdf._section_name = "DRILLING EFFICIENCY"
     _section_header(pdf, "7. Drilling Efficiency Metrics")
     if dm.get("narrative"):
         _body(pdf, dm["narrative"])
@@ -1119,6 +1366,7 @@ def _render_geophysical_integration(pdf: MIPdf, report_json: Dict) -> None:
     gp = report_json.get("geophysical_integration")
     if not gp:
         return
+    pdf._section_name = "GEOPHYSICAL INTEGRATION"
     _section_header(pdf, "8. Geophysical Integration")
     surveys = gp.get("survey_types_recommended", [])
     if surveys:
@@ -1150,6 +1398,7 @@ def _render_geostatistical_modeling(pdf: MIPdf, report_json: Dict) -> None:
     gm = report_json.get("geostatistical_modeling")
     if not gm:
         return
+    pdf._section_name = "GEOSTATISTICAL MODELING"
     _section_header(pdf, "9. Geostatistical Modeling")
     if gm.get("variography_narrative"):
         _body(pdf, gm["variography_narrative"])
@@ -1184,6 +1433,7 @@ def _render_validation_and_qc(pdf: MIPdf, report_json: Dict) -> None:
     vq = report_json.get("validation_and_qc")
     if not vq:
         return
+    pdf._section_name = "VALIDATION & QC"
     _section_header(pdf, "10. Validation & Quality Control")
     if vq.get("check_assay_protocol"):
         _subsection(pdf, "Check Assay Protocol")
@@ -1227,6 +1477,7 @@ def _render_conclusion(pdf: MIPdf, report_json: Dict) -> None:
     con = report_json.get("conclusion")
     if not con:
         return
+    pdf._section_name = "CONCLUSION"
     _section_header(pdf, "18. Conclusion")
     headline = con.get("headline_finding", "")
     if headline:
@@ -1271,6 +1522,7 @@ def _render_appendices(pdf: MIPdf, report_json: Dict) -> None:
     app = report_json.get("appendices")
     if not app:
         return
+    pdf._section_name = "APPENDICES"
     _section_header(pdf, "20. Appendices")
 
     # Appendix A: Analog Input Weighting
@@ -1326,6 +1578,7 @@ def _render_appendices(pdf: MIPdf, report_json: Dict) -> None:
 
 
 def _render_disclaimer_page(pdf: MIPdf) -> None:
+    pdf._section_name = "DISCLAIMER"
     _section_header(pdf, "Disclaimer & Important Notices")
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*DARK_TEXT)
@@ -1371,13 +1624,9 @@ def generate_pdf(report_json: Dict, project_name: str) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.set_margins(14, 16, 14)
 
-    # ── Page 1: Cover ───────────────────────────────────────────────────────────
+    # ── Page 1: Cover (Design B — TOC embedded on cover) ───────────────────────
     pdf.add_page()
     _cover_page(pdf, report_json, project_name)
-
-    # ── Page 2: Table of Contents ───────────────────────────────────────────────
-    pdf.add_page()
-    _toc_page(pdf, report_json)
 
     # ── Content pages ───────────────────────────────────────────────────────────
     pdf.add_page()
