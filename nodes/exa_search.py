@@ -74,10 +74,17 @@ def search_project_data(
         f"I need from the most recent NI 43-101, JORC report, feasibility study, PFS, "
         f"PEA or company press release: "
         f"total resource tonnes (measured, indicated, inferred separately) and grade, "
-        f"deposit type, mining method, processing method, metallurgical recovery, "
+        f"contained metal quantity (e.g. Moz gold, Mlbs copper), "
+        f"deposit type, host rock type, mineralisation style, "
+        f"by-product metals in the resource, "
+        f"mining method, processing method, metallurgical recovery, final saleable product, "
         f"mine life, annual production rate, initial CAPEX, OPEX per unit, "
         f"NPV with discount rate, IRR, payback period, "
-        f"project location (country and region), current project stage."
+        f"project location (country, region, and geological district), "
+        f"current project stage, project ownership percentage, "
+        f"planned construction or mine start year, "
+        f"primary energy or power source, site elevation in metres, "
+        f"climate and terrain description, permitting milestones achieved."
     )
     payload = {
         "query": query,
@@ -113,8 +120,19 @@ def search_missing_fields(
 ) -> tuple[str, list[str]]:
     """Targeted retry for specific missing fields."""
     field_labels = {
+        # Existing fields
+        "country": "country where the project is located",
+        "region": "region or state/province within the country",
+        "company_name": "mining company that owns or operates the project",
+        "commodity": "primary commodity or mineral being mined",
+        "deposit_type": "deposit type classification (e.g. VMS, porphyry copper, orogenic gold)",
+        "project_stage": "current project stage (Exploration, PEA, PFS, Feasibility, Construction, Production)",
+        "tonnage_mt": "total mineral resource in million tonnes (Mt)",
+        "grade_value": "average resource grade value",
+        "grade_unit": "grade unit (g/t Au, % Cu, % U3O8)",
+        "resource_category": "NI 43-101 resource category (Measured, Indicated, Inferred, M+I+I)",
         "mining_method": "mining method (open pit / underground / ISR)",
-        "processing_method": "processing method (heap leach / flotation / mill)",
+        "processing_method": "processing method (heap leach / flotation / CIL mill)",
         "recovery_rate": "metallurgical or mill recovery percentage",
         "mine_life_years": "projected mine life in years",
         "depth_meters": "deposit depth in metres",
@@ -126,6 +144,24 @@ def search_missing_fields(
         "opex_per_unit": "operating cost per unit",
         "payback_years": "payback period in years or months",
         "production_rate_per_year": "annual production rate",
+        "latitude": "decimal latitude of the project site",
+        "longitude": "decimal longitude of the project site",
+        "location_name": "human-readable location description",
+        # Extended fields
+        "host_rock": "host rock type hosting the deposit (e.g. granite, limestone, greenstone)",
+        "mineralization_style": "mineralisation style (e.g. epithermal vein, porphyry, VMS, IOCG)",
+        "resource_size_value": "contained metal quantity as a number (e.g. 3.2 for '3.2 Moz gold', 400 for '400 Mlbs copper')",
+        "resource_size_unit": "unit for contained metal quantity (Moz, Mlbs, kt Cu)",
+        "by_product_commodities": "by-product metals listed in resource tables alongside the primary metal",
+        "final_product": "final saleable product form (doré bars, copper concentrate, uranium oxide U3O8)",
+        "ownership_type": "project ownership structure (100% owned, 50% JV with X, optioned)",
+        "district": "geological or administrative district name within the broader region",
+        "start_year": "planned mine start or construction start year (integer)",
+        "end_year": "planned mine end or closure year (integer)",
+        "energy_source": "primary power or energy source (grid power, diesel generators, LNG, solar)",
+        "climate_terrain": "climate and terrain description of the project site (Arctic tundra, tropical, high-altitude)",
+        "permitting_status": "permitting milestones already achieved (Environmental Assessment approval, Mining licence, Federal permits)",
+        "elevation_meters": "project site elevation above sea level in metres",
     }
     needed = ", ".join(field_labels.get(f, f) for f in missing_fields)
     query = (

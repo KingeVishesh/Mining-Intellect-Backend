@@ -140,8 +140,12 @@ def validate_node(state: ResearchState) -> ResearchState:
     if not fields.get("latitude") or not fields.get("longitude"):
         errors.append("Missing lat/lng (geocoding failed or location not found)")
 
-    if fields.get("tonnage_mt") is None:
-        errors.append("No resource tonnage found")
+    # Tonnage is only required when a formal resource study exists (PEA or later).
+    # Early-stage exploration projects legitimately have no resource estimate yet.
+    stage = (fields.get("project_stage") or "").lower()
+    study_stages = {"pea", "pfs", "feasibility", "construction", "production"}
+    if stage in study_stages and fields.get("tonnage_mt") is None:
+        errors.append("No resource tonnage found (required for PEA+ stage projects)")
 
     logger.info(f"[validate] {len(errors)} validation issues")
     return {"validation_errors": errors}

@@ -34,6 +34,7 @@ class ProjectData(BaseModel):
     resource_category: Optional[str] = None
     resource_size_value: Optional[float] = None
     resource_size_unit: Optional[str] = None
+    by_product_commodities: Optional[List[str]] = None
 
     # Geology
     host_rock: Optional[str] = None
@@ -49,6 +50,10 @@ class ProjectData(BaseModel):
     mine_life_years: Optional[float] = None
     production_rate_per_year: Optional[float] = None
     production_rate_unit: Optional[str] = None
+    final_product: Optional[str] = None
+    energy_source: Optional[str] = None
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
 
     # Economics
     npv_usd_millions: Optional[float] = None
@@ -56,6 +61,16 @@ class ProjectData(BaseModel):
     irr_percent: Optional[float] = None
     opex_per_unit: Optional[float] = None
     payback_years: Optional[float] = None
+
+    # Company / Ownership
+    ownership_type: Optional[str] = None
+
+    # Location (extended)
+    elevation_meters: Optional[float] = None
+    climate_terrain: Optional[str] = None
+
+    # Permitting / ESG
+    permitting_status: Optional[List[str]] = None
 
     # Status / Meta
     status: Optional[str] = None

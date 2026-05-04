@@ -30,6 +30,15 @@ TARGET_FIELDS = [
     "npv_usd_millions", "capex_usd_millions",
     "irr_percent", "opex_per_unit", "payback_years", "production_rate_per_year",
     "latitude", "longitude", "location_name",
+    # Extended fields
+    "host_rock", "mineralization_style",
+    "resource_size_value", "resource_size_unit",
+    "by_product_commodities",
+    "final_product", "ownership_type", "district",
+    "start_year", "end_year",
+    "energy_source", "climate_terrain",
+    "permitting_status",
+    "elevation_meters",
 ]
 
 
@@ -94,6 +103,35 @@ Other fields:
 11. production_rate_per_year = annual production rate as a number.
 12. latitude/longitude = decimal degrees if explicitly stated. null otherwise.
 13. location_name = human-readable location (e.g. "Northern Ontario, Canada").
+14. host_rock: the rock type that hosts the deposit (e.g. "granite", "limestone",
+    "greenstone", "schist"). null if not stated.
+15. mineralization_style: the mineralisation style or deposit sub-type (e.g. "epithermal vein",
+    "porphyry", "VMS", "IOCG", "skarn", "MVT", "orogenic", "sediment-hosted"). null if not stated.
+16. resource_size_value: contained metal quantity as a NUMBER only (e.g. 3.2 for "3.2 Moz gold",
+    400 for "400 Mlbs copper"). Prefer the total resource. null if not stated.
+    resource_size_unit: the unit string for the contained metal (e.g. "Moz", "Mlbs", "kt Cu").
+    null if resource_size_value is null.
+17. by_product_commodities: JSON array of by-product metal names mentioned alongside the primary
+    resource (e.g. ["Silver", "Molybdenum"]). Use [] if none are mentioned. NOT null — always an array.
+18. final_product: the planned saleable product form (e.g. "doré bars", "copper concentrate",
+    "nickel sulphate", "uranium oxide (U3O8)", "iron ore pellets"). null if not stated.
+19. ownership_type: the project ownership structure as stated in the text
+    (e.g. "100% owned", "50% JV with Company X", "optioned from Vendor Y"). null if not stated.
+20. district: geological district or sub-regional name within the broader region
+    (e.g. "Abitibi Greenstone Belt", "Atacama Region", "Pilbara Craton"). null if not stated.
+21. start_year: planned or actual mine start or construction start year as an INTEGER
+    (e.g. 2026). Found in project timelines, FS construction schedules. null if not stated.
+22. end_year: planned mine closure year as an INTEGER. If not stated but start_year and
+    mine_life_years are both known, compute start_year + mine_life_years. null otherwise.
+23. energy_source: primary energy or power source for the operation
+    (e.g. "grid power", "diesel generators", "LNG", "solar + diesel hybrid"). null if not stated.
+24. climate_terrain: brief climate and terrain description of the project site
+    (e.g. "Arctic tundra", "Tropical rainforest", "High-altitude Andes", "Semi-arid desert",
+    "Boreal forest"). null if not stated.
+25. permitting_status: JSON array of permitting milestones already achieved
+    (e.g. ["Environmental Impact Assessment approved", "Mining licence granted",
+    "Federal permits received"]). Use [] if none are mentioned. NOT null — always an array.
+26. elevation_meters: project site elevation above sea level in METRES as a number. null if not stated.
 
 Output ONLY this JSON object, no other text:
 
@@ -123,7 +161,21 @@ Output ONLY this JSON object, no other text:
   "production_rate_per_year": number | null,
   "latitude": number | null,
   "longitude": number | null,
-  "location_name": string | null
+  "location_name": string | null,
+  "host_rock": string | null,
+  "mineralization_style": string | null,
+  "resource_size_value": number | null,
+  "resource_size_unit": string | null,
+  "by_product_commodities": array,
+  "final_product": string | null,
+  "ownership_type": string | null,
+  "district": string | null,
+  "start_year": integer | null,
+  "end_year": integer | null,
+  "energy_source": string | null,
+  "climate_terrain": string | null,
+  "permitting_status": array,
+  "elevation_meters": number | null
 }}
 
 Project context: {company} - {project_name} ({material})
@@ -176,7 +228,7 @@ EXTRACTED VALUES (some may be wrong or hallucinated):
 {json.dumps(extracted_summary, indent=2)}
 
 SOURCE TEXT (treat as ground truth):
-{source_text[:6000]}
+{source_text[:12000]}
 
 For each field return one of:
 - "accept"         → value is explicitly stated or clearly derivable from the source text
