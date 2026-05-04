@@ -38,6 +38,24 @@ def _norm_material(material: str) -> str:
     return _SYMBOL_TO_MATERIAL.get(material.strip().lower(), material.strip().lower())
 
 
+# Industry-median resource estimates used as last-resort fallback when a project has
+# no official MRE and no analogs with data. Values are mid-range for pre-MRE exploration
+# projects. Conviction is set to 5% to make it clear these are placeholders.
+_MATERIAL_MEDIANS: Dict[str, Dict] = {
+    "silver":    {"tonnage_mt": 50.0,   "grade": 120.0, "unit": "g/t"},
+    "gold":      {"tonnage_mt": 15.0,   "grade": 1.5,   "unit": "g/t"},
+    "copper":    {"tonnage_mt": 200.0,  "grade": 0.5,   "unit": "%"},
+    "nickel":    {"tonnage_mt": 30.0,   "grade": 1.0,   "unit": "%"},
+    "uranium":   {"tonnage_mt": 10.0,   "grade": 0.08,  "unit": "%"},
+    "iron":      {"tonnage_mt": 500.0,  "grade": 30.0,  "unit": "%"},
+    "platinum":  {"tonnage_mt": 50.0,   "grade": 3.0,   "unit": "g/t"},
+    "palladium": {"tonnage_mt": 50.0,   "grade": 3.0,   "unit": "g/t"},
+    "lead":      {"tonnage_mt": 20.0,   "grade": 5.0,   "unit": "%"},
+    "zinc":      {"tonnage_mt": 20.0,   "grade": 6.0,   "unit": "%"},
+    "molybdenum":{"tonnage_mt": 100.0,  "grade": 0.05,  "unit": "%"},
+}
+
+
 def _contained_metal(tonnage_kt: float, grade_pct: float, material: str) -> float:
     """
     Calculate contained metal.
@@ -228,7 +246,38 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
             "analogs_used": [],
             "rules_applied": [],
         }
-    # Truly no data at all
+    # No project MRE — use material industry medians at 5% conviction so the report
+    # is not all-zeros. Description makes clear this is a placeholder.
+    norm = _norm_material(material)
+    med = _MATERIAL_MEDIANS.get(norm)
+    if med:
+        med_kt   = med["tonnage_mt"] * 1000  # Mt -> kt
+        med_g    = med["grade"]
+        mi_kt    = med_kt * 0.60
+        inf_kt   = med_kt * 0.40
+        logger.warning(f"[_minimal_model] No data for {label} — using {norm} industry median "
+                       f"({med['tonnage_mt']} Mt @ {med_g} {med['unit']}) at 5% conviction")
+        return {
+            "model": label,
+            "mi_tonnage_kt": round(mi_kt, 2),
+            "mi_grade_pct": round(med_g, 4),
+            "mi_contained_mlb": round(_contained_metal(mi_kt, med_g, material), 3),
+            "inferred_tonnage_kt": round(inf_kt, 2),
+            "inferred_grade_pct": round(med_g * 0.90, 4),
+            "inferred_contained_mlb": round(_contained_metal(inf_kt, med_g * 0.90, material), 3),
+            "total_tonnage_kt": round(med_kt, 2),
+            "total_grade_pct": round(med_g, 4),
+            "total_contained_mlb": round(_contained_metal(med_kt, med_g, material), 3),
+            "description": (
+                "INDICATIVE ONLY — no project MRE and no analogs with resource data. "
+                f"Industry median for {norm} exploration stage used as placeholder. "
+                "Do NOT use these numbers for investment or technical decisions."
+            ),
+            "conviction_pct": 5.0,
+            "analogs_used": [],
+            "rules_applied": [],
+        }
+    # Unknown material — truly no data
     return {
         "model": label,
         "mi_tonnage_kt": 0.0,
@@ -240,7 +289,7 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
         "total_tonnage_kt": 0.0,
         "total_grade_pct": 0.0,
         "total_contained_mlb": 0.0,
-        "description": "Insufficient data — no analogs and no project MRE available.",
+        "description": "Insufficient data — no analogs, no project MRE, and no industry median available.",
         "conviction_pct": 0.0,
         "analogs_used": [],
         "rules_applied": [],
