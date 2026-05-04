@@ -71,8 +71,19 @@ Convert the mining project summary below into a flat JSON object.
 
 Rules:
 1. Use null (never 0 or empty string) when a value is not found or not applicable.
-2. tonnage_mt = measured+indicated total in MILLION tonnes. If source gives kt, divide by 1000.
-3. grade_value = number only (no units). grade_unit = the unit string e.g. "% U3O8", "g/t Au".
+
+CRITICAL — Resource Estimate (highest-priority fields):
+2. tonnage_mt: Total mineral resource in MILLION tonnes (Mt). Search for phrases like:
+   "Indicated resource of X Mt", "total resource of X million tonnes",
+   "Measured+Indicated+Inferred of X Mt", "X,000 kt" (divide kt by 1000).
+   Sum all categories if only individual categories are stated.
+   If source gives kt (thousand tonnes), DIVIDE by 1000 to get Mt.
+   IMPORTANT: Prefer the TOTAL resource over M&I alone if available.
+3. grade_value: Average resource grade as a NUMBER only (no units). grade_unit = the unit
+   string e.g. "% U3O8", "g/t Au", "g/t Ag". Look for phrases like "grading X g/t",
+   "averaging X% Cu", "at a grade of X". Extract the number matching the grade_unit.
+
+Other fields:
 4. npv_usd_millions = after-tax NPV in USD millions. If CAD, multiply by {cad_usd_rate:.4f}.
 5. capex_usd_millions = initial CAPEX in USD millions. If CAD, multiply by {cad_usd_rate:.4f}.
 6. recovery_rate = metallurgical recovery as 0-100 number. null if not stated.
