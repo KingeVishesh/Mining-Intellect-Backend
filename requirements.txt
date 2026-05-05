@@ -21,6 +21,7 @@ pydantic-settings>=2.1.0
 # HTTP
 requests>=2.31.0
 aiohttp>=3.9.0
+httpx>=0.27.0
 
 # Geocoding (for lat/lng from location names)
 geopy>=2.4.0

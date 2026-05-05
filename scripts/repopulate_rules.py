@@ -152,13 +152,14 @@ def main():
         logger.error("SUPABASE_URL not set in environment")
         sys.exit(1)
 
-    # Fetch all rules that still have null conditions_json
-    query = get_client().table("compiled_rules").select("rule_id,source_material,source_lesson")
+    # Fetch all rules, then filter to those still missing conditions_json
+    query = get_client().table("compiled_rules").select("rule_id,source_material,source_lesson,conditions_json")
     if args.material:
         query = query.eq("source_material", args.material)
-    res = query.is_("conditions_json", "null").limit(1000).execute()
-    rules = res.data or []
-    logger.info(f"Found {len(rules)} rules with null conditions_json")
+    res = query.limit(1000).execute()
+    all_rules = res.data or []
+    rules = [r for r in all_rules if not r.get("conditions_json")]
+    logger.info(f"Found {len(rules)}/{len(all_rules)} rules with null conditions_json")
 
     if not rules:
         logger.info("Nothing to do — all rules already populated.")
