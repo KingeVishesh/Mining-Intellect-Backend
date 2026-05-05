@@ -250,13 +250,25 @@ def get_analogs(project_id: str) -> List[Dict]:
 
 # ── Compiled Rules ─────────────────────────────────────────────────────────────
 
+# Maps project material values (capitalised) to compiled_rules.source_material keys (lowercase).
+# Gold and Silver share the same rule set; PGMs cover platinum and palladium.
+_MATERIAL_TO_RULES_KEY: Dict[str, str] = {
+    "gold": "gold_silver", "silver": "gold_silver",
+    "copper": "copper",
+    "nickel": "nickel",
+    "uranium": "uranium",
+    "pgm": "pgm", "platinum": "pgm", "palladium": "pgm",
+}
+
+
 def get_compiled_rules(material: str) -> List[Dict]:
-    """Load compiled rules for a given material."""
+    """Load compiled rules for a given material, normalising the material name to the DB key."""
+    key = _MATERIAL_TO_RULES_KEY.get(material.strip().lower(), material.strip().lower())
     res = (
         get_client()
         .table("compiled_rules")
         .select("*")
-        .eq("source_material", material)
+        .eq("source_material", key)
         .execute()
     )
     return res.data or []

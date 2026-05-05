@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
 
-from nodes import exa_search, field_extractor, supabase_ops
+from nodes import exa_search, field_extractor, rules_engine, supabase_ops
 
 logger = logging.getLogger(__name__)
 
@@ -165,26 +165,31 @@ def _proximity_score(project: dict, analog: dict) -> float:
     Used as fallback when LLM scoring fails (returns default 50).
     Ensures different projects weight the same analog pool differently.
     """
-    score = 35.0  # base: passed commodity + tonnage hard filter
+    score = 45.0  # base: passed commodity + tonnage hard filter (raised from 35)
 
     p_ton = float(project.get("tonnage_mt") or 0)
     a_ton = float(analog.get("tonnage_mt") or 0)
     if p_ton > 0 and a_ton > 0:
         ratio = max(p_ton, a_ton) / min(p_ton, a_ton)
-        # ratio 1→30pts, ratio 2→24pts, ratio 5→12pts, ratio 10→0pts
-        score += max(0.0, 30.0 - (ratio - 1.0) * 3.3)
+        # ratio 1→25pts, ratio 2→20pts, ratio 5→10pts, ratio 10→0pts
+        score += max(0.0, 25.0 - (ratio - 1.0) * 2.8)
 
     p_grade = float(project.get("grade_value") or 0)
     a_grade = float(analog.get("grade_value") or 0)
     if p_grade > 0 and a_grade > 0:
         ratio = max(p_grade, a_grade) / min(p_grade, a_grade)
-        # ratio 1→20pts, ratio 2→15pts, ratio 5→5pts
-        score += max(0.0, 20.0 - (ratio - 1.0) * 2.5)
+        # ratio 1→15pts, ratio 2→10pts, ratio 5→2pts
+        score += max(0.0, 15.0 - (ratio - 1.0) * 2.0)
 
+    # Deposit type is the most predictive factor — upweighted
     if (project.get("deposit_type") or "").lower() == (analog.get("deposit_type") or "").lower() != "":
-        score += 10.0
+        score += 15.0
 
     if (project.get("mining_method") or "").lower() == (analog.get("mining_method") or "").lower() != "":
+        score += 5.0
+
+    # Same country bonus
+    if (project.get("country") or "").lower() == (analog.get("country") or "").lower() != "":
         score += 5.0
 
     return min(100.0, round(score, 1))
@@ -225,7 +230,30 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
         "country": project.get("country"),
     }
 
-    scored = field_extractor.score_analogs(target_summary, all_candidates)
+    # Load commodity-specific analog criteria from compiled rules
+    material = project.get("material", "")
+    all_rules = rules_engine.load_rules(material)
+    commodity_criteria: list = []
+    for r in all_rules:
+        cj = r.get("conditions_json") or {}
+        if isinstance(cj, str):
+            try:
+                import json as _json
+                cj = _json.loads(cj)
+            except Exception:
+                cj = {}
+        commodity_criteria.extend(cj.get("analog_selection_criteria", []))
+    # Deduplicate and cap to keep prompt size manageable
+    seen: set = set()
+    unique_criteria = []
+    for c in commodity_criteria:
+        if c not in seen:
+            seen.add(c)
+            unique_criteria.append(c)
+    commodity_criteria = unique_criteria[:15]
+    logger.info(f"[score] Loaded {len(all_rules)} {material} rules, {len(commodity_criteria)} analog criteria")
+
+    scored = field_extractor.score_analogs(target_summary, all_candidates, commodity_criteria)
 
     # Replace LLM default-50 scores with deterministic proximity scores so different
     # projects weight the same analog pool differently (fixes identical report numbers).
@@ -235,8 +263,8 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
 
     ranked = sorted(scored, key=lambda x: x.get("similarity_score", 0), reverse=True)
 
-    # Keep only well-matched analogs (≥62); fall back to best available if too few pass.
-    MIN_SCORE = 62
+    # Keep only well-matched analogs (≥55); fall back to best available if too few pass.
+    MIN_SCORE = 55
     above = [a for a in ranked if a.get("similarity_score", 0) >= MIN_SCORE]
     top_4 = (above if len(above) >= 2 else ranked)[:4]
 

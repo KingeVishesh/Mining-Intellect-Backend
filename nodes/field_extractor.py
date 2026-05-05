@@ -350,17 +350,30 @@ SOURCE TEXT:
 def score_analogs(
     target_project: dict,
     candidates: list[dict],
+    commodity_criteria: list[str] | None = None,
 ) -> list[dict]:
     """
     LLM scores each candidate analog for relevance to the target project (0-100).
     Returns candidates with similarity_score and similarity_reasons added.
+    commodity_criteria: optional list of domain-specific criteria derived from compiled rules.
     """
     if not candidates:
         return []
 
-    prompt = f"""You are a mining geology expert. Score each candidate project for similarity
-to the TARGET project. Consider: deposit type, material, grade, tonnage, mining method, location.
+    criteria_block = ""
+    if commodity_criteria:
+        criteria_block = "\nCOMMODITY-SPECIFIC ANALOG CRITERIA (from compiled rules):\n" + \
+                         "\n".join(f"- {c}" for c in commodity_criteria) + "\n"
 
+    prompt = f"""You are a mining geology expert. Score each candidate analog for similarity
+to the TARGET project using the rubric below.
+
+SCORING RUBRIC:
+- 85-100: Excellent — same deposit type, grade within 1.5×, tonnage within 2×
+- 65-84:  Good — same deposit type OR grade/tonnage within 5×
+- 45-64:  Acceptable — same commodity, different/unknown deposit type or missing data
+- <45:    Poor — significant geological or scale mismatch, do not use
+{criteria_block}
 TARGET PROJECT:
 {json.dumps(target_project, indent=2)}
 
