@@ -108,16 +108,16 @@ Return ONLY a JSON array of objects, one per rule. No other text.
 
 
 def upsert_rules(generated: list[dict], dry_run: bool) -> int:
-    """Upsert the generated content back to Supabase. Returns count saved."""
+    """Update existing rules with generated content. Returns count saved."""
     if not generated:
         return 0
 
-    rows = []
+    updates = []
     for g in generated:
         rule_id = g.get("rule_id")
         if not rule_id:
             continue
-        rows.append({
+        updates.append({
             "rule_id": rule_id,
             "impact": g.get("impact"),
             "risk": g.get("risk"),
@@ -126,17 +126,22 @@ def upsert_rules(generated: list[dict], dry_run: bool) -> int:
         })
 
     if dry_run:
-        logger.info(f"[dry-run] Would upsert {len(rows)} rows")
-        for r in rows[:2]:
+        logger.info(f"[dry-run] Would update {len(updates)} rows")
+        for r in updates[:2]:
             logger.info(f"  Sample: {json.dumps(r, indent=2)}")
-        return len(rows)
+        return len(updates)
 
-    try:
-        get_client().table("compiled_rules").upsert(rows, on_conflict="rule_id").execute()
-        return len(rows)
-    except Exception as e:
-        logger.error(f"Supabase upsert error: {e}")
-        return 0
+    client = get_client()
+    saved = 0
+    for row in updates:
+        rule_id = row["rule_id"]
+        payload = {k: v for k, v in row.items() if k != "rule_id"}
+        try:
+            client.table("compiled_rules").update(payload).eq("rule_id", rule_id).execute()
+            saved += 1
+        except Exception as e:
+            logger.warning(f"  Update failed for {rule_id}: {e}")
+    return saved
 
 
 def main():
@@ -152,14 +157,16 @@ def main():
         logger.error("SUPABASE_URL not set in environment")
         sys.exit(1)
 
-    # Fetch all rules, then filter to those still missing conditions_json
-    query = get_client().table("compiled_rules").select("rule_id,source_material,source_lesson,conditions_json")
+    # Fetch data_quality rules missing conditions_json (analog/confidence rules use analog_criteria instead)
+    query = get_client().table("compiled_rules") \
+        .select("rule_id,source_material,source_lesson,conditions_json") \
+        .eq("rule_type", "data_quality")
     if args.material:
         query = query.eq("source_material", args.material)
-    res = query.limit(1000).execute()
+    res = query.limit(2000).execute()
     all_rules = res.data or []
     rules = [r for r in all_rules if not r.get("conditions_json")]
-    logger.info(f"Found {len(rules)}/{len(all_rules)} rules with null conditions_json")
+    logger.info(f"Found {len(rules)}/{len(all_rules)} data_quality rules with null conditions_json")
 
     if not rules:
         logger.info("Nothing to do — all rules already populated.")
