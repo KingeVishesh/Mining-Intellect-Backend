@@ -250,27 +250,46 @@ def get_analogs(project_id: str) -> List[Dict]:
 
 # ── Compiled Rules ─────────────────────────────────────────────────────────────
 
-# Maps project material values (capitalised) to compiled_rules.source_material keys (lowercase).
-# Gold and Silver share the same rule set; PGMs cover platinum and palladium.
-_MATERIAL_TO_RULES_KEY: Dict[str, str] = {
-    "gold": "gold_silver", "silver": "gold_silver",
-    "copper": "copper",
-    "nickel": "nickel",
-    "uranium": "uranium",
-    "pgm": "pgm", "platinum": "pgm", "palladium": "pgm",
+# Gold and Silver each load their own rules PLUS the shared gold_silver bucket.
+# This way gold-specific (Carlin, orogenic) and silver-specific (CRD, manto) rules
+# are kept separate, while shared epithermal/porphyry rules apply to both.
+_MATERIAL_TO_RULES_KEYS: Dict[str, List[str]] = {
+    "gold":      ["gold", "gold_silver"],
+    "silver":    ["silver", "gold_silver"],
+    "copper":    ["copper"],
+    "nickel":    ["nickel"],
+    "uranium":   ["uranium"],
+    "pgm":       ["pgm"],
+    "platinum":  ["pgm"],
+    "palladium": ["pgm"],
+    "iron":      ["iron"],
+    "iron ore":  ["iron"],
 }
 
 
-def get_compiled_rules(material: str) -> List[Dict]:
-    """Load compiled rules for a given material, normalising the material name to the DB key."""
-    key = _MATERIAL_TO_RULES_KEY.get(material.strip().lower(), material.strip().lower())
-    res = (
+def get_compiled_rules(material: str, rule_type: Optional[str] = None) -> List[Dict]:
+    """Load compiled rules for a given material, normalising to DB keys.
+
+    Args:
+        material: project material (e.g. 'Gold', 'Copper')
+        rule_type: optional filter — 'analog_selection', 'model_adjustment',
+                   'confidence_adjustment', 'data_quality'
+    """
+    keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
+    query = (
         get_client()
         .table("compiled_rules")
         .select("*")
-        .eq("source_material", key)
-        .execute()
+        .in_("source_material", keys)
     )
+    # Only filter by active if the column exists (added in schema migration)
+    try:
+        query = query.eq("active", True)
+    except Exception:
+        pass
+    if rule_type:
+        query = query.eq("rule_type", rule_type)
+    res = query.execute()
     return res.data or []
 
 

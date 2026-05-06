@@ -192,6 +192,14 @@ def _proximity_score(project: dict, analog: dict) -> float:
     if (project.get("country") or "").lower() == (analog.get("country") or "").lower() != "":
         score += 5.0
 
+    # Same project stage — proxy for drilling density and data confidence
+    if (project.get("project_stage") or "").lower() == (analog.get("project_stage") or "").lower() != "":
+        score += 8.0
+
+    # Same host rock or mineralization style
+    if (project.get("host_rock") or "").lower() == (analog.get("host_rock") or "").lower() != "":
+        score += 5.0
+
     return min(100.0, round(score, 1))
 
 
@@ -217,7 +225,7 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
     if not all_candidates:
         return {"all_candidates": [], "scored_analogs": []}
 
-    # Build compact project summary for scoring
+    # Build compact project summary for scoring (include all fields useful for analog matching)
     target_summary = {
         "name": project.get("name"),
         "material": project.get("material"),
@@ -228,21 +236,39 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
         "project_stage": project.get("project_stage"),
         "mining_method": project.get("mining_method"),
         "country": project.get("country"),
+        "host_rock": project.get("host_rock"),
+        "mineralization_style": project.get("mineralization_style"),
+        "resource_category": project.get("resource_category"),
     }
 
-    # Load commodity-specific analog criteria from compiled rules
+    # Load analog_selection rules only (not data_quality drill-program rules)
     material = project.get("material", "")
-    all_rules = rules_engine.load_rules(material)
+    analog_rules = rules_engine.load_rules(material, rule_type="analog_selection")
     commodity_criteria: list = []
-    for r in all_rules:
-        cj = r.get("conditions_json") or {}
-        if isinstance(cj, str):
-            try:
-                import json as _json
-                cj = _json.loads(cj)
-            except Exception:
-                cj = {}
-        commodity_criteria.extend(cj.get("analog_selection_criteria", []))
+    for r in analog_rules:
+        # First-class analog_criteria column (post-migration)
+        first_class = r.get("analog_criteria") or []
+        if first_class:
+            commodity_criteria.extend(first_class)
+        else:
+            # Legacy: extract from conditions_json blob
+            cj = r.get("conditions_json") or {}
+            if isinstance(cj, str):
+                try:
+                    import json as _json
+                    cj = _json.loads(cj)
+                except Exception:
+                    cj = {}
+            commodity_criteria.extend(cj.get("analog_selection_criteria", []))
+
+    # Add project_stage as a drilling-proxy criterion
+    p_stage = project.get("project_stage")
+    if p_stage:
+        commodity_criteria.append(
+            f"Prefer analogs at {p_stage} stage — same stage implies similar drilling "
+            "density and resource classification confidence level"
+        )
+
     # Deduplicate and cap to keep prompt size manageable
     seen: set = set()
     unique_criteria = []
@@ -250,8 +276,9 @@ def score_analogs_node(state: AnalogState) -> AnalogState:
         if c not in seen:
             seen.add(c)
             unique_criteria.append(c)
-    commodity_criteria = unique_criteria[:15]
-    logger.info(f"[score] Loaded {len(all_rules)} {material} rules, {len(commodity_criteria)} analog criteria")
+    commodity_criteria = unique_criteria[:20]
+    logger.info(f"[score] Loaded {len(analog_rules)} analog_selection rules, "
+                f"{len(commodity_criteria)} criteria for {material}")
 
     scored = field_extractor.score_analogs(target_summary, all_candidates, commodity_criteria)
 

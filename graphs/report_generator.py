@@ -74,11 +74,20 @@ def load_project_and_analogs_node(state: ReportState) -> ReportState:
 
 
 def load_rules_node(state: ReportState) -> ReportState:
-    """Load compiled rules for the project's material."""
+    """Load model_adjustment and confidence_adjustment rules for the project's material.
+
+    data_quality rules (drill-program checks) are excluded here — they require raw
+    drill metrics not available in the projects table. analog_selection rules are
+    handled in analog_finder, not here.
+    """
     if state.get("error"):
         return {}
     material = state["project"].get("material", "")
-    all_rules = rules_engine.load_rules(material)
+    model_rules = rules_engine.load_rules(material, rule_type="model_adjustment")
+    conf_rules = rules_engine.load_rules(material, rule_type="confidence_adjustment")
+    all_rules = model_rules + conf_rules
+    logger.info(f"[load_rules] {len(model_rules)} model_adjustment + "
+                f"{len(conf_rules)} confidence_adjustment rules for {material}")
     return {"all_rules": all_rules}
 
 
