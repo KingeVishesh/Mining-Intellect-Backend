@@ -14,8 +14,46 @@ import math
 from typing import Dict, List, Optional
 
 from nodes.llm_factory import get_llm
+from nodes.rules_engine import get_analog_rule, get_stage_modifier_map
 
 logger = logging.getLogger(__name__)
+
+
+def _analog_weight(analog: Dict, stage_map: Dict[str, float], drilling_stage: str) -> float:
+    """
+    Compute a relative weight for one analog — higher is more influential.
+
+    Components:
+      base          = similarity_score (0–100) or 30.0 when null/N/A
+      source_bonus  = +8 for 'library' source (human-validated, previously approved)
+      stage_bonus   = confidence_modifier for analog.project_stage from confidence_adjustment rules
+      drilling_pen  = −10 for 'dense' deposit types when analog has only Inferred resource
+
+    weight = max(1.0, adjusted) ** 2  ← squaring amplifies differences non-linearly
+    Example: adjusted 108 vs 35 → weights 11664 vs 1225 (9.5× difference, not 3.1×)
+    """
+    raw_score = analog.get("similarity_score")
+    base = float(raw_score) if raw_score is not None else 30.0
+
+    source_bonus = 8.0 if analog.get("source") == "library" else 0.0
+
+    analog_stage = (analog.get("project_stage") or "").lower().strip()
+    stage_bonus = 0.0
+    if analog_stage:
+        for stage_key, modifier in stage_map.items():
+            if stage_key and (stage_key in analog_stage or analog_stage in stage_key):
+                stage_bonus = modifier
+                break
+
+    resource_cat = (analog.get("resource_category") or "").lower()
+    drilling_pen = 0.0
+    if (drilling_stage == "dense"
+            and "inferred" in resource_cat
+            and "indicated" not in resource_cat):
+        drilling_pen = -10.0
+
+    adjusted = base + source_bonus + stage_bonus + drilling_pen
+    return max(1.0, adjusted) ** 2
 
 
 def _weighted_average(values: List[float], weights: List[float]) -> float:
@@ -93,8 +131,14 @@ def build_model_1(
         logger.warning("[Model1] No valid analogs with tonnage+grade — using minimal defaults")
         return _minimal_model(project, material, "Model 1 (Independent)")
 
-    # Use similarity score as weight (default 50 if missing)
-    weights = [float(a.get("similarity_score", 50)) for a in valid]
+    # Load rule-based weighting context
+    deposit_type = project.get("deposit_type")
+    analog_rule = get_analog_rule(material, deposit_type)
+    drilling_stage = (analog_rule or {}).get("drilling_stage", "moderate")
+    stage_map = get_stage_modifier_map(material)
+
+    # Rule-driven squared weights: base score + source bonus + analog stage bonus + drilling penalty
+    weights = [_analog_weight(a, stage_map, drilling_stage) for a in valid]
     tonnages_kt = [float(a["tonnage_mt"]) * 1000 for a in valid]  # convert Mt -> kt
     grades = [float(a["grade_value"]) for a in valid]
 
@@ -114,9 +158,12 @@ def build_model_1(
     inferred_kt = base_inferred_kt * t_mult
     grade = base_grade * g_mult
 
-    # Conviction: based on analog count, similarity scores, and rule confidence
-    avg_similarity = _weighted_average(weights, [1.0] * len(weights))
-    analog_confidence = min(100.0, (len(valid) / 5) * 40 + avg_similarity * 0.4)
+    # Conviction: use raw 0-100 similarity scores (not squared weights) so the scale is meaningful
+    raw_scores = [float(a["similarity_score"]) for a in valid if a.get("similarity_score") is not None]
+    avg_raw = sum(raw_scores) / len(raw_scores) if raw_scores else 50.0
+    n_high = sum(1 for s in raw_scores if s >= 70)
+    pool_quality = min(1.0, min(len(valid), 5) / 5 * 0.6 + n_high / max(1, len(valid)) * 0.4)
+    analog_confidence = min(100.0, pool_quality * 60 + avg_raw * 0.4)
     conviction = max(0.0, min(100.0, analog_confidence + conf_delta))
 
     return {

@@ -101,6 +101,23 @@ def get_analog_rule(material: str, deposit_type: Optional[str] = None) -> Option
     return rules[0]
 
 
+def get_stage_modifier_map(material: str) -> Dict[str, float]:
+    """Return {stage_str: confidence_modifier} from confidence_adjustment rules.
+
+    Used by model_builder to weight analogs by their own project stage — a
+    'production' analog (modifier=+15) gets more weight than an 'early exploration'
+    analog (modifier=−25) with the same raw similarity score.
+    """
+    rules = get_compiled_rules(material, rule_type="confidence_adjustment")
+    result: Dict[str, float] = {}
+    for r in rules:
+        stage = (r.get("project_stage_filter") or "").strip().lower()
+        modifier = r.get("confidence_modifier")
+        if stage and modifier is not None:
+            result[stage] = float(modifier)
+    return result
+
+
 def apply_rule_multipliers(
     base_tonnage: float,
     base_grade: float,

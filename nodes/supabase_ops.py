@@ -83,7 +83,8 @@ def get_approved_analogs(
         .table("report_analogs")
         .select(
             "analog_name,analog_material,analog_deposit_type,analog_country,"
-            "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,similarity_score"
+            "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
+            "similarity_score,analog_project_stage"
         )
         .in_("analog_material", keys)
         .eq("status", "approved")
@@ -115,6 +116,7 @@ def get_approved_analogs(
             "grade_value": r.get("analog_grade_value"),
             "grade_unit": r.get("analog_grade_unit"),
             "source_url": r.get("source_url"),
+            "project_stage": r.get("analog_project_stage"),
             "source": "library",
         })
     return candidates
@@ -478,6 +480,7 @@ def save_report_analogs(
             "analog_tonnage_mt": a.get("tonnage_mt"),
             "analog_grade_value": a.get("grade_value"),
             "analog_grade_unit": a.get("grade_unit"),
+            "analog_project_stage": a.get("project_stage"),
             "similarity_score": a.get("similarity_score"),
             "source": a.get("source"),
             "source_url": a.get("source_url"),
@@ -496,6 +499,7 @@ def save_report_analogs(
             "analog_tonnage_mt": a.get("tonnage_mt"),
             "analog_grade_value": a.get("grade_value"),
             "analog_grade_unit": a.get("grade_unit"),
+            "analog_project_stage": a.get("project_stage"),
             "similarity_score": a.get("similarity_score"),
             "source": a.get("source"),
             "source_url": a.get("source_url"),
