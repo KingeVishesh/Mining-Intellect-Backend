@@ -1,0 +1,50 @@
+{% set acq = report.acquisition_analysis or {} %}
+{% set tiers = [
+  ('Junior / Emerging Producer', acq.junior),
+  ('Mid-Tier Producer', acq.mid_tier),
+  ('Major Producer (Top-Tier)', acq.major),
+] %}
+
+<section class="section" data-section="ACQUISITION ANALYSIS">
+  <div class="section-header">
+    <div class="num">17</div>
+    <div class="title">17. Strategic Acquisition Analysis</div>
+  </div>
+
+  {% for tier_name, tier_data in tiers %}
+    {% if tier_data %}
+      {% set verdict = tier_data.verdict or '' %}
+      {% set v_class = {'Well-suited':'green','Potentially suitable':'amber','Not suitable':'red'}.get(verdict, 'navy') %}
+      <div class="tier">
+        <div class="tier-head">
+          <div class="name">{{ tier_name }}</div>
+          <div class="verdict {{ v_class }}">{{ verdict }}</div>
+        </div>
+        {% if tier_data.score_summary %}
+          <div class="tier-summary">{{ tier_data.score_summary }}</div>
+        {% endif %}
+        {% set tier_items = tier_data['items'] %}
+        {% if tier_items %}
+          <table class="data">
+            <thead><tr>
+              <th style="width:34%;">Criterion</th>
+              <th style="width:14%;">Status</th>
+              <th style="width:52%;">Comment</th>
+            </tr></thead>
+            <tbody>
+              {% for item in tier_items %}
+                {% set status = (item.status or 'amber') | lower %}
+                {% set status_pill = {'green':'green','amber':'amber','red':'red'}.get(status, 'navy') %}
+                <tr class="alt">
+                  <td>{{ item.criterion or '' }}</td>
+                  <td class="center"><span class="pill {{ status_pill }}">{{ status | upper }}</span></td>
+                  <td>{{ item.comment or '' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% endfor %}
+</section>

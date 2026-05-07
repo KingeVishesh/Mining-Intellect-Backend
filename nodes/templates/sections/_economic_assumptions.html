@@ -1,0 +1,31 @@
+{% set econ = report.economic_assumptions or {} %}
+{% set prices = econ.metal_prices or {} %}
+{% set rec = econ.recoveries or {} %}
+
+<section class="section" data-section="ECONOMIC ASSUMPTIONS">
+  <div class="section-header">
+    <div class="num">11</div>
+    <div class="title">11. Economic Assumptions</div>
+  </div>
+
+  {% for label, val in [
+    ('CuEq Formula', econ.cueq_formula),
+    ('Cut-off Grade', econ.cutoff_grade),
+    ('Block Model Size', econ.block_model_size),
+    ('Cost per Tonne', econ.cost_per_tonne),
+  ] %}
+    {% if val %}<div class="kv"><div class="k">{{ label }}:</div><div class="v">{{ val }}</div></div>{% endif %}
+  {% endfor %}
+
+  {% if prices.primary_metal %}
+    <div class="kv"><div class="k">Primary Metal:</div><div class="v">{{ prices.primary_metal }} @ {{ prices.primary_price or 'N/A' }}</div></div>
+  {% endif %}
+
+  {% if rec %}
+    <div class="kv"><div class="k">Primary Recovery:</div><div class="v">{{ rec.primary_pct or 'N/A' }}%  —  {{ rec.notes or '' }}</div></div>
+  {% endif %}
+
+  <p class="small italic text-gray mt-3">
+    Metal prices, recoveries, and cut-off grades are assumptions used for MI internal modeling only. These do not constitute a formal economic assessment.
+  </p>
+</section>

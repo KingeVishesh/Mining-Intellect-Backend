@@ -1,0 +1,24 @@
+<section class="section" data-section="DISCLAIMER">
+  <div class="section-header no-num">
+    <div class="title">Disclaimer &amp; Important Notices</div>
+  </div>
+
+  {% set notices = [
+    ('Not Regulatory Compliant',
+     'This report was not prepared or reviewed by a Qualified Person (QP) as defined under NI 43-101 or JORC. It does not constitute a formal mineral resource estimate compliant with any regulatory standard.'),
+    ('Not Investment Advice',
+     'This report is for informational and planning purposes only. It does not constitute investment advice and should not be relied upon for investment decisions.'),
+    ('Preliminary Estimates',
+     'All resource estimates are preliminary and internal to Mining Intellect. Estimates are subject to change with the receipt of new data, revised interpretations, or updated metal prices.'),
+    ('Analog-Based Methodology',
+     'The modeling methodology uses comparable projects (analogs) and statistical methods to estimate potential resources. This approach has inherent limitations for early-stage projects.'),
+    ('Independent Verification Required',
+     'For any regulatory, financing, or public reporting purposes, an independent Qualified Person review is required. Mining Intellect estimates should be treated as supplementary information only.'),
+  ] %}
+  {% for title, body in notices %}
+    <div class="notice">
+      <div class="notice-title">{{ title }}</div>
+      <div class="notice-body">{{ body }}</div>
+    </div>
+  {% endfor %}
+</section>

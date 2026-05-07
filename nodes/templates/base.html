@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ project_name }} — Resource Modeling Report</title>
+</head>
+<body>
+  {# Strings consumed by @page running headers — invisible content #}
+  <span class="string-project" style="display:none;">{{ project_name }}</span>
+  <span class="string-date" style="display:none;">{{ report.metadata.generated_at[:10] if report.metadata and report.metadata.generated_at else '' }}</span>
+
+  {% block content %}{% endblock %}
+</body>
+</html>

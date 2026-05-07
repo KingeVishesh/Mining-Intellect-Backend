@@ -1,0 +1,280 @@
+/* ─── Components: tables, metric boxes, sidebars, badges, callouts ───────── */
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1mm 0 3mm 0;
+  font-size: 8pt;
+  table-layout: fixed;
+}
+table.data th {
+  background: var(--navy);
+  color: var(--white);
+  font-weight: bold;
+  padding: 1.8mm 1.5mm;
+  text-align: center;
+  border: 0.2pt solid var(--navy);
+  font-size: 7.5pt;
+}
+table.data td {
+  padding: 1.5mm;
+  border: 0.2pt solid #CCC;
+  vertical-align: top;
+  word-wrap: break-word;
+}
+table.data tbody tr.alt td { background: var(--alt-row); }
+table.data tbody tr.highlight td {
+  background: var(--gold-tint);
+  font-weight: bold;
+}
+table.data td.num { text-align: right; }
+table.data td.center { text-align: center; }
+
+/* Risk / status pill cells (used inside table cells) */
+.pill {
+  display: inline-block;
+  padding: 0.4mm 2mm;
+  border-radius: 2mm;
+  font-weight: bold;
+  font-size: 7pt;
+  text-align: center;
+  min-width: 14mm;
+}
+.pill.green  { background: var(--green-bg); color: var(--green); }
+.pill.amber  { background: var(--amber-bg); color: var(--amber); }
+.pill.red    { background: var(--red-bg);   color: var(--red); }
+.pill.navy   { background: var(--light-bg); color: var(--navy); }
+
+/* Risk row backgrounds (entire row tinted) */
+table.risk tbody tr.high td   { background: var(--red-bg); }
+table.risk tbody tr.medium td { background: var(--amber-bg); }
+table.risk tbody tr.low td    { background: var(--green-bg); }
+
+/* ── Sidebar (right column) ──────────────────────────────────────────────── */
+.layout-sidebar {
+  display: grid;
+  grid-template-columns: 1fr 55mm;
+  gap: 5mm;
+  margin-bottom: 3mm;
+}
+.sidebar { display: flex; flex-direction: column; gap: 1mm; }
+.sidebar .metric {
+  border: 0.5pt solid var(--gold);
+  background: var(--light-bg);
+  padding: 1.5mm 1mm;
+  text-align: center;
+  break-inside: avoid;
+}
+.sidebar .metric .label {
+  font-size: 6pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--gray-text);
+  letter-spacing: 0.3pt;
+}
+.sidebar .metric .value {
+  font-size: 13pt;
+  font-weight: bold;
+  color: var(--navy);
+  line-height: 1.1;
+  margin-top: 1mm;
+}
+.sidebar .metric .unit {
+  font-size: 7pt;
+  color: var(--gray-text);
+  margin-top: 0.5mm;
+}
+.sidebar .metric .sub {
+  font-size: 6pt;
+  font-style: italic;
+  color: var(--gray-text);
+  margin-top: 0.5mm;
+}
+
+/* Primary (hero) sidebar metric — navy background, bigger */
+.sidebar .metric.primary {
+  background: var(--navy);
+  color: var(--white);
+  padding: 2.5mm 1mm;
+}
+.sidebar .metric.primary .label  { color: #B4C8E6; }
+.sidebar .metric.primary .value  { color: var(--white); font-size: 18pt; }
+.sidebar .metric.primary .unit   { color: var(--gold); }
+.sidebar .metric.primary .sub    { color: #B4C8E6; }
+
+/* ── Inline metric grid (4-up boxes) ──────────────────────────────────────── */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3mm;
+  margin: 2mm 0 3mm 0;
+}
+.metric-grid .metric {
+  border: 0.6pt solid var(--gold);
+  background: var(--light-bg);
+  padding: 2mm 1mm;
+  text-align: center;
+}
+.metric-grid .metric .value {
+  font-size: 12pt;
+  font-weight: bold;
+  color: var(--navy);
+}
+.metric-grid .metric .unit  { font-size: 7pt; color: var(--gray-text); }
+.metric-grid .metric .label { font-size: 7pt; color: var(--gray-text); margin-top: 1mm; }
+
+/* ── Key/value rows ──────────────────────────────────────────────────────── */
+.kv {
+  display: flex;
+  gap: 2mm;
+  margin: 0.5mm 0;
+  font-size: 9pt;
+}
+.kv .k {
+  font-weight: bold;
+  color: var(--navy);
+  flex: 0 0 44mm;
+}
+.kv .v { flex: 1; color: var(--dark-text); }
+
+/* ── Bullets ─────────────────────────────────────────────────────────────── */
+ul.bullets { list-style: none; padding: 0; margin: 1mm 0 2mm 0; }
+ul.bullets li {
+  position: relative;
+  padding-left: 5mm;
+  margin-bottom: 1mm;
+  font-size: 9pt;
+}
+ul.bullets li::before {
+  content: "•";
+  position: absolute;
+  left: 1mm;
+  color: var(--navy);
+  font-weight: bold;
+}
+
+ul.strengths li::before { content: "+"; color: var(--green); font-weight: bold; }
+ul.uncertainties li::before { content: "!"; color: var(--amber); font-weight: bold; }
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 1mm 3mm;
+  font-weight: bold;
+  font-size: 8pt;
+  border-radius: 1mm;
+}
+.badge.green { background: var(--green-bg); color: var(--green); }
+.badge.amber { background: var(--amber-bg); color: var(--amber); }
+.badge.red   { background: var(--red-bg);   color: var(--red); }
+.badge.navy  { background: var(--light-bg); color: var(--navy); }
+
+/* ── Callout boxes ───────────────────────────────────────────────────────── */
+.callout {
+  border: 0.8pt solid var(--gold);
+  background: var(--light-bg);
+  padding: 2.5mm 3mm;
+  margin: 2mm 0 3mm 0;
+  break-inside: avoid;
+}
+.callout.warn {
+  border-color: var(--amber);
+  background: #FFF8DC;
+  color: #645000;
+}
+.callout-title {
+  font-weight: bold;
+  color: var(--amber);
+  font-size: 7pt;
+  text-transform: uppercase;
+  margin-bottom: 1mm;
+}
+.callout-body { font-size: 7pt; }
+.callout-body.large { font-size: 9pt; color: var(--navy); font-weight: bold; }
+
+/* ── Recommendation row ──────────────────────────────────────────────────── */
+.recommendation {
+  margin-bottom: 3mm;
+  break-inside: avoid;
+}
+.recommendation .rec-head {
+  display: flex;
+  align-items: stretch;
+  font-weight: bold;
+  font-size: 9pt;
+}
+.recommendation .rec-head .prio {
+  flex: 0 0 22mm;
+  text-align: center;
+  padding: 1.5mm 1mm;
+}
+.recommendation .rec-head .text {
+  flex: 1;
+  background: var(--light-bg);
+  padding: 1.5mm 2mm;
+}
+.recommendation .rec-head.high  .prio { background: var(--red-bg);   color: var(--red); }
+.recommendation .rec-head.medium .prio { background: var(--amber-bg); color: var(--amber); }
+.recommendation .rec-head.low   .prio { background: var(--green-bg); color: var(--green); }
+.recommendation .rationale {
+  font-size: 8pt;
+  color: var(--gray-text);
+  margin: 1mm 0 0 6mm;
+}
+.recommendation .meta {
+  font-size: 8pt;
+  font-style: italic;
+  color: var(--gray-text);
+  margin: 0.5mm 0 0 6mm;
+}
+
+/* ── Acquisition tier ────────────────────────────────────────────────────── */
+.tier { margin-bottom: 4mm; break-inside: avoid; }
+.tier-head {
+  display: grid;
+  grid-template-columns: 100mm 1fr;
+  gap: 0;
+}
+.tier-head .name {
+  background: var(--light-bg);
+  color: var(--navy);
+  font-weight: bold;
+  padding: 1.5mm 2mm;
+  font-size: 9pt;
+}
+.tier-head .verdict {
+  padding: 1.5mm 2mm;
+  font-weight: bold;
+  font-size: 9pt;
+}
+.tier-head .verdict.green { background: var(--green-bg); color: var(--green); }
+.tier-head .verdict.amber { background: var(--amber-bg); color: var(--amber); }
+.tier-head .verdict.red   { background: var(--red-bg);   color: var(--red); }
+.tier-head .verdict.navy  { background: var(--light-bg); color: var(--navy); }
+.tier-summary {
+  font-size: 8pt;
+  font-style: italic;
+  color: var(--gray-text);
+  padding: 1mm 0 2mm 6mm;
+}
+
+/* ── Glossary rows ───────────────────────────────────────────────────────── */
+.glossary-row {
+  display: grid;
+  grid-template-columns: 55mm 1fr;
+  padding: 1.5mm 2mm;
+  font-size: 9pt;
+}
+.glossary-row.alt { background: var(--alt-row); }
+.glossary-row .term { font-weight: bold; color: var(--navy); }
+
+/* ── Disclaimer notice ───────────────────────────────────────────────────── */
+.notice { margin-bottom: 3mm; break-inside: avoid; }
+.notice .notice-title {
+  font-weight: bold;
+  color: var(--navy);
+  font-size: 9pt;
+  margin-bottom: 1mm;
+}
+.notice .notice-body { font-size: 9pt; }

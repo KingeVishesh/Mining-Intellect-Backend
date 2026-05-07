@@ -1,0 +1,82 @@
+{% set sens = report.sensitivity_analysis or {} %}
+
+<section class="section" data-section="SENSITIVITY ANALYSIS">
+  <div class="section-header">
+    <div class="num">12</div>
+    <div class="title">12. Sensitivity Analysis</div>
+  </div>
+
+  {% if sens.cutoff_table %}
+    <div class="subsection">Cut-Off Grade Sensitivity</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:21%;">Cut-Off</th>
+        <th style="width:28%;">Tonnage (kt)</th>
+        <th style="width:21%;">Grade</th>
+        <th style="width:30%;">Contained Metal</th>
+      </tr></thead>
+      <tbody>
+        {% for row in sens.cutoff_table %}
+          {% set is_base = row.cut_off_label == 'Base' %}
+          <tr class="{% if is_base %}highlight{% elif loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td class="center">{{ row.cut_off_label or '' }}</td>
+            <td class="num">{{ row.tonnage_kt | num }}</td>
+            <td class="num">{{ '%.3f' | format(row.grade | float) }} {{ row.grade_unit or '' }}</td>
+            <td class="num">{{ '%.2f' | format(row.contained_metal | float) }} {{ row.metal_unit or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if sens.price_table %}
+    <div class="subsection">Metal Price Sensitivity</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:28%;">Price Change</th>
+        <th style="width:36%;">Tonnage (kt)</th>
+        <th style="width:36%;">Contained Metal</th>
+      </tr></thead>
+      <tbody>
+        {% for row in sens.price_table %}
+          {% set is_base = row.price_label == 'Base' %}
+          {% set delta = row.price_delta_pct or 0 %}
+          {% set rowcls = 'highlight' if is_base else ('green' if delta > 0 else ('red' if delta < 0 else ('alt' if loop.index0 % 2 == 0 else ''))) %}
+          <tr class="{{ rowcls }}">
+            <td class="center">{{ row.price_label or '' }}</td>
+            <td class="num">{{ row.tonnage_kt | num }}</td>
+            <td class="num">{{ '%.2f' | format(row.contained_metal | float) }} {{ row.metal_unit or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if sens.scenario_table %}
+    <div class="subsection">Combined Scenarios</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:18%;">Scenario</th>
+        <th style="width:13%;">Cut-Off</th>
+        <th style="width:15%;">Metal Price</th>
+        <th style="width:13%;">Recovery</th>
+        <th style="width:18%;">Tonnage (kt)</th>
+        <th style="width:23%;">Contained Metal</th>
+      </tr></thead>
+      <tbody>
+        {% for row in sens.scenario_table %}
+          {% set scen = row.scenario or '' %}
+          {% set rowcls = 'green' if scen == 'Best Case' else ('highlight' if scen == 'Base Case' else ('red' if scen == 'Worst Case' else '')) %}
+          <tr class="{{ rowcls }}">
+            <td>{{ scen }}</td>
+            <td class="center">{{ row.cut_off or '' }}</td>
+            <td class="center">{{ row.metal_price or '' }}</td>
+            <td class="center">{{ row.recovery or '' }}</td>
+            <td class="num">{{ row.tonnage_kt | num }}</td>
+            <td class="num">{{ '%.2f' | format(row.contained_metal | float) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>

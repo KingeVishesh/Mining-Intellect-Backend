@@ -1,0 +1,15 @@
+{% set terms = report.key_terms or [] %}
+
+<section class="section" data-section="KEY TERMS">
+  <div class="section-header">
+    <div class="num">19</div>
+    <div class="title">19. Key Terms Glossary</div>
+  </div>
+
+  {% for item in terms %}
+    <div class="glossary-row {% if loop.index0 % 2 == 0 %}alt{% endif %}">
+      <div class="term">{{ item.term or '' }}</div>
+      <div>{{ item.definition or '' }}</div>
+    </div>
+  {% endfor %}
+</section>

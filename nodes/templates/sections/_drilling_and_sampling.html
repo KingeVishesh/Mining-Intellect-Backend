@@ -1,0 +1,32 @@
+{% set ds = report.drilling_and_sampling or {} %}
+
+<section class="section" data-section="DRILLING &amp; SAMPLING">
+  <div class="section-header">
+    <div class="num">06</div>
+    <div class="title">6. Drilling &amp; Sampling Data</div>
+  </div>
+
+  {% if ds.total_holes_estimated %}
+    <div class="kv"><div class="k">Estimated Drilling:</div><div class="v">{{ ds.total_holes_estimated }}</div></div>
+  {% endif %}
+
+  {% if ds.drillhole_strategy %}
+    <p class="mt-2">{{ ds.drillhole_strategy }}</p>
+  {% endif %}
+
+  {% for label, key in [
+    ('Assay QA/QC Protocol', 'assay_qa_qc'),
+    ('XRF & Geochemical Notes', 'xrf_geochemical_notes'),
+    ('Cost Efficiency', 'cost_efficiency_notes'),
+  ] %}
+    {% if ds[key] %}
+      <div class="subsection">{{ label }}</div>
+      <p>{{ ds[key] }}</p>
+    {% endif %}
+  {% endfor %}
+
+  {% if ds.data_quality_assessment %}
+    <div class="subsection">Data Quality Assessment</div>
+    <p class="italic text-gray">{{ ds.data_quality_assessment }}</p>
+  {% endif %}
+</section>

@@ -1,0 +1,33 @@
+/* ─── Print-specific page-break behavior ─────────────────────────────────── */
+
+/* Tables don't split mid-row across pages */
+table.data { page-break-inside: auto; }
+table.data thead { display: table-header-group; }
+table.data tr { page-break-inside: avoid; break-inside: avoid; }
+
+/* Headings stay with their content */
+.section-header { break-after: avoid; page-break-after: avoid; }
+.subsection     { break-after: avoid; page-break-after: avoid; }
+
+/* Atomic blocks */
+.metric, .callout, .recommendation, .notice, .tier, .sidebar .metric {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Cover page */
+.cover {
+  page-break-after: always;
+  break-after: page;
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  background: var(--white);
+  overflow: hidden;
+}
+
+/* No widows/orphans on body paragraphs */
+p { orphans: 3; widows: 3; }
+
+/* When sidebar layout is on, the right column should not trigger page break */
+.layout-sidebar { break-inside: auto; }

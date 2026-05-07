@@ -1,0 +1,117 @@
+{% set res = report.resource_estimates or {} %}
+{% set comp = res.comparison_table or [] %}
+{% set ind  = res.independent_analysis or {} %}
+{% set upd  = res.updated_analysis or {} %}
+{% set material = (report.metadata or {}).material or '' %}
+{% set best = none %}
+{% for r in comp %}{% if 'Model 1' in (r.model or '') and not best %}{% set best = r %}{% endif %}{% endfor %}
+{% if not best and comp %}{% set best = comp[0] %}{% endif %}
+
+<section class="section" data-section="RESOURCE MODELS">
+  <div class="section-header">
+    <div class="num">05</div>
+    <div class="title">5. Resource Models</div>
+  </div>
+
+  <div class="layout-sidebar">
+    <div>
+      {% if comp %}
+        <div class="subsection">Model Comparison — Tonnage &amp; Grade</div>
+        <table class="data">
+          <thead><tr>
+            <th style="width:32%;">Model</th>
+            <th style="width:17%;">M&amp;I Ton (kt)</th>
+            <th style="width:17%;">M&amp;I Grade</th>
+            <th style="width:17%;">Total (kt)</th>
+            <th style="width:17%;">Total Grade</th>
+          </tr></thead>
+          <tbody>
+            {% for row in comp %}
+              {% set is_official = 'Official' in (row.model or '') %}
+              <tr class="{% if is_official %}highlight{% elif loop.index0 % 2 == 0 %}alt{% endif %}">
+                <td>{{ row.model or '' }}</td>
+                <td class="num">{{ row.mi_tonnage_kt | num }}</td>
+                <td class="num">{{ row.mi_grade_pct | grade(material) }}</td>
+                <td class="num">{{ row.total_tonnage_kt | num }}</td>
+                <td class="num">{{ row.total_grade_pct | grade(material) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <p class="small italic text-gray mt-2">Contained metal (Mlb base metals / Moz precious) and model conviction:</p>
+        <table class="data">
+          <thead><tr>
+            <th style="width:30%;">Model</th>
+            <th style="width:18%;">Contained Metal</th>
+            <th style="width:12%;">Unit</th>
+            <th style="width:14%;">Conviction %</th>
+            <th style="width:26%;">Description</th>
+          </tr></thead>
+          <tbody>
+            {% for row in comp %}
+              {% set is_m1 = 'Model 1' in (row.model or '') %}
+              {% set is_m2 = 'Model 2' in (row.model or '') %}
+              {% set conv = ind.confidence_pct if is_m1 else (upd.confidence_pct if is_m2 else 0) %}
+              <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+                <td>{{ row.model or '' }}</td>
+                <td class="num">{{ row.total_contained_mlb | num('{:,.2f}') }}</td>
+                <td class="center">Mlb / Moz</td>
+                <td class="center">{% if conv %}{{ '%.0f' | format(conv) }}%{% else %}N/A{% endif %}</td>
+                <td>{{ (row.description or '')[:45] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      {% if res.compliance_summary %}
+        <ul class="bullets mt-3">
+          {% for line in res.compliance_summary %}
+            <li class="small italic text-gray">{{ line }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+
+    {% if best %}
+      {% set mi_mt     = (best.mi_tonnage_kt or 0) | float / 1000 %}
+      {% set mi_grade  = best.mi_grade_pct or 0 %}
+      {% set inf_mt    = (best.inferred_tonnage_kt or 0) | float / 1000 %}
+      {% set total_mt  = (best.total_tonnage_kt or 0) | float / 1000 %}
+      {% set contained = best.total_contained_mlb or 0 %}
+      {% set conv_pct  = ind.confidence_pct or 0 %}
+      <div class="sidebar">
+        <div class="metric primary">
+          <div class="label">M&amp;I TONNAGE</div>
+          <div class="value">{{ '%.1f' | format(mi_mt) }}</div>
+          <div class="unit">Mt</div>
+        </div>
+        <div class="metric">
+          <div class="label">M&amp;I GRADE</div>
+          <div class="value">{{ mi_grade | grade(material) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">INFERRED</div>
+          <div class="value">{{ '%.1f' | format(inf_mt) }}</div>
+          <div class="unit">Mt</div>
+        </div>
+        <div class="metric">
+          <div class="label">TOTAL RESOURCE</div>
+          <div class="value">{{ '%.1f' | format(total_mt) }}</div>
+          <div class="unit">Mt</div>
+        </div>
+        <div class="metric">
+          <div class="label">CONTAINED METAL</div>
+          <div class="value">{{ contained | num('{:,.1f}') }}</div>
+          <div class="unit">Mlb / Moz</div>
+        </div>
+        <div class="metric">
+          <div class="label">CONVICTION</div>
+          <div class="value">{{ '%.0f' | format(conv_pct) }}</div>
+          <div class="unit">%</div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>

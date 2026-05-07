@@ -1,0 +1,26 @@
+{% set recs = report.actionable_recommendations or [] %}
+
+<section class="section" data-section="RECOMMENDATIONS">
+  <div class="section-header">
+    <div class="num">15</div>
+    <div class="title">15. Actionable Recommendations</div>
+  </div>
+
+  {% for rec in recs %}
+    {% if rec is mapping %}
+      {% set prio = rec.priority or 'Medium' %}
+      {% set prio_class = {'High':'high','Medium':'medium','Low':'low'}.get(prio, 'medium') %}
+      <div class="recommendation">
+        <div class="rec-head {{ prio_class }}">
+          <div class="prio">[{{ prio }}]</div>
+          <div class="text">{{ rec.recommendation or '' }}</div>
+        </div>
+        {% if rec.rationale %}<div class="rationale">{{ rec.rationale }}</div>{% endif %}
+        {% set details = [] %}
+        {% if rec.estimated_cost %}{% set _ = details.append('Cost: ' ~ rec.estimated_cost) %}{% endif %}
+        {% if rec.timeline %}{% set _ = details.append('Timeline: ' ~ rec.timeline) %}{% endif %}
+        {% if details %}<div class="meta">{{ details | join('  |  ') }}</div>{% endif %}
+      </div>
+    {% endif %}
+  {% endfor %}
+</section>

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# 1. Cover (always) #}
+{% include "sections/_cover.html" %}
+
+{# 2. Executive summary (always) #}
+{% include "sections/_executive_summary.html" %}
+
+{# 3. Project overview (always) #}
+{% include "sections/_project_overview.html" %}
+
+{# 4. Geological framework (optional) #}
+{% if report.geological_framework %}
+  {% include "sections/_geological_framework.html" %}
+{% endif %}
+
+{# 5. Analog comparison (optional) #}
+{% if report.analogs_comparison %}
+  {% include "sections/_analogs_comparison.html" %}
+{% endif %}
+
+{# 6. Resource models (always) #}
+{% include "sections/_resource_models.html" %}
+
+{# 7. Drilling & sampling (optional) #}
+{% if report.drilling_and_sampling %}
+  {% include "sections/_drilling_and_sampling.html" %}
+{% endif %}
+
+{# 8. Drilling efficiency (optional) #}
+{% if report.drilling_efficiency_metrics %}
+  {% include "sections/_drilling_efficiency.html" %}
+{% endif %}
+
+{# 9. Geophysical integration (optional) #}
+{% if report.geophysical_integration %}
+  {% include "sections/_geophysical_integration.html" %}
+{% endif %}
+
+{# 10. Geostatistical modeling (optional) #}
+{% if report.geostatistical_modeling %}
+  {% include "sections/_geostatistical_modeling.html" %}
+{% endif %}
+
+{# 11. Validation & QC (optional) #}
+{% if report.validation_and_qc %}
+  {% include "sections/_validation_and_qc.html" %}
+{% endif %}
+
+{# 12. Economic assumptions (optional) #}
+{% if report.economic_assumptions %}
+  {% include "sections/_economic_assumptions.html" %}
+{% endif %}
+
+{# 13. Sensitivity analysis (optional) #}
+{% if report.sensitivity_analysis %}
+  {% include "sections/_sensitivity.html" %}
+{% endif %}
+
+{# 14. Risk matrix (optional) #}
+{% if report.risk_matrix %}
+  {% include "sections/_risk_matrix.html" %}
+{% endif %}
+
+{# 15. Exploration strategy (optional) #}
+{% if report.exploration_strategy %}
+  {% include "sections/_exploration_strategy.html" %}
+{% endif %}
+
+{# 16. Recommendations (always) #}
+{% include "sections/_recommendations.html" %}
+
+{# 17. Strengths & uncertainties (always) #}
+{% include "sections/_strengths_uncertainties.html" %}
+
+{# 18. Acquisition analysis (optional) #}
+{% if report.acquisition_analysis %}
+  {% include "sections/_acquisition_analysis.html" %}
+{% endif %}
+
+{# 19. Conclusion (optional) #}
+{% if report.conclusion %}
+  {% include "sections/_conclusion.html" %}
+{% endif %}
+
+{# 20. Key terms glossary (optional) #}
+{% if report.key_terms %}
+  {% include "sections/_key_terms.html" %}
+{% endif %}
+
+{# 21. Appendices (optional) #}
+{% if report.appendices %}
+  {% include "sections/_appendices.html" %}
+{% endif %}
+
+{# Final disclaimer (always) #}
+{% include "sections/_disclaimer.html" %}
+
+{% endblock %}

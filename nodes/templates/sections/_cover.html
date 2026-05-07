@@ -1,0 +1,191 @@
+{# Cover page — full bleed, gold top bar, left content + right sidebar metrics #}
+{% set meta = report.metadata or {} %}
+{% set exec = report.executive_summary or {} %}
+{% set res  = report.resource_estimates or {} %}
+{% set comp = res.comparison_table or [] %}
+{% set ind  = res.independent_analysis or {} %}
+{% set upd  = res.updated_analysis or {} %}
+{% set best = none %}
+{% for r in comp %}{% if 'Model 1' in (r.model or '') and not best %}{% set best = r %}{% endif %}{% endfor %}
+{% if not best and comp %}{% set best = comp[0] %}{% endif %}
+{% set assessment = exec.overall_assessment or 'Cautious' %}
+{% set badge_class = {'Positive':'green','Cautious':'amber','Negative':'red'}.get(assessment, 'navy') %}
+
+<div class="cover">
+  <style scoped>
+    .cover { padding: 0; }
+    .cover .top-bar {
+      background: var(--gold);
+      color: var(--white);
+      font-weight: bold;
+      font-size: 7pt;
+      padding: 1.8mm 14mm;
+      letter-spacing: 0.5pt;
+    }
+    .cover .grid {
+      display: grid;
+      grid-template-columns: 122mm 60mm;
+      gap: 6mm;
+      padding: 8mm 14mm 0 14mm;
+    }
+    .cover .meta-line {
+      color: var(--gray-text);
+      font-size: 8pt;
+      margin-bottom: 2mm;
+    }
+    .cover h1.product {
+      font-size: 14pt;
+      color: var(--navy);
+      margin: 0 0 1mm 0;
+      letter-spacing: 0.5pt;
+    }
+    .cover .gold-rule {
+      border-bottom: 1.2pt solid var(--gold);
+      width: 122mm;
+      margin: 1mm 0 4mm 0;
+    }
+    .cover h2.project-name {
+      font-size: 22pt;
+      color: var(--navy);
+      margin: 0 0 2mm 0;
+      line-height: 1.15;
+    }
+    .cover .tags {
+      color: var(--gray-text);
+      font-size: 9pt;
+      margin-bottom: 5mm;
+    }
+    .cover .toc-title {
+      color: var(--navy);
+      font-weight: bold;
+      font-size: 8pt;
+      letter-spacing: 0.5pt;
+      border-bottom: 0.4pt solid var(--gold);
+      padding-bottom: 1mm;
+      margin: 4mm 0 2mm 0;
+    }
+    .cover .toc-row {
+      display: grid;
+      grid-template-columns: 12mm 1fr;
+      font-size: 8pt;
+      padding: 0.6mm 0;
+    }
+    .cover .toc-row .num { color: var(--navy); font-weight: bold; }
+    .cover .takeaway {
+      font-style: italic;
+      color: var(--navy);
+      font-size: 9pt;
+      margin-top: 4mm;
+      padding-left: 2mm;
+      border-left: 1.5pt solid var(--gold);
+    }
+    .cover .sidebar-cover {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5mm;
+    }
+    .cover .stamp {
+      text-align: center;
+      margin-top: 4mm;
+    }
+    .cover .stamp .label { color: var(--navy); font-weight: bold; font-size: 7pt; }
+    .cover .stamp .body  { color: var(--gray-text); font-size: 7pt; }
+    .cover .disclaimer-box {
+      position: absolute;
+      left: 14mm;
+      right: 14mm;
+      bottom: 14mm;
+      border: 0.5pt solid var(--amber);
+      background: #FFF8DC;
+      padding: 2mm 3mm;
+    }
+    .cover .disclaimer-box .t { color: var(--amber); font-weight: bold; font-size: 7pt; }
+    .cover .disclaimer-box .b { color: #645000; font-size: 7pt; }
+  </style>
+
+  <div class="top-bar">MINING INTELLECT AI PLATFORM</div>
+
+  <div class="grid">
+    {# Left column #}
+    <div>
+      <div class="meta-line">{{ (meta.generated_at or '')[:10] }}  |  AI-Powered Resource Analysis</div>
+      <h1 class="product">RESOURCE MODELING REPORT</h1>
+      <div class="gold-rule"></div>
+      <h2 class="project-name">{{ project_name }}</h2>
+      <div class="tags">
+        {%- set tag_parts = [] -%}
+        {%- if meta.material %}{% set _ = tag_parts.append(meta.material) %}{% endif -%}
+        {%- if meta.deposit_type %}{% set _ = tag_parts.append(meta.deposit_type) %}{% endif -%}
+        {%- if meta.country %}{% set _ = tag_parts.append(meta.country) %}{% endif -%}
+        {%- if meta.project_stage %}{% set _ = tag_parts.append(meta.project_stage) %}{% endif -%}
+        {{ tag_parts | join('  |  ') }}
+      </div>
+      <span class="badge {{ badge_class }}">Assessment: {{ assessment }}</span>
+
+      <div class="toc-title">CONTENTS</div>
+      {% for num, name in [
+        ('01','Executive Summary'),
+        ('02','Project Overview'),
+        ('03','Geological Framework'),
+        ('04','Analog Comparison'),
+        ('05','Resource Models'),
+        ('06','Drilling & Sampling'),
+        ('07','Sensitivity Analysis'),
+        ('08','Risk Matrix'),
+        ('09','Recommendations'),
+        ('10','Acquisition Analysis'),
+        ('11','Conclusion'),
+        ('12','Disclaimer')
+      ] %}
+        <div class="toc-row"><span class="num">{{ num }}</span><span>{{ name }}</span></div>
+      {% endfor %}
+
+      {% if exec.key_takeaway %}
+        <div class="takeaway">"{{ exec.key_takeaway }}"</div>
+      {% endif %}
+    </div>
+
+    {# Right column — sidebar metrics #}
+    <div class="sidebar-cover">
+      {% if best %}
+        {% set total_mt   = (best.total_tonnage_kt or 0) | float / 1000 %}
+        {% set mi_mt      = (best.mi_tonnage_kt or 0) | float / 1000 %}
+        {% set mi_grade   = best.mi_grade_pct or 0 %}
+        {% set conv_pct   = ind.confidence_pct or 0 %}
+        {% set conv2_pct  = upd.confidence_pct or conv_pct %}
+
+        <div class="metric primary">
+          <div class="label">TOTAL RESOURCE</div>
+          <div class="value">{{ '%.1f' | format(total_mt) }}</div>
+          <div class="unit">Mt</div>
+        </div>
+        <div class="metric">
+          <div class="label">CONFIDENCE</div>
+          <div class="value">{{ '%.0f' | format(conv_pct) }}</div>
+          <div class="unit">%</div>
+        </div>
+        <div class="metric">
+          <div class="label">HIGH-GRADE (M&amp;I)</div>
+          <div class="value">{{ '%.0f' | format(mi_mt) }}</div>
+          <div class="unit">Mt</div>
+          {% if mi_grade %}<div class="sub">@ {{ mi_grade | grade(meta.material) }}</div>{% endif %}
+        </div>
+        <div class="metric">
+          <div class="label">MI CONVICTION</div>
+          <div class="value">{{ '%.0f' | format(conv2_pct) }}</div>
+          <div class="unit">%</div>
+        </div>
+
+        <div class="stamp">
+          <div class="label">Prepared by:</div>
+          <div class="body">Mining Intellect AI Platform</div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="disclaimer-box">
+    <div class="t">DISCLAIMER</div>
+    <div class="b">This report is for informational purposes only. It does not replace a regulatory-compliant mineral resource estimate (NI 43-101, JORC). Not prepared by a Qualified Person. Not investment advice. Estimates may change with new data.</div>
+  </div>
+</div>

@@ -1,0 +1,65 @@
+{% set exec = report.executive_summary or {} %}
+{% set res  = report.resource_estimates or {} %}
+{% set material = (report.metadata or {}).material or '' %}
+{% set comp = res.comparison_table or [] %}
+{% set ind  = res.independent_analysis or {} %}
+{% set best = none %}
+{% for r in comp %}{% if 'Model 1' in (r.model or '') and not best %}{% set best = r %}{% endif %}{% endfor %}
+{% if not best and comp %}{% set best = comp[0] %}{% endif %}
+{% set assessment = exec.overall_assessment or 'Cautious' %}
+{% set badge_class = {'Positive':'green','Cautious':'amber','Negative':'red'}.get(assessment, 'navy') %}
+
+<section class="section" data-section="EXECUTIVE SUMMARY">
+  <div class="section-header">
+    <div class="num">01</div>
+    <div class="title">1. Executive Summary</div>
+  </div>
+
+  <div class="layout-sidebar">
+    <div>
+      <span class="badge {{ badge_class }}">Overall: {{ assessment }}</span>
+      {% if exec.key_takeaway %}
+        <p class="callout-italic mt-3">"{{ exec.key_takeaway }}"</p>
+      {% endif %}
+      {% if exec.summary_text %}
+        <p class="mt-2">{{ exec.summary_text }}</p>
+      {% endif %}
+    </div>
+
+    {% if best %}
+      {% set total_mt   = (best.total_tonnage_kt or 0) | float / 1000 %}
+      {% set grade      = best.total_grade_pct or 0 %}
+      {% set mi_mt      = (best.mi_tonnage_kt or 0) | float / 1000 %}
+      {% set mi_grade   = best.mi_grade_pct or 0 %}
+      {% set conv_pct   = ind.confidence_pct or 0 %}
+      {% set contained  = best.total_contained_mlb or 0 %}
+      <div class="sidebar">
+        <div class="metric primary">
+          <div class="label">TOTAL RESOURCE</div>
+          <div class="value">{{ '%.1f' | format(total_mt) }}</div>
+          <div class="unit">Mt</div>
+        </div>
+        <div class="metric">
+          <div class="label">GRADE</div>
+          <div class="value">{{ grade | grade(material) }}</div>
+        </div>
+        <div class="metric">
+          <div class="label">HIGH-GRADE M&amp;I</div>
+          <div class="value">{{ '%.0f' | format(mi_mt) }}</div>
+          <div class="unit">Mt</div>
+          {% if mi_grade %}<div class="sub">@ {{ mi_grade | grade(material) }}</div>{% endif %}
+        </div>
+        <div class="metric">
+          <div class="label">CONTAINED</div>
+          <div class="value">{{ contained | num('{:,.1f}') }}</div>
+          <div class="unit">Mlb / Moz</div>
+        </div>
+        <div class="metric">
+          <div class="label">CONVICTION</div>
+          <div class="value">{{ '%.0f' | format(conv_pct) }}</div>
+          <div class="unit">%</div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>

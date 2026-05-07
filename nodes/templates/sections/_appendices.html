@@ -1,0 +1,81 @@
+{% set app = report.appendices or {} %}
+
+<section class="section" data-section="APPENDICES">
+  <div class="section-header">
+    <div class="num">20</div>
+    <div class="title">20. Appendices</div>
+  </div>
+
+  {% if app.input_weighting_table %}
+    <div class="subsection">Appendix A: Analog Input Weighting</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:35%;">Analog</th>
+        <th style="width:14%;">Weight (%)</th>
+        <th style="width:51%;">Key Rationale</th>
+      </tr></thead>
+      <tbody>
+        {% for r in app.input_weighting_table %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ r.analog_name or '' }}</td>
+            <td class="center">{{ r.weight_pct or '' }}</td>
+            <td>{{ r.key_rationale or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if app.variogram_parameters_table %}
+    <div class="subsection">Appendix B: Variogram Parameters</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:30%;">Zone</th>
+        <th style="width:15%;">Nugget</th>
+        <th style="width:15%;">Sill</th>
+        <th style="width:20%;">Range Major (m)</th>
+        <th style="width:20%;">Range Minor (m)</th>
+      </tr></thead>
+      <tbody>
+        {% for r in app.variogram_parameters_table %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ r.zone or '' }}</td>
+            <td class="center">{{ r.nugget or '' }}</td>
+            <td class="center">{{ r.sill or '' }}</td>
+            <td class="center">{{ r.range_major_m or '' }}</td>
+            <td class="center">{{ r.range_minor_m or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if app.drilling_summary_table %}
+    <div class="subsection">Appendix C: Drilling Summary</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:22%;">Hole Type</th>
+        <th style="width:14%;">Count</th>
+        <th style="width:21%;">Avg Depth (m)</th>
+        <th style="width:43%;">Purpose</th>
+      </tr></thead>
+      <tbody>
+        {% for r in app.drilling_summary_table %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ r.hole_type or '' }}</td>
+            <td class="center">{{ r.count or '' }}</td>
+            <td class="center">{{ r.avg_depth_m or '' }}</td>
+            <td>{{ r.purpose or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if app.references %}
+    <div class="subsection">Appendix D: References</div>
+    <ul class="bullets">
+      {% for ref in app.references %}<li>{{ ref }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</section>

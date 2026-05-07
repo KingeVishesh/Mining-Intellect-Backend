@@ -1,0 +1,51 @@
+{% set gm = report.geostatistical_modeling or {} %}
+
+<section class="section" data-section="GEOSTATISTICAL MODELING">
+  <div class="section-header">
+    <div class="num">09</div>
+    <div class="title">9. Geostatistical Modeling</div>
+  </div>
+
+  {% if gm.variography_narrative %}<p>{{ gm.variography_narrative }}</p>{% endif %}
+
+  {% if gm.estimation_method %}
+    <div class="kv"><div class="k">Estimation Method:</div><div class="v">{{ gm.estimation_method }}</div></div>
+  {% endif %}
+
+  {% if gm.variogram_parameters %}
+    <div class="subsection">Variogram Parameters by Zone</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:25%;">Zone</th>
+        <th style="width:13%;">Nugget</th>
+        <th style="width:13%;">Sill</th>
+        <th style="width:18%;">Range Major (m)</th>
+        <th style="width:18%;">Range Minor (m)</th>
+        <th style="width:13%;">Anisotropy</th>
+      </tr></thead>
+      <tbody>
+        {% for p in gm.variogram_parameters %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ p.zone or '' }}</td>
+            <td class="center">{{ p.nugget or '' }}</td>
+            <td class="center">{{ p.sill or '' }}</td>
+            <td class="center">{{ p.range_major_m or '' }}</td>
+            <td class="center">{{ p.range_minor_m or '' }}</td>
+            <td class="center">{{ p.anisotropy_ratio or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% for label, key in [
+    ('Grade Capping Method', 'grade_capping_method'),
+    ('Extension Ranges', 'extension_ranges'),
+    ('By-Product Modeling', 'byproduct_modeling'),
+  ] %}
+    {% if gm[key] %}
+      <div class="subsection">{{ label }}</div>
+      <p>{{ gm[key] }}</p>
+    {% endif %}
+  {% endfor %}
+</section>

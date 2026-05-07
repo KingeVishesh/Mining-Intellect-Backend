@@ -1,0 +1,40 @@
+{% set ov = report.project_overview or {} %}
+{% set meta = report.metadata or {} %}
+
+<section class="section" data-section="PROJECT OVERVIEW">
+  <div class="section-header">
+    <div class="num">02</div>
+    <div class="title">2. Project Overview</div>
+  </div>
+
+  {% for label, val in [
+    ('Project', meta.project_name),
+    ('Material', meta.material),
+    ('Deposit Type', meta.deposit_type),
+    ('Country', meta.country),
+    ('Stage', meta.project_stage),
+  ] %}
+    {% if val %}<div class="kv"><div class="k">{{ label }}:</div><div class="v">{{ val }}</div></div>{% endif %}
+  {% endfor %}
+
+  {% if ov.project_summary %}
+    <p class="mt-3">{{ ov.project_summary }}</p>
+  {% endif %}
+
+  {% if ov.key_characteristics %}
+    <div class="subsection">Key Characteristics</div>
+    <ul class="bullets">
+      {% for c in ov.key_characteristics %}<li>{{ c }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if ov.official_mre_summary %}
+    <div class="subsection">Official MRE</div>
+    <p>{{ ov.official_mre_summary }}</p>
+  {% endif %}
+
+  {% if ov.drilling_data_summary %}
+    <div class="subsection">Drilling Data</div>
+    <p>{{ ov.drilling_data_summary }}</p>
+  {% endif %}
+</section>

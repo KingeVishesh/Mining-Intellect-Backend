@@ -1,0 +1,43 @@
+{% set geo = report.geological_framework or {} %}
+
+<section class="section" data-section="GEOLOGICAL FRAMEWORK">
+  <div class="section-header">
+    <div class="num">03</div>
+    <div class="title">3. Geological Framework</div>
+  </div>
+
+  {% if geo.regional_setting %}<p>{{ geo.regional_setting }}</p>{% endif %}
+
+  {% for label, key in [
+    ('Deposit Characteristics', 'deposit_characteristics'),
+    ('Mineralisation Description', 'mineralization_description'),
+    ('Structural Complexity', 'structural_complexity'),
+    ('Geological Continuity', 'geological_continuity'),
+    ('Logistics & Infrastructure', 'logistics_and_infrastructure'),
+  ] %}
+    {% if geo[key] %}
+      <div class="subsection">{{ label }}</div>
+      <p>{{ geo[key] }}</p>
+    {% endif %}
+  {% endfor %}
+
+  {% if geo.mineral_zones %}
+    <div class="subsection">Mineral Zones</div>
+    <table class="data">
+      <thead><tr>
+        <th style="width:25%;">Zone Name</th>
+        <th style="width:50%;">Description</th>
+        <th style="width:25%;">Grade Range</th>
+      </tr></thead>
+      <tbody>
+        {% for z in geo.mineral_zones %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ z.zone_name or '' }}</td>
+            <td>{{ z.description or '' }}</td>
+            <td class="center">{{ z.grade_range or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>

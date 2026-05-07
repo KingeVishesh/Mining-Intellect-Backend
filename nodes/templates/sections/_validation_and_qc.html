@@ -1,0 +1,41 @@
+{% set vq = report.validation_and_qc or {} %}
+
+<section class="section" data-section="VALIDATION &amp; QC">
+  <div class="section-header">
+    <div class="num">10</div>
+    <div class="title">10. Validation &amp; Quality Control</div>
+  </div>
+
+  {% if vq.check_assay_protocol %}
+    <div class="subsection">Check Assay Protocol</div>
+    <p>{{ vq.check_assay_protocol }}</p>
+  {% endif %}
+
+  {% if vq.monte_carlo_summary %}
+    <div class="subsection">Monte Carlo Simulation</div>
+    <p>{{ vq.monte_carlo_summary }}</p>
+  {% endif %}
+
+  {% set p10t = vq.p10_tonnage_kt or 0 %}
+  {% set p90t = vq.p90_tonnage_kt or 0 %}
+  {% set p10g = vq.p10_grade or 0 %}
+  {% set p90g = vq.p90_grade or 0 %}
+  {% if p10t or p90t or p10g or p90g %}
+    <div class="metric-grid">
+      <div class="metric"><div class="value">{{ p10t | num }}</div><div class="unit">kt</div><div class="label">P10 Tonnage</div></div>
+      <div class="metric"><div class="value">{{ p90t | num }}</div><div class="unit">kt</div><div class="label">P90 Tonnage</div></div>
+      <div class="metric"><div class="value">{{ '%.4f' | format(p10g | float) }}</div><div class="label">P10 Grade</div></div>
+      <div class="metric"><div class="value">{{ '%.4f' | format(p90g | float) }}</div><div class="label">P90 Grade</div></div>
+    </div>
+  {% endif %}
+
+  {% if vq.statistical_reconciliation %}
+    <div class="subsection">Statistical Reconciliation</div>
+    <p>{{ vq.statistical_reconciliation }}</p>
+  {% endif %}
+
+  {% if vq.audit_trail_notes %}
+    <div class="subsection">Audit Trail Notes</div>
+    <p class="italic text-gray">{{ vq.audit_trail_notes }}</p>
+  {% endif %}
+</section>

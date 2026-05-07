@@ -1,0 +1,43 @@
+{% set dm = report.drilling_efficiency_metrics or {} %}
+
+<section class="section" data-section="DRILLING EFFICIENCY">
+  <div class="section-header">
+    <div class="num">07</div>
+    <div class="title">7. Drilling Efficiency Metrics</div>
+  </div>
+
+  {% if dm.narrative %}<p>{{ dm.narrative }}</p>{% endif %}
+
+  {% if dm.metrics_table %}
+    <table class="data">
+      <thead><tr>
+        <th style="width:36%;">Metric</th>
+        <th style="width:25%;">Project Value</th>
+        <th style="width:24%;">Peer Range</th>
+        <th style="width:15%;">Assessment</th>
+      </tr></thead>
+      <tbody>
+        {% for row in dm.metrics_table %}
+          {% set assess = row.assessment or 'In-Line' %}
+          {% set assess_class = {'Above Peer':'green','In-Line':'amber','Below Peer':'red'}.get(assess, 'amber') %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ row.metric or '' }}</td>
+            <td>{{ row.project_value or '' }}</td>
+            <td>{{ row.peer_range or '' }}</td>
+            <td class="center"><span class="pill {{ assess_class }}">{{ assess }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% for label, key in [
+    ('Shareholder Dilution Efficiency', 'shareholder_dilution_efficiency'),
+    ('Cost per Meter vs. Peers', 'cost_per_meter_vs_peers'),
+  ] %}
+    {% if dm[key] %}
+      <div class="subsection">{{ label }}</div>
+      <p>{{ dm[key] }}</p>
+    {% endif %}
+  {% endfor %}
+</section>

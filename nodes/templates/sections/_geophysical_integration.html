@@ -1,0 +1,40 @@
+{% set gp = report.geophysical_integration or {} %}
+
+<section class="section" data-section="GEOPHYSICAL INTEGRATION">
+  <div class="section-header">
+    <div class="num">08</div>
+    <div class="title">8. Geophysical Integration</div>
+  </div>
+
+  {% if gp.survey_types_recommended %}
+    <table class="data">
+      <thead><tr>
+        <th style="width:25%;">Survey Type</th>
+        <th style="width:60%;">Rationale</th>
+        <th style="width:15%;">Priority</th>
+      </tr></thead>
+      <tbody>
+        {% for s in gp.survey_types_recommended %}
+          {% set prio = s.priority or 'Medium' %}
+          {% set prio_class = {'High':'red','Medium':'amber','Low':'green'}.get(prio, 'amber') %}
+          <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+            <td>{{ s.survey_type or '' }}</td>
+            <td>{{ s.rationale or '' }}</td>
+            <td class="center"><span class="pill {{ prio_class }}">{{ prio }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% for label, key in [
+    ('Continuity Thresholds', 'continuity_thresholds'),
+    ('Validation Triggers', 'validation_triggers'),
+    ('Existing Data Notes', 'existing_data_notes'),
+  ] %}
+    {% if gp[key] %}
+      <div class="subsection">{{ label }}</div>
+      <p>{{ gp[key] }}</p>
+    {% endif %}
+  {% endfor %}
+</section>

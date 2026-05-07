@@ -1,0 +1,29 @@
+{% set con = report.conclusion or {} %}
+{% set readiness = con.investment_readiness or '' %}
+{% set readiness_class = {'Development-ready':'green','Resource-stage':'amber','Pre-resource':'red'}.get(readiness, 'navy') %}
+
+<section class="section" data-section="CONCLUSION">
+  <div class="section-header">
+    <div class="num">18</div>
+    <div class="title">18. Conclusion</div>
+  </div>
+
+  {% if con.headline_finding %}
+    <div class="callout">
+      <div class="callout-body large">{{ con.headline_finding }}</div>
+    </div>
+  {% endif %}
+
+  {% if con.conclusion_text %}<p>{{ con.conclusion_text }}</p>{% endif %}
+
+  {% if con.next_milestone %}
+    <div class="kv mt-2"><div class="k">Next Milestone:</div><div class="v">{{ con.next_milestone }}</div></div>
+  {% endif %}
+
+  {% if readiness %}
+    <div class="kv mt-2">
+      <div class="k">Investment Readiness:</div>
+      <div class="v"><span class="badge {{ readiness_class }}">{{ readiness }}</span></div>
+    </div>
+  {% endif %}
+</section>

@@ -1,0 +1,34 @@
+{% set risks = report.risk_matrix or [] %}
+
+<section class="section" data-section="RISK MATRIX">
+  <div class="section-header">
+    <div class="num">13</div>
+    <div class="title">13. Risk Matrix</div>
+  </div>
+
+  <table class="data risk">
+    <thead><tr>
+      <th style="width:25%;">Risk Factor</th>
+      <th style="width:17%;">Probability</th>
+      <th style="width:13%;">Impact</th>
+      <th style="width:45%;">Mitigation Strategy</th>
+    </tr></thead>
+    <tbody>
+      {% for r in risks %}
+        {% set p = (r.probability or '') | string %}
+        {% set i = (r.impact or '') | string %}
+        {% set rowcls = 'high' if ('High' in p and 'High' in i) else ('medium' if ('High' in p or 'High' in i) else 'low') %}
+        {% set p_pill = 'red' if 'High' in p else ('amber' if 'Moderate' in p else 'green') %}
+        {% set i_pill = 'red' if 'High' in i else ('amber' if 'Moderate' in i else 'green') %}
+        <tr class="{{ rowcls }}">
+          <td class="bold">{{ r.risk_factor or '' }}</td>
+          <td class="center"><span class="pill {{ p_pill }}">{{ p }}</span></td>
+          <td class="center"><span class="pill {{ i_pill }}">{{ i }}</span></td>
+          <td>{{ r.mitigation or '' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="small text-gray">Legend: Red = High probability + High impact  |  Amber = Moderate  |  Green = Low</p>
+</section>

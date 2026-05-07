@@ -1,0 +1,31 @@
+{% set strategy = report.exploration_strategy or [] %}
+
+<section class="section" data-section="EXPLORATION STRATEGY">
+  <div class="section-header">
+    <div class="num">14</div>
+    <div class="title">14. Exploration Strategy &amp; Timeline</div>
+  </div>
+
+  <table class="data">
+    <thead><tr>
+      <th style="width:24%;">Activity</th>
+      <th style="width:14%;">Cost Estimate</th>
+      <th style="width:12%;">Timeline</th>
+      <th style="width:10%;">Priority</th>
+      <th style="width:40%;">Expected Outcome</th>
+    </tr></thead>
+    <tbody>
+      {% for phase in strategy %}
+        {% set prio = phase.priority or 'Medium' %}
+        {% set prio_class = {'High':'red','Medium':'amber','Low':'green'}.get(prio, 'amber') %}
+        <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+          <td>{{ phase.activity or '' }}</td>
+          <td class="num">{{ phase.cost_estimate or '' }}</td>
+          <td class="center">{{ phase.timeline or '' }}</td>
+          <td class="center"><span class="pill {{ prio_class }}">{{ prio }}</span></td>
+          <td>{{ phase.expected_outcome or '' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

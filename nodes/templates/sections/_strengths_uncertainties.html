@@ -1,0 +1,32 @@
+{% set uands = report.key_uncertainties_and_strengths or {} %}
+{% set lessons = report.lessons_summary or {} %}
+{% set strengths = uands.strengths or [] %}
+{% set uncertainties = uands.uncertainties or [] %}
+
+<section class="section" data-section="STRENGTHS &amp; UNCERTAINTIES">
+  <div class="section-header">
+    <div class="num">16</div>
+    <div class="title">16. Strengths &amp; Uncertainties</div>
+  </div>
+
+  {% if strengths %}
+    <div class="subsection">Strengths</div>
+    <ul class="bullets strengths">
+      {% for s in strengths %}<li>{{ s }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if uncertainties %}
+    <div class="subsection">Uncertainties &amp; Risks</div>
+    <ul class="bullets uncertainties">
+      {% for u in uncertainties %}<li>{{ u }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if lessons %}
+    <div class="kv mt-2">
+      <div class="k">Rules Applied:</div>
+      <div class="v">{{ lessons.total_lessons_applied or 0 }} total, {{ lessons.high_confidence_lessons or 0 }} high-confidence</div>
+    </div>
+  {% endif %}
+</section>

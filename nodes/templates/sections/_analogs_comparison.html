@@ -1,0 +1,38 @@
+{% set analogs = report.analogs_comparison or [] %}
+
+<section class="section" data-section="ANALOG COMPARISON">
+  <div class="section-header">
+    <div class="num">04</div>
+    <div class="title">4. Analog Comparison</div>
+  </div>
+
+  <p class="muted">{{ analogs | length }} comparable projects used to calibrate the resource model.</p>
+
+  <table class="data">
+    <thead><tr>
+      <th style="width:28%;">Project Name</th>
+      <th style="width:14%;">Country</th>
+      <th style="width:20%;">Deposit Type</th>
+      <th style="width:13%;">Tonnage (Mt)</th>
+      <th style="width:12%;">Grade</th>
+      <th style="width:13%;">Similarity</th>
+    </tr></thead>
+    <tbody>
+      {% for a in analogs %}
+        {% set raw = a.similarity_score or 0 %}
+        {% set score = raw * 100 if raw <= 1 else raw %}
+        {% set sim_class = 'green' if score >= 70 else ('amber' if score >= 40 else 'red') %}
+        <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
+          <td>{{ a.name or '' }}</td>
+          <td>{{ a.country or '' }}</td>
+          <td>{{ a.deposit_type or '' }}</td>
+          <td class="num">{{ a.tonnage_mt | num('{:,.1f}') }}</td>
+          <td class="num">{% if a.grade_value is not none %}{{ '%.3f' | format(a.grade_value | float) }} {{ a.grade_unit or '%' }}{% else %}N/A{% endif %}</td>
+          <td class="center"><span class="pill {{ sim_class }}">{{ '%.0f' | format(score) }}%</span></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="small text-gray">Similarity ≥70% green, 40-70% amber, &lt;40% red.</p>
+</section>
