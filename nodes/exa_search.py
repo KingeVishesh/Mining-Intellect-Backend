@@ -192,41 +192,70 @@ def search_missing_fields(
 
 def search_analog_projects(
     material: str,
-    deposit_type: str,
+    deposit_type: Optional[str],
+    project_name: str = "",
+    analog_rule: Optional[dict] = None,
     grade_value: Optional[float] = None,
     grade_unit: Optional[str] = None,
     tonnage_mt: Optional[float] = None,
     country: Optional[str] = None,
 ) -> tuple[str, list[str]]:
     """
-    Find comparable mining projects via Exa.
+    Find comparable mining projects via Exa using a rule-driven targeted query.
     Returns (synthesised_text, source_urls).
     """
-    grade_str = f"{grade_value} {grade_unit}" if grade_value and grade_unit else ""
-    tonnage_str = f"{tonnage_mt}Mt" if tonnage_mt else ""
-    location_str = f"in {country}" if country else "globally"
+    # Build grade range string: prefer rule range over project grade
+    grade_min = (analog_rule or {}).get("grade_min")
+    grade_max = (analog_rule or {}).get("grade_max")
+    rule_grade_unit = (analog_rule or {}).get("grade_unit") or grade_unit or ""
+    if grade_min and grade_max:
+        grade_range_str = f"{grade_min}–{grade_max} {rule_grade_unit}".strip()
+    elif grade_value and grade_unit:
+        grade_range_str = f"approximately {grade_value} {grade_unit}"
+    else:
+        grade_range_str = ""
+
+    tonnage_str = f"approximately {tonnage_mt} Mt resource" if tonnage_mt else ""
+    deposit_str = deposit_type or material
+    exclude_str = f" Do not include {project_name} itself." if project_name else ""
+
+    # Pull 3 most geologically specific criteria from the rule (skip "Exclude" lines)
+    geo_criteria: list[str] = []
+    for c in (analog_rule or {}).get("analog_criteria") or []:
+        if not c.lower().startswith("exclude") and len(geo_criteria) < 3:
+            geo_criteria.append(c)
+    criteria_str = " ".join(f"({c})" for c in geo_criteria) if geo_criteria else ""
+
+    location_hint = f" Prefer projects in or near {country}." if country else ""
 
     query = (
-        f"What are examples of comparable {material} mining projects with {deposit_type} "
-        f"deposit type {location_str}? "
-        f"I need projects similar to one with {grade_str} grade and {tonnage_str} resource. "
-        f"List 5-10 analog projects with their: project name, company, country, "
-        f"deposit type, resource size in tonnes, grade, project stage, and NI 43-101 or JORC reference."
+        f"List 5-8 {deposit_str} {material} mining projects with confirmed NI 43-101 or JORC "
+        f"resource estimates"
+        f"{(', ' + grade_range_str + ' grade') if grade_range_str else ''}"
+        f"{(', ' + tonnage_str) if tonnage_str else ''}."
+        f"{(' Key criteria: ' + criteria_str) if criteria_str else ''}"
+        f"{location_hint}"
+        f"{exclude_str}"
+        f" For each project provide: project name, company, country, deposit type, "
+        f"total resource tonnage (Mt), grade and unit, resource category (M&I/Inferred), "
+        f"project stage, and technical report reference."
     )
+
     payload = {
         "query": query,
         "type": "deep",
         "systemPrompt": (
-            "Focus on NI 43-101 and JORC compliant resource estimates. "
-            "Prefer projects at a similar or more advanced stage. "
-            "List distinct projects with their exact resource figures."
+            "You are a mining industry analyst. Focus exclusively on projects with confirmed "
+            "NI 43-101 or JORC compliant resource estimates. List distinct projects with "
+            "their exact resource figures from technical reports. Do not include exploration "
+            "targets without a resource estimate."
         ),
         "outputSchema": {
             "type": "text",
             "description": (
                 "For each comparable project list: project name, company name, country, "
-                "deposit type, total resource tonnage (Mt), grade and unit, project stage, "
-                "and the technical report reference."
+                "deposit type, total resource tonnage (Mt), grade and unit, resource category, "
+                "project stage, and the technical report reference."
             ),
         },
     }

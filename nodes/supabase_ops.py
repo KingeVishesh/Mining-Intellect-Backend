@@ -66,6 +66,60 @@ def search_projects_by_criteria(
     return res.data or []
 
 
+def get_approved_analogs(
+    material: str,
+    deposit_type: Optional[str] = None,
+    limit: int = 20,
+) -> List[Dict]:
+    """Query report_analogs for previously approved analogs of this commodity.
+
+    Returns candidates in the standard analog dict format (name, material, deposit_type,
+    tonnage_mt, grade_value, grade_unit, country, source_url, source='library').
+    """
+    keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
+    # report_analogs stores the raw material string — try all mapped keys
+    q = (
+        get_client()
+        .table("report_analogs")
+        .select(
+            "analog_name,analog_material,analog_deposit_type,analog_country,"
+            "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,similarity_score"
+        )
+        .in_("analog_material", keys)
+        .eq("status", "approved")
+    )
+    if deposit_type:
+        dep = deposit_type.strip().lower()
+        # ilike for case-insensitive partial match — Supabase REST supports this
+        q = q.ilike("analog_deposit_type", f"%{dep}%")
+
+    res = q.limit(limit).execute()
+    rows = res.data or []
+
+    candidates = []
+    seen_names: set = set()
+    for r in rows:
+        name = r.get("analog_name") or ""
+        if not name:
+            continue
+        norm = name.lower().strip()
+        if norm in seen_names:
+            continue
+        seen_names.add(norm)
+        candidates.append({
+            "name": name,
+            "material": r.get("analog_material") or material,
+            "deposit_type": r.get("analog_deposit_type"),
+            "country": r.get("analog_country"),
+            "tonnage_mt": r.get("analog_tonnage_mt"),
+            "grade_value": r.get("analog_grade_value"),
+            "grade_unit": r.get("analog_grade_unit"),
+            "source_url": r.get("source_url"),
+            "source": "library",
+        })
+    return candidates
+
+
 # ── Companies ─────────────────────────────────────────────────────────────────
 
 _LEGAL_SUFFIXES = re.compile(

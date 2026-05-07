@@ -79,6 +79,28 @@ def activate_rules(project: Dict, rules: List[Dict]) -> List[Dict]:
     return activated
 
 
+def get_analog_rule(material: str, deposit_type: Optional[str] = None) -> Optional[Dict]:
+    """Return the best matching analog_selection rule for this project.
+
+    Tries exact deposit_type match first; falls back to any rule for the material.
+    Returns None if no analog_selection rule exists for this commodity.
+    """
+    rules = get_compiled_rules(material, rule_type="analog_selection")
+    if not rules:
+        return None
+
+    if deposit_type:
+        dep_lower = deposit_type.strip().lower()
+        # Exact or partial deposit_type match
+        for r in rules:
+            r_dep = (r.get("deposit_type") or "").strip().lower()
+            if r_dep and (r_dep in dep_lower or dep_lower in r_dep):
+                return r
+
+    # Fallback: return first rule for the material (most rules are commodity-specific)
+    return rules[0]
+
+
 def apply_rule_multipliers(
     base_tonnage: float,
     base_grade: float,
