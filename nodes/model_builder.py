@@ -110,6 +110,59 @@ def _contained_metal(tonnage_kt: float, grade_pct: float, material: str) -> floa
         return (tonnage_kt * 1000 * (grade_pct / 100) * 2204.62) / 1e6
 
 
+_RESOURCE_CAPTURE_FRACTIONS: Dict[str, float] = {
+    # Bulk, pervasive mineralisation — most of the envelope is ore
+    "porphyry":     0.75,
+    "bif":          0.80,
+    "magnetite":    0.80,
+    "sediment":     0.70,
+    "laterite":     0.80,
+    "merensky":     0.90,  # thin reef but extremely continuous
+    "platreef":     0.85,
+    "ug2":          0.90,
+    # Moderate — mixed mass / structural controls
+    "iocg":         0.65,
+    "carlin":       0.55,
+    "vms":          0.60,
+    "magmatic":     0.65,
+    "skarn":        0.50,
+    "unconformity": 0.55,
+    "roll":         0.60,
+    "intrusive":    0.70,
+    # Narrow vein / structural — only a fraction of the envelope is ore
+    "epithermal":   0.40,
+    "orogenic":     0.35,
+}
+
+
+def _estimate_tonnage_from_geometry(project: Dict, deposit_type: str) -> Optional[float]:
+    """
+    Estimate resource tonnage (Mt) from drilled geometry: strike × width × depth.
+
+    Returns None when any dimension is missing — caller falls back to analog average.
+    Applies a deposit-type specific 'resource capture fraction': the proportion of
+    the mineralized envelope that is typically above economic cutoff grade.
+    """
+    strike_m = float(project.get("strike_length_meters") or 0)
+    width_m  = float(project.get("width_meters") or 0)
+    depth_m  = float(project.get("depth_meters") or 0)
+    if not (strike_m > 0 and width_m > 0 and depth_m > 0):
+        return None
+
+    dep = (deposit_type or "").lower()
+    capture = next(
+        (v for k, v in _RESOURCE_CAPTURE_FRACTIONS.items() if k in dep),
+        0.55,  # default: moderate
+    )
+    rock_density = 2.7  # t/m³ — standard siliceous/mafic/calc-silicate rock
+    tonnage_mt = (strike_m * width_m * depth_m * rock_density * capture) / 1e6
+    logger.info(
+        f"[Model1] Geometry tonnage: {strike_m}m × {width_m}m × {depth_m}m "
+        f"× {rock_density} × {capture} = {tonnage_mt:.2f} Mt (deposit={dep or 'unknown'})"
+    )
+    return tonnage_mt
+
+
 def build_model_1(
     analogs: List[Dict],
     project: Dict,
@@ -142,9 +195,37 @@ def build_model_1(
     tonnages_kt = [float(a["tonnage_mt"]) * 1000 for a in valid]  # convert Mt -> kt
     grades = [float(a["grade_value"]) for a in valid]
 
-    # Split into M&I (70%) and inferred (30%) based on analog averages
-    base_total_kt = _weighted_average(tonnages_kt, weights)
+    # ── Tonnage: geometry-constrained when drilled dimensions are available ────
+    # Analogs tell us grade and deposit characteristics — not deposit SIZE.
+    # When the project has strike × width × depth, use that drilled envelope
+    # (scaled by a deposit-type capture fraction) rather than the analog average.
+    geometry_tonnage_mt = _estimate_tonnage_from_geometry(project, deposit_type)
+    analog_avg_kt = _weighted_average(tonnages_kt, weights)
+
+    if geometry_tonnage_mt is not None:
+        base_total_kt = geometry_tonnage_mt * 1000
+        tonnage_source = "geometry"
+        geo_analog_ratio = (geometry_tonnage_mt * 1000 / analog_avg_kt
+                            if analog_avg_kt > 0 else None)
+        if geo_analog_ratio and (geo_analog_ratio > 5 or geo_analog_ratio < 0.2):
+            if geo_analog_ratio < 1:
+                ratio_str = f"{1/geo_analog_ratio:.1f}× smaller than"
+            else:
+                ratio_str = f"{geo_analog_ratio:.1f}× larger than"
+            tonnage_divergence_note = (
+                f" (Note: geometry estimate {geometry_tonnage_mt:.1f} Mt is {ratio_str} "
+                f"analog average {analog_avg_kt/1000:.1f} Mt — geometry used.)"
+            )
+        else:
+            tonnage_divergence_note = ""
+    else:
+        base_total_kt = analog_avg_kt
+        tonnage_source = "analog_average"
+        tonnage_divergence_note = ""
+
+    # Grade always from analog weighted average (intensive property, scale-independent)
     base_grade = _weighted_average(grades, weights)
+
     base_mi_kt = base_total_kt * 0.70
     base_inferred_kt = base_total_kt * 0.30
 
@@ -158,13 +239,23 @@ def build_model_1(
     inferred_kt = base_inferred_kt * t_mult
     grade = base_grade * g_mult
 
-    # Conviction: use raw 0-100 similarity scores (not squared weights) so the scale is meaningful
+    # Conviction: raw 0-100 similarity scores (not squared weights) keep the scale meaningful
     raw_scores = [float(a["similarity_score"]) for a in valid if a.get("similarity_score") is not None]
     avg_raw = sum(raw_scores) / len(raw_scores) if raw_scores else 50.0
     n_high = sum(1 for s in raw_scores if s >= 70)
     pool_quality = min(1.0, min(len(valid), 5) / 5 * 0.6 + n_high / max(1, len(valid)) * 0.4)
-    analog_confidence = min(100.0, pool_quality * 60 + avg_raw * 0.4)
-    conviction = max(0.0, min(100.0, analog_confidence + conf_delta))
+
+    # Geometry constraint raises confidence ceiling; missing geometry caps it at 55
+    max_confidence = 100.0 if tonnage_source == "geometry" else 55.0
+    geometry_bonus = 5.0 if tonnage_source == "geometry" else 0.0
+    analog_confidence = min(max_confidence, pool_quality * 60 + avg_raw * 0.4)
+    conviction = max(0.0, min(100.0, analog_confidence + conf_delta + geometry_bonus))
+
+    tonnage_note = (
+        "drilled geometry (strike × width × depth)"
+        if tonnage_source == "geometry"
+        else "analog weighted average (no geometry data available)"
+    )
 
     return {
         "model": "Model 1 (Independent)",
@@ -172,12 +263,16 @@ def build_model_1(
         "mi_grade_pct": round(grade, 4),
         "mi_contained_mlb": round(_contained_metal(mi_kt, grade, material), 3),
         "inferred_tonnage_kt": round(inferred_kt, 2),
-        "inferred_grade_pct": round(grade * 0.95, 4),  # inferred slightly lower confidence
+        "inferred_grade_pct": round(grade * 0.95, 4),
         "inferred_contained_mlb": round(_contained_metal(inferred_kt, grade * 0.95, material), 3),
         "total_tonnage_kt": round(mi_kt + inferred_kt, 2),
         "total_grade_pct": round(grade, 4),
         "total_contained_mlb": round(_contained_metal(mi_kt + inferred_kt, grade, material), 3),
-        "description": f"Independent estimate using {len(valid)} analog project(s) and {len(adj.get('rules_applied', []))} rules.",
+        "description": (
+            f"Independent estimate using {len(valid)} analog project(s) "
+            f"and {len(adj.get('rules_applied', []))} rules. "
+            f"Tonnage from {tonnage_note}.{tonnage_divergence_note}"
+        ),
         "conviction_pct": round(conviction, 1),
         "analogs_used": [a.get("name", "unknown") for a in valid],
         "rules_applied": adj.get("rules_applied", []),
