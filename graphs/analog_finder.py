@@ -178,6 +178,38 @@ def _deposit_type_family(dep: str) -> Optional[str]:
     return None
 
 
+# Material + country heuristics to infer deposit family when deposit_type is unknown.
+# Nickel laterites only form in tropical weathering belts; sulphides are found globally.
+# If we can rule out a family from geography, block analogs of that family.
+_NICKEL_LATERITE_COUNTRIES = frozenset({
+    "indonesia", "philippines", "new caledonia", "cuba", "brazil", "colombia",
+    "guatemala", "dominican republic", "madagascar", "russia",
+})
+_NICKEL_SULPHIDE_COUNTRIES = frozenset({
+    "canada", "australia", "finland", "norway", "sweden", "botswana",
+    "zimbabwe", "south africa", "greenland", "scotland",
+})
+
+
+def _infer_excluded_families(material: str, country: str) -> frozenset:
+    """
+    Return deposit-type families that are geologically impossible for this
+    material + country combination. Used when deposit_type is unknown on the target.
+
+    Conservative: only excludes when we're highly confident (e.g. nickel laterite
+    in Canada is essentially impossible). Returns empty set when uncertain.
+    """
+    m = material.strip().lower()
+    c = country.strip().lower() if country else ""
+    excluded: set[str] = set()
+    if m == "nickel":
+        if c in _NICKEL_SULPHIDE_COUNTRIES:
+            excluded.add("laterite")       # laterites don't form in temperate regions
+        elif c in _NICKEL_LATERITE_COUNTRIES:
+            excluded.add("magmatic_sulphide")  # primary sulphide deposits rare in these belts
+    return frozenset(excluded)
+
+
 _GEO_STOP_WORDS = frozenset({
     "the", "a", "an", "and", "or", "of", "with", "type", "style", "hosted",
     "deposit", "mineralisation", "mineralization", "bearing", "rich", "related",
@@ -464,9 +496,16 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     rule_grade_max = float((analog_rule or {}).get("grade_max") or 0)
     exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
     target_family = _deposit_type_family(target_deposit)
+    # When deposit_type is unknown, infer which families are geologically impossible
+    # from material + country (e.g. nickel laterite in Canada → exclude laterite family).
+    inferred_excluded_families = (
+        _infer_excluded_families(target_material, project.get("country") or "")
+        if not target_family else frozenset()
+    )
     logger.info(
         f"[score] {len(library)} library + {len(exa)} exa = {len(all_candidates)} candidates | "
-        f"target_family={target_family!r} exclusions={exclusions}"
+        f"target_family={target_family!r} inferred_excluded={inferred_excluded_families} "
+        f"exclusions={exclusions}"
     )
 
     # ── Step A: Dedup by normalized name ───────────────────────────────────
@@ -507,6 +546,17 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             if c_family and c_family != target_family:
                 logger.info(
                     f"[filter] DISQUALIFY (deposit family {target_family!r} ≠ {c_family!r}): {name}"
+                )
+                continue
+
+        # 3b. Inferred family exclusion — when target deposit_type is unknown, use
+        # material + country to rule out impossible families (e.g. nickel laterite in Canada).
+        if inferred_excluded_families and c_dep:
+            c_family = _deposit_type_family(c_dep)
+            if c_family and c_family in inferred_excluded_families:
+                logger.info(
+                    f"[filter] DISQUALIFY (inferred excluded family {c_family!r} for "
+                    f"{target_material}/{project.get('country', '?')}): {name}"
                 )
                 continue
 

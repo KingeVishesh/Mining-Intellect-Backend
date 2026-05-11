@@ -85,40 +85,39 @@ def get_analog_rule(material: str, deposit_type: Optional[str] = None) -> Option
     Priority:
       1. Primary-material rule with matching deposit_type
       2. Any rule with matching deposit_type (cross-material e.g. gold_silver)
-      3. Primary-material rule with no deposit_type constraint (fallback)
-      4. Any rule (last resort)
+      3. None — when deposit_type is unknown, no rule is safer than the wrong rule.
+         A laterite rule applied to a sulphide project (or vice versa) poisons the
+         Exa query with wrong geological criteria and wrong grade ranges.
 
-    The primary-material preference prevents silver projects from accidentally
-    receiving a gold_silver porphyry rule (with Au grade ranges) when no
-    deposit_type is set — which would poison the Exa query.
+    Deliberately no material-only fallback: all compiled analog_selection rules are
+    deposit-type-specific (e.g. nickel_laterite vs nickel_magmatic_sulphide). Returning
+    the first rule alphabetically when deposit_type is unknown would silently apply the
+    wrong rule. Callers should handle None by running a material-only Exa query.
     """
     rules = get_compiled_rules(material, rule_type="analog_selection")
     if not rules:
         return None
 
+    if not deposit_type:
+        return None
+
     mat_lower = material.strip().lower()
+    dep_lower = deposit_type.strip().lower()
 
-    if deposit_type:
-        dep_lower = deposit_type.strip().lower()
-        # Pass 1: primary material + deposit_type match
-        for r in rules:
-            r_dep = (r.get("deposit_type") or "").strip().lower()
-            r_mat = (r.get("source_material") or "").strip().lower()
-            if r_dep and r_mat == mat_lower and (r_dep in dep_lower or dep_lower in r_dep):
-                return r
-        # Pass 2: any deposit_type match regardless of material (gold_silver, etc.)
-        for r in rules:
-            r_dep = (r.get("deposit_type") or "").strip().lower()
-            if r_dep and (r_dep in dep_lower or dep_lower in r_dep):
-                return r
-
-    # Fallback: primary material rule only — never return a cross-material rule as fallback
+    # Pass 1: primary material + deposit_type match
     for r in rules:
+        r_dep = (r.get("deposit_type") or "").strip().lower()
         r_mat = (r.get("source_material") or "").strip().lower()
-        if r_mat == mat_lower:
+        if r_dep and r_mat == mat_lower and (r_dep in dep_lower or dep_lower in r_dep):
             return r
 
-    return rules[0]  # absolute last resort
+    # Pass 2: any deposit_type match regardless of material (gold_silver, etc.)
+    for r in rules:
+        r_dep = (r.get("deposit_type") or "").strip().lower()
+        if r_dep and (r_dep in dep_lower or dep_lower in r_dep):
+            return r
+
+    return None
 
 
 def get_stage_modifier_map(material: str) -> Dict[str, float]:

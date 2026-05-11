@@ -73,10 +73,19 @@ def get_approved_analogs(
 ) -> List[Dict]:
     """Query report_analogs for previously approved analogs of this commodity.
 
+    When deposit_type is None (unknown target), the library is skipped entirely.
+    Library analogs were approved for specific projects with known deposit types —
+    returning them without a deposit_type filter would mix incompatible families
+    (e.g. nickel laterite vs magmatic sulphide) and poison the candidate pool.
+
     Returns candidates in the standard analog dict format (name, material, deposit_type,
     tonnage_mt, grade_value, grade_unit, country, source_url, source='library').
     """
+    if not deposit_type:
+        return []
+
     keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
+    dep = deposit_type.strip().lower()
     # report_analogs stores the raw material string — try all mapped keys
     q = (
         get_client()
@@ -91,7 +100,6 @@ def get_approved_analogs(
         .eq("status", "approved")
     )
     if deposit_type:
-        dep = deposit_type.strip().lower()
         # ilike for case-insensitive partial match — Supabase REST supports this
         q = q.ilike("analog_deposit_type", f"%{dep}%")
 
