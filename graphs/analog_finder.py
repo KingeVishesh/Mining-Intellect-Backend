@@ -22,7 +22,7 @@ Changes from v1:
 from __future__ import annotations
 import logging
 import re
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
 
@@ -507,21 +507,21 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
                 )
                 continue
 
-        # 5. Tonnage >20x (extreme scale outlier — not a geological filter)
+        # 4. Tonnage >20x (extreme scale outlier — not a geological filter)
         if p_tonnage > 0 and c_tonnage > 0:
             ratio = max(p_tonnage, c_tonnage) / min(p_tonnage, c_tonnage)
             if ratio > 20:
                 logger.info(f"[filter] DISQUALIFY (tonnage {ratio:.0f}×): {name}")
                 continue
 
-        # 6. Deposit type exclusion from rule criteria (expert-coded edge cases beyond family gate)
+        # 5. Deposit type exclusion from rule criteria (expert-coded edge cases beyond family gate)
         if c_dep and exclusions:
             excluded = any(excl in c_dep for excl in exclusions)
             if excluded:
                 logger.info(f"[filter] DISQUALIFY (excluded deposit type '{c_dep}'): {name}")
                 continue
 
-        # 7. Grade outside deposit-type range by >3x
+        # 6. Grade outside deposit-type range by >3x
         if c_grade > 0 and rule_grade_min > 0 and rule_grade_max > 0:
             if c_grade < rule_grade_min / 3 or c_grade > rule_grade_max * 3:
                 logger.info(f"[filter] DISQUALIFY (grade {c_grade} outside rule range {rule_grade_min}-{rule_grade_max} ×3): {name}")
