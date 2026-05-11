@@ -48,6 +48,50 @@ class AnalogState(TypedDict, total=False):
 
 # ── Scoring helpers ────────────────────────────────────────────────────────────
 
+# Commodity aliases: maps a canonical material name to all acceptable commodity strings
+# an analog can carry and still be considered the same commodity.
+_COMMODITY_ALIASES: dict[str, set[str]] = {
+    "gold":    {"gold", "au", "gold-silver", "gold_silver", "au-ag"},
+    "silver":  {"silver", "ag", "gold-silver", "gold_silver", "au-ag"},
+    "copper":  {"copper", "cu"},
+    "nickel":  {"nickel", "ni"},
+    "uranium": {"uranium", "u", "u3o8"},
+    "iron":    {"iron", "iron ore", "fe"},
+    "pgm":     {"pgm", "platinum", "palladium", "pt", "pd", "pge"},
+}
+
+
+def _materials_compatible(target: str, candidate: str) -> bool:
+    """True if candidate commodity string is compatible with target material."""
+    t = target.strip().lower()
+    c = candidate.strip().lower()
+    if not c:
+        return True  # unknown commodity — let through, other filters may catch it
+    if t == c:
+        return True
+    return c in _COMMODITY_ALIASES.get(t, {t})
+
+
+# Grade-unit families: grades can only be compared within the same family.
+_GT_FAMILY = {"g/t", "g/t au", "g/t ag", "g/t pt", "g/t pd", "g/tpt", "ppm", "gpt", "oz/t"}
+_PCT_FAMILY = {"%", "percent", "pct", "% cu", "% ni", "% zn", "% pb", "% fe", "% u3o8", "% co"}
+
+
+def _grade_units_compatible(u1: str, u2: str) -> bool:
+    """False when units are from different families (e.g. g/t vs %) — comparing would give garbage ratios."""
+    if not u1 or not u2:
+        return True
+    n1 = u1.strip().lower()
+    n2 = u2.strip().lower()
+    in_gt1 = any(n1.startswith(k) or k in n1 for k in ("g/t", "ppm", "oz/t", "gpt"))
+    in_gt2 = any(n2.startswith(k) or k in n2 for k in ("g/t", "ppm", "oz/t", "gpt"))
+    in_pct1 = n1.startswith("%") or "percent" in n1
+    in_pct2 = n2.startswith("%") or "percent" in n2
+    if (in_gt1 and in_pct2) or (in_pct1 and in_gt2):
+        return False
+    return True
+
+
 _CONTINENT = {
     "australia": "oceania", "canada": "north_america", "usa": "north_america",
     "united states": "north_america", "mexico": "north_america",
@@ -103,12 +147,18 @@ def _score_candidate(project: dict, analog: dict) -> tuple[Optional[float], list
     # ── Factor 1: Grade similarity (max 35) ─────────────────────────────────
     p_g = float(project.get("grade_value") or 0)
     a_g = float(analog.get("grade_value") or 0)
+    p_gu = project.get("grade_unit") or ""
+    a_gu = analog.get("grade_unit") or ""
     if p_g > 0 and a_g > 0:
-        pts = _ratio_score(p_g, a_g, [(1.5, 35), (2.0, 25), (3.0, 15), (5.0, 5)])
-        ratio = round(max(p_g, a_g) / min(p_g, a_g), 1)
-        earned += pts
-        possible += 35
-        reasons.append(f"Grade {ratio}× match: {int(pts)}/35 pts")
+        if not _grade_units_compatible(p_gu, a_gu):
+            # Units are from different families (e.g. g/t vs %) — skip, don't score 0
+            reasons.append(f"Grade units incompatible ({p_gu!r} vs {a_gu!r}): skipped")
+        else:
+            pts = _ratio_score(p_g, a_g, [(1.5, 35), (2.0, 25), (3.0, 15), (5.0, 5)])
+            ratio = round(max(p_g, a_g) / min(p_g, a_g), 1)
+            earned += pts
+            possible += 35
+            reasons.append(f"Grade {ratio}× match: {int(pts)}/35 pts")
 
     # ── Factor 2: Tonnage similarity (max 25) ───────────────────────────────
     p_t = float(project.get("tonnage_mt") or 0)
@@ -164,11 +214,18 @@ def _score_candidate(project: dict, analog: dict) -> tuple[Optional[float], list
 
     # ── Need at least 2 factors to produce a meaningful score ────────────────
     # Deposit type always counts; check if any other factor was evaluated
-    other_factors_scored = p_g > 0 and a_g > 0 or p_t > 0 and a_t > 0 or (p_m and a_m) or (p_c and a_c)
+    other_factors_scored = (
+        (p_g > 0 and a_g > 0 and _grade_units_compatible(p_gu, a_gu))
+        or (p_t > 0 and a_t > 0)
+        or bool(p_m and a_m)
+        or bool(p_c and a_c)
+    )
     if not other_factors_scored:
         return None, ["Insufficient data for scoring (< 2 factors available)"]
 
-    score = round(earned, 1)
+    # Normalize to 0-100 percentage of the criteria we could actually evaluate.
+    # A perfect 3-factor match (no mining method / country data) → 100, not 80.
+    score = round((earned / possible * 100) if possible > 0 else 0, 1)
     return score, reasons
 
 
@@ -276,7 +333,9 @@ def exa_search_node(state: AnalogState) -> AnalogState:
         for i, a in enumerate(raw):
             exa_analogs.append({
                 "name": a.get("name", f"Unknown project {i}"),
-                "material": material,
+                # Use extracted commodity — enables real material validation downstream.
+                # Fall back to project material only when extraction returned nothing.
+                "material": (a.get("commodity") or "").strip().lower() or material,
                 "deposit_type": a.get("deposit_type"),
                 "tonnage_mt": a.get("tonnage_mt"),
                 "grade_value": a.get("grade_value"),
@@ -340,9 +399,9 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             logger.info(f"[filter] DISQUALIFY (self-analog): {name}")
             continue
 
-        # 2. Material mismatch
-        if c_material and target_material and c_material != target_material:
-            logger.info(f"[filter] DISQUALIFY (material): {name} — {c_material} ≠ {target_material}")
+        # 2. Commodity mismatch — uses alias map so gold_silver passes for both gold and silver targets
+        if c_material and target_material and not _materials_compatible(target_material, c_material):
+            logger.info(f"[filter] DISQUALIFY (commodity mismatch): {name} — {c_material} ≠ {target_material}")
             continue
 
         # 3. Tonnage >20x

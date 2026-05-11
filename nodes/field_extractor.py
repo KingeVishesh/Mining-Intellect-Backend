@@ -309,21 +309,25 @@ def extract_analog_projects(
     Returns a list of dicts matching the AnalogProject schema.
     """
     prompt = f"""Extract a list of mining project analogs from the text below.
-Material type: {material}
+Expected material type: {material}
 
 For each project extract:
 {{
   "name": string,
   "company": string,
   "country": string | null,
+  "commodity": string | null,   (primary commodity as a single lowercase word e.g. "silver", "gold", "copper", "nickel")
   "deposit_type": string | null,
   "tonnage_mt": number | null,   (in million tonnes)
-  "grade_value": number | null,
-  "grade_unit": string | null,
+  "grade_value": number | null,  (numeric value only, e.g. 350 for "350 g/t Ag")
+  "grade_unit": string | null,   (unit string e.g. "g/t Ag", "% Cu", "% Ni")
   "project_stage": string | null,
   "mining_method": string | null,
   "source_url": string | null
 }}
+
+IMPORTANT: Extract "commodity" from the text — do not assume it is {material}.
+If the text describes a gold project, set commodity to "gold" even if the expected material is "{material}".
 
 Return ONLY a JSON array of project objects. No other text.
 
