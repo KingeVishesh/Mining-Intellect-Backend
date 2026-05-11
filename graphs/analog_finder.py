@@ -273,14 +273,17 @@ def _score_candidate(project: dict, analog: dict) -> tuple[Optional[float], list
             reasons.append(f"Grade {ratio}× match: {int(pts)}/25 pts")
 
     # ── Factor 4: District / country (15 pts) ────────────────────────────────
-    # Always in pool when any country is known — serves as a geological-setting proxy
+    # Always added to possible when any country is known, but does NOT count toward
+    # the factors_in_pool minimum — it is a tiebreaker, not a primary similarity signal.
+    # Without this guard, a project with only grade+country (no geological text) could
+    # reach factors_in_pool=2 and score 0% instead of N/A when both earn 0 points.
     p_dist = (project.get("district") or "").strip()
     a_dist = (analog.get("district") or "").strip()
     p_c = (project.get("country") or "").strip().lower()
     a_c = (analog.get("country") or "").strip().lower()
     if p_c or a_c:
         possible += 15.0
-        factors_in_pool += 1
+        # intentionally NOT incrementing factors_in_pool here
         if p_dist and a_dist:
             pts = _geo_text_score(p_dist, a_dist, 15.0)
             if pts > 0:
