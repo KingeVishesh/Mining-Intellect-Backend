@@ -182,7 +182,7 @@ def build_model_1(
 
     if not valid:
         logger.warning("[Model1] No valid analogs with tonnage+grade — using minimal defaults")
-        return _minimal_model(project, material, "Model 1 (Independent)")
+        return _minimal_model(project, material, "MI Model (Pre-MRE)")
 
     # Load rule-based weighting context
     deposit_type = project.get("deposit_type")
@@ -258,7 +258,7 @@ def build_model_1(
     )
 
     return {
-        "model": "Model 1 (Independent)",
+        "model": "MI Model (Pre-MRE)",
         "mi_tonnage_kt": round(mi_kt, 2),
         "mi_grade_pct": round(grade, 4),
         "mi_contained_mlb": round(_contained_metal(mi_kt, grade, material), 3),
@@ -313,7 +313,7 @@ def build_model_2(
     conviction = min(100.0, model_1["conviction_pct"] * 0.3 + 65.0)
 
     return {
-        "model": "Model 2 (Updated)",
+        "model": "MI Model (Post-MRE)",
         "mi_tonnage_kt": round(mi_kt, 2),
         "mi_grade_pct": round(blended_grade, 4),
         "mi_contained_mlb": round(_contained_metal(mi_kt, blended_grade, material), 3),
@@ -323,7 +323,7 @@ def build_model_2(
         "total_tonnage_kt": round(blended_tonnage, 2),
         "total_grade_pct": round(blended_grade, 4),
         "total_contained_mlb": round(_contained_metal(blended_tonnage, blended_grade, material), 3),
-        "description": "Updated estimate reconciling independent model with official MRE (80/20 blend).",
+        "description": "MI estimate reconciling independent model with official MRE (80/20 blend).",
         "conviction_pct": round(conviction, 1),
         "analogs_used": model_1.get("analogs_used", []),
         "rules_applied": model_1.get("rules_applied", []),
@@ -575,7 +575,7 @@ def generate_report_narrative(
     grade_unit = project.get("grade_unit", "%")
     model_summary = json.dumps(model_1, indent=2)
     if model_2:
-        model_summary += "\n\nModel 2:\n" + json.dumps(model_2, indent=2)
+        model_summary += "\n\nMI Model (Post-MRE):\n" + json.dumps(model_2, indent=2)
 
     analogs_summary = json.dumps([
         {k: a.get(k) for k in ("name","tonnage_mt","grade_value","grade_unit","deposit_type","country","similarity_score")}
@@ -907,8 +907,8 @@ PROJECT CONTEXT:
 - Region: {project.get('region', 'N/A')}
 - Host Rock: {host_rock or 'N/A'}
 - Mineralization Style: {min_style or 'N/A'}
-- Total Tonnage (Model 1): {model_1.get('total_tonnage_kt', 0):,.0f} kt
-- Grade (Model 1): {model_1.get('total_grade_pct', 0):.4f}
+- Total Tonnage (MI Model): {model_1.get('total_tonnage_kt', 0):,.0f} kt
+- Grade (MI Model): {model_1.get('total_grade_pct', 0):.4f}
 - P10 Tonnage: {p10t:,.0f} kt | P90 Tonnage: {p90t:,.0f} kt
 - P10 Grade: {p10g:.4f} | P90 Grade: {p90g:.4f}
 - Analogs used (top 5): {analogs_mini}
@@ -977,7 +977,7 @@ Return a single valid JSON object with EXACTLY these 8 keys. Be specific, techni
     "audit_trail_notes": "1 paragraph on documentation requirements for NI 43-101 / JORC readiness"
   }},
   "conclusion": {{
-    "conclusion_text": "2-3 paragraphs: (1) methodology summary and confidence statement, (2) key findings with actual tonnage/grade numbers from Model 1, (3) path forward and next milestone",
+    "conclusion_text": "2-3 paragraphs: (1) methodology summary and confidence statement, (2) key findings with actual tonnage/grade numbers from the MI Model, (3) path forward and next milestone",
     "headline_finding": "One crisp sentence — the single most important finding from this entire report",
     "next_milestone": "The most critical next action to advance this project (specific, with timeframe)",
     "investment_readiness": "Pre-resource|Resource-stage|Development-ready"
