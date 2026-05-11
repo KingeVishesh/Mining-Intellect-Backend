@@ -314,19 +314,23 @@ Expected material type: {material}
 For each project extract:
 {{
   "name": string,
-  "company": string,
+  "company": string | null,
   "country": string | null,
-  "commodity": string | null,   (primary commodity as a single lowercase word e.g. "silver", "gold", "copper", "nickel")
-  "deposit_type": string | null,
-  "tonnage_mt": number | null,   (in million tonnes)
-  "grade_value": number | null,  (numeric value only, e.g. 350 for "350 g/t Ag")
-  "grade_unit": string | null,   (unit string e.g. "g/t Ag", "% Cu", "% Ni")
+  "commodity": string | null,            (primary commodity as a single lowercase word: "silver", "gold", "copper", "nickel")
+  "deposit_type": string | null,         (e.g. "porphyry copper-gold", "orogenic gold", "CRD silver-lead-zinc", "VMS")
+  "host_rock": string | null,            (rock type hosting the deposit, e.g. "limestone", "granite", "greenstone schist", "rhyolite")
+  "mineralization_style": string | null, (e.g. "epithermal vein", "porphyry disseminated Cu-Au", "CRD manto silver", "orogenic shear-hosted")
+  "district": string | null,             (geological district or province, e.g. "Abitibi Greenstone Belt", "Central Andes porphyry belt", "Chihuahua Mexico")
+  "tonnage_mt": number | null,           (in million tonnes)
+  "grade_value": number | null,          (numeric value only, e.g. 350 for "350 g/t Ag")
+  "grade_unit": string | null,           (unit string e.g. "g/t Ag", "% Cu", "% Ni")
   "project_stage": string | null,
   "mining_method": string | null,
   "source_url": string | null
 }}
 
 IMPORTANT: Extract "commodity" from the text — do not assume it is {material}.
+IMPORTANT: host_rock, mineralization_style, and district are critical for analog quality — extract them whenever mentioned.
 If the text describes a gold project, set commodity to "gold" even if the expected material is "{material}".
 
 Return ONLY a JSON array of project objects. No other text.

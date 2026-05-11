@@ -199,62 +199,74 @@ def search_analog_projects(
     grade_unit: Optional[str] = None,
     tonnage_mt: Optional[float] = None,
     country: Optional[str] = None,
+    host_rock: Optional[str] = None,
+    mineralization_style: Optional[str] = None,
 ) -> tuple[str, list[str]]:
     """
-    Find comparable mining projects via Exa using a rule-driven targeted query.
+    Find comparable mining projects via Exa using a geology-first targeted query.
+    Geological identity (deposit type, host rock, mineralization style) leads the query.
+    Grade and tonnage are secondary hints, not primary search criteria.
     Returns (synthesised_text, source_urls).
     """
-    # Build grade range string: prefer rule range over project grade
-    grade_min = (analog_rule or {}).get("grade_min")
-    grade_max = (analog_rule or {}).get("grade_max")
-    rule_grade_unit = (analog_rule or {}).get("grade_unit") or grade_unit or ""
-    if grade_min and grade_max:
-        grade_range_str = f"{grade_min}–{grade_max} {rule_grade_unit}".strip()
-    elif grade_value and grade_unit:
-        grade_range_str = f"approximately {grade_value} {grade_unit}"
-    else:
-        grade_range_str = ""
-
-    tonnage_str = f"approximately {tonnage_mt} Mt resource" if tonnage_mt else ""
     deposit_str = deposit_type or material
-    exclude_str = f" Do not include {project_name} itself." if project_name else ""
+    exclude_str = f"Do not include {project_name} itself." if project_name else ""
+    location_hint = f"Prefer projects in or near {country}." if country else ""
 
-    # Pull 3 most geologically specific criteria from the rule (skip "Exclude" lines)
+    # Build geological identity description — this is the primary search signal
+    geo_parts: list[str] = []
+    if mineralization_style:
+        geo_parts.append(f"with {mineralization_style} mineralization")
+    if host_rock:
+        geo_parts.append(f"hosted in {host_rock}")
+    # Pull up to 3 geologically specific criteria from the rule (skip "Exclude" lines)
     geo_criteria: list[str] = []
     for c in (analog_rule or {}).get("analog_criteria") or []:
         if not c.lower().startswith("exclude") and len(geo_criteria) < 3:
             geo_criteria.append(c)
-    criteria_str = " ".join(f"({c})" for c in geo_criteria) if geo_criteria else ""
+    if geo_criteria:
+        geo_parts.append("(" + "; ".join(geo_criteria) + ")")
+    geo_description = " ".join(geo_parts)
 
-    location_hint = f" Prefer projects in or near {country}." if country else ""
+    # Build grade range hint — secondary, only used if geological description is thin
+    grade_min = (analog_rule or {}).get("grade_min")
+    grade_max = (analog_rule or {}).get("grade_max")
+    rule_grade_unit = (analog_rule or {}).get("grade_unit") or grade_unit or ""
+    if grade_min and grade_max:
+        grade_hint = f"Grade range {grade_min}–{grade_max} {rule_grade_unit}.".strip()
+    elif grade_value and grade_unit:
+        grade_hint = f"Grade approximately {grade_value} {grade_unit}."
+    else:
+        grade_hint = ""
 
     query = (
-        f"List 5-8 {deposit_str} {material} mining projects with confirmed NI 43-101 or JORC "
-        f"resource estimates"
-        f"{(', ' + grade_range_str + ' grade') if grade_range_str else ''}"
-        f"{(', ' + tonnage_str) if tonnage_str else ''}."
-        f"{(' Key criteria: ' + criteria_str) if criteria_str else ''}"
-        f"{location_hint}"
-        f"{exclude_str}"
-        f" For each project provide: project name, company, country, deposit type, "
-        f"total resource tonnage (Mt), grade and unit, resource category (M&I/Inferred), "
-        f"project stage, and technical report reference."
+        f"Find 5-8 {deposit_str} {material} deposits "
+        f"{geo_description + ' ' if geo_description else ''}"
+        f"with confirmed NI 43-101 or JORC resource estimates. "
+        f"{grade_hint + ' ' if grade_hint else ''}"
+        f"{location_hint + ' ' if location_hint else ''}"
+        f"{exclude_str + ' ' if exclude_str else ''}"
+        f"For each project provide: project name, company, country, deposit type, "
+        f"host rock type, mineralization style, geological district or province, "
+        f"total resource tonnage (Mt), grade and unit, resource category "
+        f"(Measured/Indicated/Inferred), project stage, and technical report reference."
     )
 
     payload = {
         "query": query,
         "type": "deep",
         "systemPrompt": (
-            "You are a mining industry analyst. Focus exclusively on projects with confirmed "
-            "NI 43-101 or JORC compliant resource estimates. List distinct projects with "
-            "their exact resource figures from technical reports. Do not include exploration "
-            "targets without a resource estimate."
+            "You are a mining industry geologist. For each project, prioritize describing "
+            "the geological characteristics: deposit type, host rock type, mineralization "
+            "style, and geological district or province. Resource figures must come from "
+            "NI 43-101 or JORC compliant technical reports — do not include exploration "
+            "targets without a resource estimate. Report exact figures with units."
         ),
         "outputSchema": {
             "type": "text",
             "description": (
-                "For each comparable project list: project name, company name, country, "
-                "deposit type, total resource tonnage (Mt), grade and unit, resource category, "
+                "For each comparable project list: project name, company, country, "
+                "deposit type, host rock, mineralization style, geological district/province, "
+                "total resource tonnage (Mt), grade and unit, resource category, "
                 "project stage, and the technical report reference."
             ),
         },

@@ -84,7 +84,8 @@ def get_approved_analogs(
         .select(
             "analog_name,analog_material,analog_deposit_type,analog_country,"
             "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
-            "similarity_score,analog_project_stage"
+            "similarity_score,analog_project_stage,"
+            "analog_host_rock,analog_mineralization_style,analog_district"
         )
         .in_("analog_material", keys)
         .eq("status", "approved")
@@ -111,6 +112,9 @@ def get_approved_analogs(
             "name": name,
             "material": r.get("analog_material") or material,
             "deposit_type": r.get("analog_deposit_type"),
+            "host_rock": r.get("analog_host_rock"),
+            "mineralization_style": r.get("analog_mineralization_style"),
+            "district": r.get("analog_district"),
             "country": r.get("analog_country"),
             "tonnage_mt": r.get("analog_tonnage_mt"),
             "grade_value": r.get("analog_grade_value"),
@@ -476,6 +480,9 @@ def save_report_analogs(
             "analog_name": a.get("name") or a.get("project_name") or "Unknown",
             "analog_material": a.get("material"),
             "analog_deposit_type": a.get("deposit_type"),
+            "analog_host_rock": a.get("host_rock"),
+            "analog_mineralization_style": a.get("mineralization_style"),
+            "analog_district": a.get("district"),
             "analog_country": a.get("country"),
             "analog_tonnage_mt": a.get("tonnage_mt"),
             "analog_grade_value": a.get("grade_value"),
@@ -495,6 +502,9 @@ def save_report_analogs(
             "analog_name": a.get("name") or a.get("project_name") or "Unknown",
             "analog_material": a.get("material"),
             "analog_deposit_type": a.get("deposit_type"),
+            "analog_host_rock": a.get("host_rock"),
+            "analog_mineralization_style": a.get("mineralization_style"),
+            "analog_district": a.get("district"),
             "analog_country": a.get("country"),
             "analog_tonnage_mt": a.get("tonnage_mt"),
             "analog_grade_value": a.get("grade_value"),

@@ -123,108 +123,192 @@ def _ratio_score(a: float, b: float, bands: list[tuple[float, float]]) -> float:
     return 0.0
 
 
-def _deposit_family(dep: str) -> str:
-    """Reduce a deposit_type to a family key for partial matching."""
-    dep = dep.lower().replace("-", " ").replace("_", " ")
-    for family in ("epithermal", "porphyry", "vms", "skarn", "sediment",
-                   "orogenic", "carlin", "laterite", "magmatic", "unconformity",
-                   "roll front", "bif", "magnetite", "merensky", "platreef", "ug2"):
-        if family in dep:
+def _deposit_type_family(dep: str) -> Optional[str]:
+    """
+    Return the geological deposit-type family for a deposit type string.
+    Returns None when unrecognized — the gate only fires when BOTH sides return a known family.
+
+    Families are intentionally coarse: porphyry-Cu and porphyry-Au share a family;
+    porphyry and epithermal do not, even though they share a genetic link.
+    """
+    if not dep:
+        return None
+    d = dep.strip().lower().replace("-", " ").replace("_", " ")
+    for keyword, family in (
+        ("porphyry",               "porphyry"),
+        ("epithermal",             "epithermal"),
+        ("low sulphidation",       "epithermal"),
+        ("high sulphidation",      "epithermal"),
+        ("intermediate sulphidation", "epithermal"),
+        ("orogenic",               "orogenic"),
+        ("mesothermal",            "orogenic"),
+        ("lode gold",              "orogenic"),
+        ("vms",                    "vms"),
+        ("vhms",                   "vms"),
+        ("volcanic hosted",        "vms"),
+        ("volcanogenic",           "vms"),
+        ("carlin",                 "carlin"),
+        ("iocg",                   "iocg"),
+        ("iron oxide copper",      "iocg"),
+        ("skarn",                  "skarn"),
+        ("sediment hosted",        "sediment_hosted"),
+        ("sediment",               "sediment_hosted"),
+        ("sedex",                  "sediment_hosted"),
+        ("manto",                  "sediment_hosted"),
+        ("crd",                    "sediment_hosted"),
+        ("mvt",                    "sediment_hosted"),
+        ("carbonate replacement",  "sediment_hosted"),
+        ("bif",                    "bif"),
+        ("magnetite",              "bif"),
+        ("banded iron",            "bif"),
+        ("laterite",               "laterite"),
+        ("saprolite",              "laterite"),
+        ("magmatic sulphide",      "magmatic_sulphide"),
+        ("magmatic",               "magmatic_sulphide"),
+        ("komatiite",              "magmatic_sulphide"),
+        ("unconformity",           "unconformity"),
+        ("roll front",             "rollfront"),
+        ("rollfront",              "rollfront"),
+        ("merensky",               "pgm_reef"),
+        ("platreef",               "pgm_reef"),
+        ("ug2",                    "pgm_reef"),
+    ):
+        if keyword in d:
             return family
-    return dep
+    return None
+
+
+_GEO_STOP_WORDS = frozenset({
+    "the", "a", "an", "and", "or", "of", "with", "type", "style", "hosted",
+    "deposit", "mineralisation", "mineralization", "bearing", "rich", "related",
+    "associated", "in", "at", "from", "by", "to",
+})
+
+
+def _geo_text_score(a: str, b: str, max_pts: float) -> float:
+    """
+    Score geological text similarity by meaningful word overlap (Jaccard + coverage).
+
+    Three tiers:
+      ≥70% overlap → full score      (same geological description)
+      ≥30% overlap → 65% of max     (same family, different qualifier)
+      any 1+ word overlap → 25% of max  (related but distinct)
+    Returns 0 when no overlap.
+    """
+    a_words = {w for w in re.split(r"[\s\-_/,]+", a.lower())
+               if len(w) > 2 and w not in _GEO_STOP_WORDS}
+    b_words = {w for w in re.split(r"[\s\-_/,]+", b.lower())
+               if len(w) > 2 and w not in _GEO_STOP_WORDS}
+    if not a_words or not b_words:
+        return 0.0
+    overlap = len(a_words & b_words)
+    if overlap == 0:
+        return 0.0
+    union = len(a_words | b_words)
+    jaccard = overlap / union
+    coverage = overlap / min(len(a_words), len(b_words))
+    ratio = max(jaccard, coverage)
+    if ratio >= 0.70:
+        return max_pts
+    elif ratio >= 0.30:
+        return round(max_pts * 0.65, 1)
+    else:
+        return round(max_pts * 0.25, 1)
 
 
 def _score_candidate(project: dict, analog: dict) -> tuple[Optional[float], list[str]]:
     """
-    Deterministic 5-factor scoring. Returns (score | None, reasons).
+    Geology-first deterministic scoring. Returns (score | None, reasons).
     score is None when < 2 factors can be evaluated (insufficient data).
-    Max possible score: 100.
+    Max possible: 100 pts.
+
+    Factor hierarchy — geological identity before numerical confirmation:
+      1. Mineralization style  35 pts  (primary geological identity — skipped if either null)
+      2. Host rock             25 pts  (secondary geological identity — skipped if either null)
+      3. Grade similarity      25 pts  (quantitative confirmation — skipped if either null)
+      4. District / country    15 pts  (geographical tiebreaker — always in pool if any country known)
+
+    Deposit type is a HARD GATE in combine_filter_score_node — it is not a scored factor here.
+    Tonnage and mining method are removed: too stage-dependent to be reliable similarity signals.
     """
     earned = 0.0
     possible = 0.0
     reasons: list[str] = []
+    factors_in_pool = 0
 
-    # ── Factor 1: Grade similarity (max 35) ─────────────────────────────────
+    # ── Factor 1: Mineralization style (35 pts) ──────────────────────────────
+    p_ms = (project.get("mineralization_style") or "").strip()
+    a_ms = (analog.get("mineralization_style") or "").strip()
+    if p_ms and a_ms:
+        pts = _geo_text_score(p_ms, a_ms, 35.0)
+        earned += pts
+        possible += 35.0
+        factors_in_pool += 1
+        reasons.append(f"Min. style ({a_ms!r}): {int(pts)}/35 pts")
+
+    # ── Factor 2: Host rock (25 pts) ─────────────────────────────────────────
+    p_hr = (project.get("host_rock") or "").strip()
+    a_hr = (analog.get("host_rock") or "").strip()
+    if p_hr and a_hr:
+        pts = _geo_text_score(p_hr, a_hr, 25.0)
+        earned += pts
+        possible += 25.0
+        factors_in_pool += 1
+        reasons.append(f"Host rock ({a_hr!r}): {int(pts)}/25 pts")
+
+    # ── Factor 3: Grade similarity (25 pts) ──────────────────────────────────
     p_g = float(project.get("grade_value") or 0)
     a_g = float(analog.get("grade_value") or 0)
     p_gu = project.get("grade_unit") or ""
     a_gu = analog.get("grade_unit") or ""
     if p_g > 0 and a_g > 0:
         if not _grade_units_compatible(p_gu, a_gu):
-            # Units are from different families (e.g. g/t vs %) — skip, don't score 0
             reasons.append(f"Grade units incompatible ({p_gu!r} vs {a_gu!r}): skipped")
         else:
-            pts = _ratio_score(p_g, a_g, [(1.5, 35), (2.0, 25), (3.0, 15), (5.0, 5)])
+            pts = _ratio_score(p_g, a_g, [(1.5, 25), (2.0, 18), (3.0, 10), (5.0, 3)])
             ratio = round(max(p_g, a_g) / min(p_g, a_g), 1)
             earned += pts
-            possible += 35
-            reasons.append(f"Grade {ratio}× match: {int(pts)}/35 pts")
+            possible += 25.0
+            factors_in_pool += 1
+            reasons.append(f"Grade {ratio}× match: {int(pts)}/25 pts")
 
-    # ── Factor 2: Tonnage similarity (max 25) ───────────────────────────────
-    p_t = float(project.get("tonnage_mt") or 0)
-    a_t = float(analog.get("tonnage_mt") or 0)
-    if p_t > 0 and a_t > 0:
-        pts = _ratio_score(p_t, a_t, [(2.0, 25), (3.0, 18), (5.0, 10), (10.0, 3)])
-        ratio = round(max(p_t, a_t) / min(p_t, a_t), 1)
-        earned += pts
-        possible += 25
-        reasons.append(f"Tonnage {ratio}× match: {int(pts)}/25 pts")
-
-    # ── Factor 3: Deposit type (max 20, always evaluated — 0 if missing) ────
-    p_dep = (project.get("deposit_type") or "").strip().lower()
-    a_dep = (analog.get("deposit_type") or "").strip().lower()
-    possible += 20
-    if p_dep and a_dep:
-        if p_dep == a_dep or p_dep in a_dep or a_dep in p_dep:
-            earned += 20
-            reasons.append(f"Deposit type exact match ({a_dep}): 20/20 pts")
-        elif _deposit_family(p_dep) == _deposit_family(a_dep):
-            earned += 10
-            reasons.append(f"Deposit type family match ({_deposit_family(p_dep)}): 10/20 pts")
-        else:
-            reasons.append(f"Deposit type mismatch ({p_dep} vs {a_dep}): 0/20 pts")
-    else:
-        reasons.append("Deposit type: unknown, 0/20 pts")
-
-    # ── Factor 4: Mining method (max 10) ────────────────────────────────────
-    p_m = (project.get("mining_method") or "").strip().lower()
-    a_m = (analog.get("mining_method") or "").strip().lower()
-    if p_m and a_m:
-        pts = 10.0 if p_m == a_m else 0.0
-        earned += pts
-        possible += 10
-        reasons.append(f"Mining method: {int(pts)}/10 pts")
-
-    # ── Factor 5: Country / region (max 10) ─────────────────────────────────
+    # ── Factor 4: District / country (15 pts) ────────────────────────────────
+    # Always in pool when any country is known — serves as a geological-setting proxy
+    p_dist = (project.get("district") or "").strip()
+    a_dist = (analog.get("district") or "").strip()
     p_c = (project.get("country") or "").strip().lower()
     a_c = (analog.get("country") or "").strip().lower()
-    if p_c and a_c:
-        if p_c == a_c:
-            earned += 10; possible += 10
-            reasons.append(f"Same country ({a_c}): 10/10 pts")
-        else:
-            p_cont = _continent(p_c)
-            a_cont = _continent(a_c)
-            if p_cont and p_cont == a_cont:
-                earned += 5; possible += 10
-                reasons.append(f"Same region ({p_cont}): 5/10 pts")
+    if p_c or a_c:
+        possible += 15.0
+        factors_in_pool += 1
+        if p_dist and a_dist:
+            pts = _geo_text_score(p_dist, a_dist, 15.0)
+            if pts > 0:
+                earned += pts
+                reasons.append(f"District match ({a_dist!r}): {int(pts)}/15 pts")
+            elif p_c and a_c and p_c == a_c:
+                earned += 8.0
+                reasons.append(f"Same country ({a_c}): 8/15 pts")
             else:
-                possible += 10
-                reasons.append("Different country/region: 0/10 pts")
+                reasons.append("Different district/country: 0/15 pts")
+        elif p_c and a_c:
+            if p_c == a_c:
+                earned += 8.0
+                reasons.append(f"Same country ({a_c}): 8/15 pts")
+            else:
+                p_cont = _continent(p_c)
+                a_cont = _continent(a_c)
+                if p_cont and p_cont == a_cont:
+                    earned += 4.0
+                    reasons.append(f"Same region ({p_cont}): 4/15 pts")
+                else:
+                    reasons.append(f"Different country ({a_c}): 0/15 pts")
+        else:
+            reasons.append("Country unknown: 0/15 pts")
 
-    # ── Need at least 2 factors to produce a meaningful score ────────────────
-    # Deposit type always counts; check if any other factor was evaluated
-    other_factors_scored = (
-        (p_g > 0 and a_g > 0 and _grade_units_compatible(p_gu, a_gu))
-        or (p_t > 0 and a_t > 0)
-        or bool(p_m and a_m)
-        or bool(p_c and a_c)
-    )
-    if not other_factors_scored:
-        return None, ["Insufficient data for scoring (< 2 factors available)"]
+    if factors_in_pool < 2:
+        return None, ["Insufficient geological data (< 2 factors available)"]
 
-    # Normalize to 0-100 percentage of the criteria we could actually evaluate.
-    # A perfect 3-factor match (no mining method / country data) → 100, not 80.
     score = round((earned / possible * 100) if possible > 0 else 0, 1)
     return score, reasons
 
@@ -325,6 +409,8 @@ def exa_search_node(state: AnalogState) -> AnalogState:
         grade_unit=project.get("grade_unit"),
         tonnage_mt=project.get("tonnage_mt"),
         country=project.get("country"),
+        host_rock=project.get("host_rock"),
+        mineralization_style=project.get("mineralization_style"),
     )
 
     exa_analogs = []
@@ -337,6 +423,9 @@ def exa_search_node(state: AnalogState) -> AnalogState:
                 # Fall back to project material only when extraction returned nothing.
                 "material": (a.get("commodity") or "").strip().lower() or material,
                 "deposit_type": a.get("deposit_type"),
+                "host_rock": a.get("host_rock"),
+                "mineralization_style": a.get("mineralization_style"),
+                "district": a.get("district"),
                 "tonnage_mt": a.get("tonnage_mt"),
                 "grade_value": a.get("grade_value"),
                 "grade_unit": a.get("grade_unit"),
@@ -364,15 +453,17 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
 
     project_name = project.get("name") or ""
     target_material = (project.get("material") or "").lower()
+    target_deposit = (project.get("deposit_type") or "").lower()
     p_tonnage = float(project.get("tonnage_mt") or 0)
 
     # Grade range from rule for deposit-level validation
     rule_grade_min = float((analog_rule or {}).get("grade_min") or 0)
     rule_grade_max = float((analog_rule or {}).get("grade_max") or 0)
     exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
+    target_family = _deposit_type_family(target_deposit)
     logger.info(
         f"[score] {len(library)} library + {len(exa)} exa = {len(all_candidates)} candidates | "
-        f"exclusions={exclusions}"
+        f"target_family={target_family!r} exclusions={exclusions}"
     )
 
     # ── Step A: Dedup by normalized name ───────────────────────────────────
@@ -404,21 +495,33 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             logger.info(f"[filter] DISQUALIFY (commodity mismatch): {name} — {c_material} ≠ {target_material}")
             continue
 
-        # 3. Tonnage >20x
+        # 3. Deposit type family gate — incompatible geological families are hard disqualifications.
+        # Fires only when BOTH target AND candidate have a recognizable family.
+        # e.g. porphyry target + sediment-hosted candidate → disqualify (prevents La Joya-type errors)
+        # e.g. porphyry target + unknown candidate → pass through (give benefit of doubt)
+        if target_family and c_dep:
+            c_family = _deposit_type_family(c_dep)
+            if c_family and c_family != target_family:
+                logger.info(
+                    f"[filter] DISQUALIFY (deposit family {target_family!r} ≠ {c_family!r}): {name}"
+                )
+                continue
+
+        # 5. Tonnage >20x (extreme scale outlier — not a geological filter)
         if p_tonnage > 0 and c_tonnage > 0:
             ratio = max(p_tonnage, c_tonnage) / min(p_tonnage, c_tonnage)
             if ratio > 20:
                 logger.info(f"[filter] DISQUALIFY (tonnage {ratio:.0f}×): {name}")
                 continue
 
-        # 4. Deposit type exclusion from rule criteria
+        # 6. Deposit type exclusion from rule criteria (expert-coded edge cases beyond family gate)
         if c_dep and exclusions:
             excluded = any(excl in c_dep for excl in exclusions)
             if excluded:
                 logger.info(f"[filter] DISQUALIFY (excluded deposit type '{c_dep}'): {name}")
                 continue
 
-        # 5. Grade outside deposit-type range by >3x
+        # 7. Grade outside deposit-type range by >3x
         if c_grade > 0 and rule_grade_min > 0 and rule_grade_max > 0:
             if c_grade < rule_grade_min / 3 or c_grade > rule_grade_max * 3:
                 logger.info(f"[filter] DISQUALIFY (grade {c_grade} outside rule range {rule_grade_min}-{rule_grade_max} ×3): {name}")
