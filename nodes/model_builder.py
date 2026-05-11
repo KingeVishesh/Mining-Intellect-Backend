@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from nodes.llm_factory import get_llm
 from nodes.rules_engine import get_analog_rule, get_stage_modifier_map
@@ -133,6 +133,74 @@ _RESOURCE_CAPTURE_FRACTIONS: Dict[str, float] = {
     "epithermal":   0.40,
     "orogenic":     0.35,
 }
+
+
+_PRE_TIER_LABELS: Dict[int, str] = {
+    1: "Indicative",
+    2: "Exploratory",
+    3: "Developing",
+    4: "Advanced",
+    5: "High-Confidence",
+}
+
+_POST_TIER_LABELS: Dict[int, str] = {
+    1: "Preliminary",
+    2: "Resource-Stage",
+    3: "Scoping",
+    4: "Pre-Feasibility",
+    5: "Feasibility",
+}
+
+
+def _compute_pre_tier(conviction_pct: float) -> Tuple[str, str]:
+    """
+    Convert a 0-100 Pre-MRE conviction score to a PRE-1..PRE-5 tier.
+
+    PRE-5 is only reachable when geometry-constrained (conviction > 56 bypasses
+    the analog-only ceiling of 55). Boundaries are calibrated to the conviction
+    formula outputs rather than being arbitrary percentages.
+    """
+    if conviction_pct < 10:
+        n = 1   # Industry median fallback, no usable analogs
+    elif conviction_pct < 25:
+        n = 2   # Project data only / very weak analogs
+    elif conviction_pct < 40:
+        n = 3   # Analogs found, deposit type known, no geometry
+    elif conviction_pct <= 56:
+        n = 4   # Strong analogs at the analog-only conviction ceiling
+    else:
+        n = 5   # Geometry-constrained estimate (strike × width × depth)
+    return f"PRE-{n}", _PRE_TIER_LABELS[n]
+
+
+def _compute_post_tier(conviction_pct: float, project: Dict) -> Tuple[str, str]:
+    """
+    Map project stage + model conviction to a POST-1..POST-5 tier.
+
+    Stage is the primary driver once an official MRE exists. Conviction only
+    causes a demotion to POST-1 when the underlying MI Model was at the
+    absolute floor (minimal fallback, conviction < 67).
+    """
+    stage = (project.get("project_stage") or "").lower()
+
+    if any(k in stage for k in (
+        "feasibility study", "bankable", " bfs", " dfs", " fs",
+        "production", "construction", "operation", "producing",
+    )):
+        n = 5
+    elif any(k in stage for k in ("pre-feasibility", "prefeasibility", " pfs")):
+        n = 4
+    elif any(k in stage for k in (
+        "pea", "scoping", "preliminary economic", "economic assessment",
+        "preliminary assessment",
+    )):
+        n = 3
+    elif conviction_pct < 67:
+        n = 1   # MRE exists but underlying model was at minimum floor
+    else:
+        n = 2   # Standard resource-stage MRE, no completed study
+
+    return f"POST-{n}", _POST_TIER_LABELS[n]
 
 
 def _estimate_tonnage_from_geometry(project: Dict, deposit_type: str) -> Optional[float]:
@@ -257,6 +325,7 @@ def build_model_1(
         else "analog weighted average (no geometry data available)"
     )
 
+    tier, tier_label = _compute_pre_tier(conviction)
     return {
         "model": "MI Model (Pre-MRE)",
         "mi_tonnage_kt": round(mi_kt, 2),
@@ -274,6 +343,8 @@ def build_model_1(
             f"Tonnage from {tonnage_note}.{tonnage_divergence_note}"
         ),
         "conviction_pct": round(conviction, 1),
+        "conviction_tier": tier,
+        "conviction_label": tier_label,
         "analogs_used": [a.get("name", "unknown") for a in valid],
         "rules_applied": adj.get("rules_applied", []),
     }
@@ -311,6 +382,7 @@ def build_model_2(
 
     # Model 2 conviction is higher because we have official data
     conviction = min(100.0, model_1["conviction_pct"] * 0.3 + 65.0)
+    tier, tier_label = _compute_post_tier(conviction, project)
 
     return {
         "model": "MI Model (Post-MRE)",
@@ -325,6 +397,8 @@ def build_model_2(
         "total_contained_mlb": round(_contained_metal(blended_tonnage, blended_grade, material), 3),
         "description": "MI estimate reconciling independent model with official MRE (80/20 blend).",
         "conviction_pct": round(conviction, 1),
+        "conviction_tier": tier,
+        "conviction_label": tier_label,
         "analogs_used": model_1.get("analogs_used", []),
         "rules_applied": model_1.get("rules_applied", []),
     }
@@ -372,6 +446,7 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
     if own_kt > 0 and own_g > 0:
         mi_kt  = own_kt * 0.70
         inf_kt = own_kt * 0.30
+        tier, tier_label = _compute_pre_tier(15.0)
         return {
             "model": label,
             "mi_tonnage_kt": round(mi_kt, 2),
@@ -385,6 +460,8 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
             "total_contained_mlb": round(_contained_metal(own_kt, own_g, material), 3),
             "description": "Estimate based on project data only (no comparable analog data available).",
             "conviction_pct": 15.0,
+            "conviction_tier": tier,
+            "conviction_label": tier_label,
             "analogs_used": [],
             "rules_applied": [],
         }
@@ -399,6 +476,7 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
         inf_kt   = med_kt * 0.40
         logger.warning(f"[_minimal_model] No data for {label} — using {norm} industry median "
                        f"({med['tonnage_mt']} Mt @ {med_g} {med['unit']}) at 5% conviction")
+        tier, tier_label = _compute_pre_tier(5.0)
         return {
             "model": label,
             "mi_tonnage_kt": round(mi_kt, 2),
@@ -416,10 +494,13 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
                 "Do NOT use these numbers for investment or technical decisions."
             ),
             "conviction_pct": 5.0,
+            "conviction_tier": tier,
+            "conviction_label": tier_label,
             "analogs_used": [],
             "rules_applied": [],
         }
     # Unknown material — truly no data
+    tier, tier_label = _compute_pre_tier(0.0)
     return {
         "model": label,
         "mi_tonnage_kt": 0.0,
@@ -433,6 +514,8 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
         "total_contained_mlb": 0.0,
         "description": "Insufficient data — no analogs, no project MRE, and no industry median available.",
         "conviction_pct": 0.0,
+        "conviction_tier": tier,
+        "conviction_label": tier_label,
         "analogs_used": [],
         "rules_applied": [],
     }

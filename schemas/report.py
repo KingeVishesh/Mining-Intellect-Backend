@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 
 class ComparisonTableRow(BaseModel):
-    model: str                      # "Model 1 (Independent)" | "Model 2 (Updated)" | "Official MRE"
+    model: str                      # "MI Model (Pre-MRE)" | "MI Model (Post-MRE)" | "Official MRE"
     mi_tonnage_kt: float
     mi_grade_pct: float
     mi_contained_mlb: float
@@ -22,6 +22,9 @@ class ComparisonTableRow(BaseModel):
     total_grade_pct: float
     total_contained_mlb: float
     description: str
+    conviction_pct: Optional[float] = None
+    conviction_tier: Optional[str] = None    # e.g. "PRE-3" or "POST-2"
+    conviction_label: Optional[str] = None  # e.g. "Developing" or "Resource-Stage"
 
 
 class ResourceEstimates(BaseModel):

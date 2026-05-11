@@ -217,10 +217,14 @@ def generate_report_node(state: ReportState) -> ReportState:
             comparison_table=[ComparisonTableRow(**row) for row in comparison_table],
             independent_analysis={
                 "confidence_pct": model_1.get("conviction_pct", 0),
+                "conviction_tier": model_1.get("conviction_tier"),
+                "conviction_label": model_1.get("conviction_label"),
                 "key_factors": model_1.get("analogs_used", [])[:3],
             },
             updated_analysis={
                 "confidence_pct": (model_2 or {}).get("conviction_pct", 0),
+                "conviction_tier": (model_2 or {}).get("conviction_tier"),
+                "conviction_label": (model_2 or {}).get("conviction_label"),
                 "key_factors": [(model_2 or {}).get("description", "No updated model")],
             },
             compliance_summary=[
