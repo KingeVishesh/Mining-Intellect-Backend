@@ -270,10 +270,14 @@ def detect_subtype(
             return "bif_hosted_orogenic"
         return "orogenic_general"
 
-    # Sediment-hosted Cu
+    # Sediment-hosted Cu — includes stratabound/stratiform language and the
+    # Central African Copperbelt (Kamoa-Kakula, Tenke-Fungurume) style which
+    # is rarely tagged with the "sediment-hosted" keyword in technical reports.
     if any(k in blob for k in ("sedex", "kupferschiefer", "manto", "crd", "mvt",
                                 "sediment hosted", "sediment-hosted", "carbonate replacement",
-                                "redbed copper")):
+                                "redbed copper", "stratabound", "stratiform",
+                                "central african copperbelt", "copperbelt", "katanga",
+                                "lualaba")):
         if "sedex" in blob:
             return "sedex"
         if "kupferschiefer" in blob:
@@ -286,10 +290,14 @@ def detect_subtype(
             return "mvt"
         if "redbed" in blob:
             return "redbed_cu"
+        if any(k in blob for k in ("copperbelt", "katanga", "lualaba")):
+            return "kupferschiefer_style"  # CACB is the closest analog family
         return "sediment_hosted_general"
 
-    # VMS
-    if "vms" in blob or "vhms" in blob or "volcanic hosted massive sulphide" in blob:
+    # VMS (after porphyry/iocg/sediment because those are more specific)
+    if any(k in blob for k in ("vms", "vhms", "volcanic hosted massive sulphide",
+                                "volcanic-hosted massive sulphide",
+                                "volcanogenic massive sulphide", "volcanogenic massive sulfide")):
         return "vms_general"
 
     # Carlin

@@ -290,10 +290,23 @@ ANALOG_SELECTION_RULES = [
         "required_subtypes":   ["alkalic_porphyry"],
         "required_modes":      ["primary_sulfide"],
         "preferred_belts":     ["bc_quesnel_stikine", "lachlan"],
+        # Exhaustive negative list — defence in depth alongside the positive
+        # required_subtypes filter. Every non-alkalic copper sub-type is listed
+        # so that even when get_analog_rule routes incorrectly, the cascade
+        # still drops wrong analogs (e.g. Jasperoide skarn, Kamoa-Kakula
+        # sediment-hosted, Sherridon VMS, La Granja calc-alkalic).
         "excluded_subtypes":   [
-            "laramide_porphyry", "high_sulfidation_lithocap_porphyry",
+            "calc_alkalic_porphyry", "laramide_porphyry",
+            "high_sulfidation_lithocap_porphyry",
             "iocg_oxide", "iocg_sulfide", "iocg_hybrid",
             "oxide_iscr_supergene_blanket",
+            "cu_au_skarn", "fe_skarn", "zn_pb_skarn", "w_mo_skarn", "skarn_general",
+            "vms_general",
+            "sedex", "kupferschiefer_style", "manto_cu", "crd", "mvt",
+            "redbed_cu", "sediment_hosted_general",
+            "carlin_general",
+            "komatiite_hosted", "conduit_hosted", "magmatic_sulphide_general",
+            "limonite_laterite", "saprolite_laterite", "laterite_general",
         ],
         "excluded_modes":      ["supergene_oxide", "free_milling_oxide"],
         "excluded_recovery":   ["heap_leach", "iscr", "sx_ew"],

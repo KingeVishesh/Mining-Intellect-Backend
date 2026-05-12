@@ -642,6 +642,11 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     excluded_subtypes = set((analog_rule or {}).get("excluded_subtypes") or [])
     excluded_modes = set((analog_rule or {}).get("excluded_modes") or [])
     excluded_recovery = set((analog_rule or {}).get("excluded_recovery") or [])
+    # Positive required list — when the rule specifies required_subtypes,
+    # any candidate with a CONFIDENTLY-DETECTED different subtype is dropped.
+    # Candidates with null subtype are NOT dropped here (would discard too many
+    # poorly-enriched library/exa candidates); they fall through to L3 instead.
+    required_subtypes = set((analog_rule or {}).get("required_subtypes") or [])
 
     logger.info(
         f"[cascade] {len(library)} library + {len(exa)} exa = {len(all_candidates)} "
@@ -688,6 +693,38 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             dropped_counts["rule_recovery"] = dropped_counts.get("rule_recovery", 0) + 1
             continue
 
+        # Positive required_subtypes filter — when the rule pins a subtype list,
+        # any candidate with a detected subtype OUTSIDE that list is dropped.
+        # This catches candidates that fell through the negative excluded_subtypes
+        # check because the exclusion list wasn't exhaustive (e.g. Jasperoide skarn
+        # for the alkalic-porphyry rule whose excluded list didn't enumerate skarn).
+        if required_subtypes and cand_profile["deposit_subtype"]:
+            if cand_profile["deposit_subtype"] not in required_subtypes:
+                logger.info(
+                    f"[cascade] DROP rule required-subtype mismatch "
+                    f"({cand_profile['deposit_subtype']} not in {sorted(required_subtypes)}): {c.get('name')}"
+                )
+                dropped_counts["rule_required_subtype"] = dropped_counts.get("rule_required_subtype", 0) + 1
+                continue
+
+        # Strict-mode drop for unenriched candidates — when the rule pins a
+        # subtype list, candidates with NO subtype AND NO deposit_type / no
+        # mineralization_style cannot be classified. Better to drop than
+        # include unsubstantiated analogs (the Hat Copper run picked
+        # La Granja and Sherridon precisely because they had no enrichment
+        # and the cascade had nothing to filter on).
+        if required_subtypes and not cand_profile["deposit_subtype"]:
+            has_text = bool(
+                (c.get("deposit_type") or "").strip()
+                or (c.get("mineralization_style") or "").strip()
+            )
+            if not has_text:
+                logger.info(
+                    f"[cascade] DROP unenriched (no subtype, no deposit_type, no min_style): {c.get('name')}"
+                )
+                dropped_counts["unenriched"] = dropped_counts.get("unenriched", 0) + 1
+                continue
+
         # Legacy "Exclude X analogs" text patterns (for rules without structured fields)
         c_dep_lower = (c.get("deposit_type") or "").lower()
         if c_dep_lower and rule_exclusions:
@@ -723,7 +760,9 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         f"[cascade] {len(survivors)} survivors | dropped: {dict(dropped_counts) or 'none'}"
     )
 
-    # ── Step D: Rank by total points; take top 4-6 ─────────────────────────
+    # ── Step D: Rank by total points; HARD CAP at 4 ────────────────────────
+    # Per product requirement: max 4 analogs. Better to have 4 strong matches
+    # than dilute with weaker candidates.
     ranked = sorted(survivors, key=lambda x: -x["_rank_pts"])
     low_confidence = len(ranked) < 2
     if low_confidence:
@@ -733,11 +772,7 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         )
         top = ranked[:2]
     else:
-        top = ranked[:6]
-        # If a clear best tier exists, prefer the top 4-6 with the highest scores;
-        # don't dilute with weak ones.
-        if len(top) > 4 and top[3]["_rank_pts"] < top[0]["_rank_pts"] / 2:
-            top = top[:4]
+        top = ranked[:4]
 
     # Strip internal-only keys before returning
     for s in top:
