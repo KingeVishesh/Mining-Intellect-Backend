@@ -190,6 +190,30 @@ def search_missing_fields(
 
 # ── 2. Analog Search ──────────────────────────────────────────────────────────
 
+# Belt → human-readable hint for prompt construction
+_BELT_HINTS: dict = {
+    "bc_quesnel_stikine":   "in British Columbia's Quesnel/Stikine terrane (Golden Triangle, Iskut, Babine, Toodoggone)",
+    "yukon_tintina":        "in the Yukon or Alaskan Tintina belt",
+    "abitibi":              "in the Abitibi greenstone belt (Ontario/Quebec)",
+    "newfoundland_appalachian": "in the Newfoundland-Appalachian belt",
+    "laramide_southwest":   "in the Laramide southwest belt (Arizona, New Mexico, Sonora)",
+    "great_basin_carlin":   "in the Great Basin / Carlin Trend (Nevada)",
+    "andean":               "in the Andean copper belt (Chile, Peru, Argentina)",
+    "brazilian_shield":     "in the Brazilian Shield (Carajás, Minas Gerais)",
+    "central_african_copperbelt": "in the Central African Copperbelt (Zambia, DRC)",
+    "bushveld":             "in the Bushveld Complex (South Africa)",
+    "west_african_birimian": "in the West African Birimian belt",
+    "tanzania_archean":     "in the Tanzanian Archean greenstone belt",
+    "lachlan":              "in the Lachlan Fold Belt (NSW, Australia — Cadia)",
+    "yilgarn":              "in the Yilgarn Craton (Western Australia)",
+    "fennoscandian":        "in the Fennoscandian / Baltic Shield (Finland, Sweden, Norway)",
+    "central_asian_orogenic": "in the Central Asian Orogenic Belt (Kazakhstan, Mongolia, Russia)",
+    "indonesia_philippines_arc": "in the Indonesia / Philippines island-arc system",
+    "new_caledonia_laterite": "in the New Caledonia laterite belt",
+    "iberian_pyrite":       "in the Iberian Pyrite Belt (Portugal, Spain)",
+}
+
+
 def search_analog_projects(
     material: str,
     deposit_type: Optional[str],
@@ -201,71 +225,129 @@ def search_analog_projects(
     country: Optional[str] = None,
     host_rock: Optional[str] = None,
     mineralization_style: Optional[str] = None,
+    target_profile: Optional[dict] = None,
 ) -> tuple[str, list[str]]:
     """
-    Find comparable mining projects via Exa using a geology-first targeted query.
-    Geological identity (deposit type, host rock, mineralization style) leads the query.
-    Grade and tonnage are secondary hints, not primary search criteria.
+    Find comparable mining projects via Exa using a profile-driven targeted query.
+
+    When `target_profile` is supplied, the query is built around the project's
+    deposit sub-type, mineralization mode, tectonic belt, metal suite, and
+    recovery method — the same dimensions used by the cascading match. This
+    keeps Exa results aligned with the filters that will run on them.
+
+    When target_profile is None, falls back to the legacy generic query.
     Returns (synthesised_text, source_urls).
     """
     deposit_str = deposit_type or material
     exclude_str = f"Do not include {project_name} itself." if project_name else ""
-    location_hint = f"Prefer projects in or near {country}." if country else ""
 
-    # Build geological identity description — this is the primary search signal
-    geo_parts: list[str] = []
-    if mineralization_style:
-        geo_parts.append(f"with {mineralization_style} mineralization")
-    if host_rock:
-        geo_parts.append(f"hosted in {host_rock}")
-    # Pull up to 3 geologically specific criteria from the rule (skip "Exclude" lines)
-    geo_criteria: list[str] = []
-    for c in (analog_rule or {}).get("analog_criteria") or []:
-        if not c.lower().startswith("exclude") and len(geo_criteria) < 3:
-            geo_criteria.append(c)
-    if geo_criteria:
-        geo_parts.append("(" + "; ".join(geo_criteria) + ")")
-    geo_description = " ".join(geo_parts)
+    # Profile-driven query when we have a full geological identity
+    if target_profile and target_profile.get("deposit_subtype"):
+        subtype = target_profile["deposit_subtype"].replace("_", " ")
+        belt = target_profile.get("tectonic_belt")
+        belt_phrase = _BELT_HINTS.get(belt, "") if belt else ""
+        mode = (target_profile.get("mineralization_mode") or "").replace("_", " ")
+        recovery = (target_profile.get("recovery_method") or "").replace("_", " ")
+        suite = (target_profile.get("metal_suite") or "").replace("_", " ").upper()
 
-    # Build grade range hint — secondary, only used if geological description is thin
-    grade_min = (analog_rule or {}).get("grade_min")
-    grade_max = (analog_rule or {}).get("grade_max")
-    rule_grade_unit = (analog_rule or {}).get("grade_unit") or grade_unit or ""
-    if grade_min and grade_max:
-        grade_hint = f"Grade range {grade_min}–{grade_max} {rule_grade_unit}.".strip()
-    elif grade_value and grade_unit:
-        grade_hint = f"Grade approximately {grade_value} {grade_unit}."
+        # Identity sentence: what we're looking for in geological terms
+        identity_parts = [f"{subtype} {material} projects"]
+        if belt_phrase:
+            identity_parts.append(belt_phrase)
+        if mode:
+            identity_parts.append(f"with {mode} mineralization")
+        if recovery:
+            identity_parts.append(f"processed via {recovery}")
+        if suite:
+            identity_parts.append(f"({suite} metal suite)")
+        identity = " ".join(identity_parts)
+
+        # Pull up to 3 "Exclude X" rule criteria to instruct Exa to skip those
+        excluded_examples: list[str] = []
+        for c in (analog_rule or {}).get("excluded_subtypes") or []:
+            excluded_examples.append(c.replace("_", " "))
+            if len(excluded_examples) >= 3:
+                break
+        exclusion_clause = (
+            f" Do NOT include {', '.join(excluded_examples)} projects."
+            if excluded_examples else ""
+        )
+
+        grade_min = (analog_rule or {}).get("grade_min")
+        grade_max = (analog_rule or {}).get("grade_max")
+        rule_grade_unit = (analog_rule or {}).get("grade_unit") or grade_unit or ""
+        grade_hint = (f" Grade range {grade_min}–{grade_max} {rule_grade_unit}."
+                      if grade_min and grade_max else "")
+
+        query = (
+            f"Find 5-8 {identity} with confirmed NI 43-101 or JORC resource estimates."
+            f"{grade_hint}{exclusion_clause}"
+            f" {exclude_str}"
+            f" For each project provide: project name, company, country and region, "
+            f"deposit type and sub-type, host rock type, mineralization style and mode "
+            f"(primary sulfide vs supergene oxide), tectonic belt or geological district, "
+            f"alteration assemblage, primary metal suite, processing method "
+            f"(flotation / heap leach / ISCR / SX-EW / CIL), total resource tonnage (Mt), "
+            f"grade and unit, resource category, project stage, and technical report reference."
+        ).strip()
+
     else:
-        grade_hint = ""
+        # Fallback: legacy generic query when no profile available
+        location_hint = f"Prefer projects in or near {country}." if country else ""
+        geo_parts: list[str] = []
+        if mineralization_style:
+            geo_parts.append(f"with {mineralization_style} mineralization")
+        if host_rock:
+            geo_parts.append(f"hosted in {host_rock}")
+        geo_criteria: list[str] = []
+        for c in (analog_rule or {}).get("analog_criteria") or []:
+            if not c.lower().startswith("exclude") and len(geo_criteria) < 3:
+                geo_criteria.append(c)
+        if geo_criteria:
+            geo_parts.append("(" + "; ".join(geo_criteria) + ")")
+        geo_description = " ".join(geo_parts)
 
-    query = (
-        f"Find 5-8 {deposit_str} {material} deposits "
-        f"{geo_description + ' ' if geo_description else ''}"
-        f"with confirmed NI 43-101 or JORC resource estimates. "
-        f"{grade_hint + ' ' if grade_hint else ''}"
-        f"{location_hint + ' ' if location_hint else ''}"
-        f"{exclude_str + ' ' if exclude_str else ''}"
-        f"For each project provide: project name, company, country, deposit type, "
-        f"host rock type, mineralization style, geological district or province, "
-        f"total resource tonnage (Mt), grade and unit, resource category "
-        f"(Measured/Indicated/Inferred), project stage, and technical report reference."
-    )
+        grade_min = (analog_rule or {}).get("grade_min")
+        grade_max = (analog_rule or {}).get("grade_max")
+        rule_grade_unit = (analog_rule or {}).get("grade_unit") or grade_unit or ""
+        if grade_min and grade_max:
+            grade_hint = f"Grade range {grade_min}–{grade_max} {rule_grade_unit}.".strip()
+        elif grade_value and grade_unit:
+            grade_hint = f"Grade approximately {grade_value} {grade_unit}."
+        else:
+            grade_hint = ""
+
+        query = (
+            f"Find 5-8 {deposit_str} {material} deposits "
+            f"{geo_description + ' ' if geo_description else ''}"
+            f"with confirmed NI 43-101 or JORC resource estimates. "
+            f"{grade_hint + ' ' if grade_hint else ''}"
+            f"{location_hint + ' ' if location_hint else ''}"
+            f"{exclude_str + ' ' if exclude_str else ''}"
+            f"For each project provide: project name, company, country, deposit type, "
+            f"host rock type, mineralization style, geological district or province, "
+            f"total resource tonnage (Mt), grade and unit, resource category "
+            f"(Measured/Indicated/Inferred), project stage, and technical report reference."
+        )
 
     payload = {
         "query": query,
         "type": "deep",
         "systemPrompt": (
             "You are a mining industry geologist. For each project, prioritize describing "
-            "the geological characteristics: deposit type, host rock type, mineralization "
-            "style, and geological district or province. Resource figures must come from "
-            "NI 43-101 or JORC compliant technical reports — do not include exploration "
-            "targets without a resource estimate. Report exact figures with units."
+            "the geological characteristics: deposit type AND finer sub-type (e.g. alkalic "
+            "porphyry vs Laramide porphyry vs IOCG oxide), host rock type, mineralization "
+            "mode (primary sulfide vs supergene oxide), tectonic belt, alteration "
+            "assemblage, and processing method. Resource figures must come from NI 43-101 "
+            "or JORC compliant technical reports — do not include exploration targets "
+            "without a resource estimate. Report exact figures with units."
         ),
         "outputSchema": {
             "type": "text",
             "description": (
-                "For each comparable project list: project name, company, country, "
-                "deposit type, host rock, mineralization style, geological district/province, "
+                "For each comparable project list: project name, company, country, region, "
+                "deposit type and sub-type, host rock, mineralization style and mode, "
+                "tectonic belt, alteration assemblage, processing method, metal suite, "
                 "total resource tonnage (Mt), grade and unit, resource category, "
                 "project stage, and the technical report reference."
             ),

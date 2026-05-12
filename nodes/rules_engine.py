@@ -79,30 +79,49 @@ def activate_rules(project: Dict, rules: List[Dict]) -> List[Dict]:
     return activated
 
 
-def get_analog_rule(material: str, deposit_type: Optional[str] = None) -> Optional[Dict]:
+def get_analog_rule(
+    material: str,
+    deposit_type: Optional[str] = None,
+    deposit_subtype: Optional[str] = None,
+) -> Optional[Dict]:
     """Return the best matching analog_selection rule for this project.
 
     Priority:
-      1. Primary-material rule with matching deposit_type
-      2. Any rule with matching deposit_type (cross-material e.g. gold_silver)
-      3. None — when deposit_type is unknown, no rule is safer than the wrong rule.
-         A laterite rule applied to a sulphide project (or vice versa) poisons the
-         Exa query with wrong geological criteria and wrong grade ranges.
+      1. Primary-material rule whose `required_subtypes` contains the project's subtype
+      2. Primary-material rule with matching deposit_type
+      3. Any rule with matching deposit_type (cross-material e.g. gold_silver)
+      4. None — when deposit_type is unknown, no rule is safer than the wrong rule.
 
     Deliberately no material-only fallback: all compiled analog_selection rules are
     deposit-type-specific (e.g. nickel_laterite vs nickel_magmatic_sulphide). Returning
     the first rule alphabetically when deposit_type is unknown would silently apply the
     wrong rule. Callers should handle None by running a material-only Exa query.
+
+    Subtype takes precedence over deposit_type when provided — a Doubleview Hat Copper
+    project with deposit_subtype='alkalic_porphyry' will route to
+    analog_sel_copper_porphyry_alkalic rather than the generic porphyry rule.
     """
     rules = get_compiled_rules(material, rule_type="analog_selection")
     if not rules:
         return None
 
-    if not deposit_type:
+    if not deposit_type and not deposit_subtype:
         return None
 
     mat_lower = material.strip().lower()
-    dep_lower = deposit_type.strip().lower()
+    dep_lower = (deposit_type or "").strip().lower()
+    sub_lower = (deposit_subtype or "").strip().lower()
+
+    # Pass 0: subtype-specific rule wins outright — its required_subtypes contains ours
+    if sub_lower:
+        for r in rules:
+            r_mat = (r.get("source_material") or "").strip().lower()
+            required = [s.lower() for s in (r.get("required_subtypes") or [])]
+            if r_mat == mat_lower and sub_lower in required:
+                return r
+
+    if not dep_lower:
+        return None
 
     # Pass 1: primary material + deposit_type match
     for r in rules:

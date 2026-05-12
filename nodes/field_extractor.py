@@ -39,6 +39,9 @@ TARGET_FIELDS = [
     "energy_source", "climate_terrain",
     "permitting_status",
     "elevation_meters",
+    # Geological profile (used by analog_finder cascading match)
+    "deposit_subtype", "mineralization_mode", "tectonic_belt",
+    "metal_suite", "alteration_signature", "recovery_method",
 ]
 
 
@@ -133,6 +136,73 @@ Other fields:
     "Federal permits received"]). Use [] if none are mentioned. NOT null — always an array.
 26. elevation_meters: project site elevation above sea level in METRES as a number. null if not stated.
 
+Geological profile fields (CRITICAL for analog matching — use ONLY values from the controlled vocabulary):
+
+27. deposit_subtype: finer-grained classification than deposit_type. Use ONE of:
+    "alkalic_porphyry"      — alkalic Cu-Au porphyries (BC Quesnel/Stikine: Mt. Milligan, Mt. Polley, Cadia)
+    "calc_alkalic_porphyry" — typical Cu-Mo porphyries
+    "laramide_porphyry"     — Arizona/Sonora/Chile calc-alkaline Laramide-age porphyries
+    "high_sulfidation_lithocap_porphyry"
+    "iocg_oxide"            — IOCG with oxide blanket
+    "iocg_sulfide"          — IOCG primary sulfide
+    "iocg_hybrid"
+    "oxide_iscr_supergene_blanket" — supergene Cu oxide blanket processed via in-situ recovery (Florence, Van Dyke)
+    "low_sulfidation_epithermal" / "high_sulfidation_epithermal" / "intermediate_sulfidation_epithermal"
+    "greenstone_orogenic" / "turbidite_orogenic" / "bif_hosted_orogenic" / "orogenic_general"
+    "sedex" / "kupferschiefer_style" / "manto_cu" / "crd" / "mvt" / "redbed_cu" / "sediment_hosted_general"
+    "vms_general" / "carlin_general"
+    "cu_au_skarn" / "fe_skarn" / "zn_pb_skarn" / "w_mo_skarn" / "skarn_general"
+    "merensky_reef" / "ug2_reef" / "platreef"
+    "limonite_laterite" / "saprolite_laterite" / "laterite_general"
+    "komatiite_hosted" / "conduit_hosted" / "magmatic_sulphide_general"
+    "bif_general"
+    null if you genuinely cannot tell.
+
+28. mineralization_mode: ONE of:
+    "primary_sulfide"      — primary sulfide ore (chalcopyrite/bornite/pyrite dominant)
+    "supergene_oxide"      — weathered oxide ore (chrysocolla/malachite/atacamite)
+    "mixed_oxide_sulfide"  — transition zone
+    "refractory_sulfide"   — refractory Au in sulfide
+    "free_milling_oxide"   — free-milling oxide gold
+    "placer"
+    null if not determinable.
+
+29. tectonic_belt: mineralization province slug. ONE of:
+    "bc_quesnel_stikine"   — BC Canada interior alkalic arc
+    "yukon_tintina"
+    "abitibi"              — Ontario/Quebec greenstone
+    "newfoundland_appalachian"
+    "laramide_southwest"   — Arizona/New Mexico/Sonora
+    "great_basin_carlin"   — Nevada
+    "andean"               — Chile/Peru/Argentina/Ecuador/Bolivia/Colombia
+    "brazilian_shield" / "central_african_copperbelt" / "bushveld" / "west_african_birimian"
+    "tanzania_archean" / "lachlan" / "yilgarn" / "fennoscandian" / "central_asian_orogenic"
+    "indonesia_philippines_arc" / "new_caledonia_laterite" / "iberian_pyrite"
+    null if not determinable.
+
+30. metal_suite: characteristic metal grouping. ONE of:
+    "cu_au" / "cu_mo" / "cu_au_co_sc" (with cobalt and/or scandium byproducts)
+    "cu_ag" / "cu_zn_pb"
+    "au_only" / "au_ag" / "ag_pb_zn"
+    "ni_cu_pge" / "ni_co"
+    "pt_pd_rh" / "u_only" / "fe_only" / "li_only" / "ree_only"
+    null if not determinable.
+
+31. alteration_signature: ONE of:
+    "potassic_phyllic"       — porphyry core
+    "potassic_propylitic"
+    "sodic_calcic"           — IOCG / alkalic intrusion-related
+    "hematite_specularite"   — IOCG oxidized
+    "argillic_advanced_argillic" — high-sulfidation epithermal
+    "sericitic_quartz" / "skarn_calc_silicate" / "silicification_decalcified"
+    "chlorite_carbonate" / "supergene_oxidation" / "lateritic_weathering"
+    null if not determinable.
+
+32. recovery_method: primary metallurgical recovery route. ONE of:
+    "flotation" / "heap_leach" / "iscr" / "sx_ew" / "cn_leach" / "cil_cip"
+    "gravity" / "smelting" / "atmospheric_leach" / "hpal"
+    null if not stated.
+
 Output ONLY this JSON object, no other text:
 
 {{
@@ -175,7 +245,13 @@ Output ONLY this JSON object, no other text:
   "energy_source": string | null,
   "climate_terrain": string | null,
   "permitting_status": array,
-  "elevation_meters": number | null
+  "elevation_meters": number | null,
+  "deposit_subtype": string | null,
+  "mineralization_mode": string | null,
+  "tectonic_belt": string | null,
+  "metal_suite": string | null,
+  "alteration_signature": string | null,
+  "recovery_method": string | null
 }}
 
 Project context: {company} - {project_name} ({material})
@@ -185,18 +261,103 @@ SOURCE TEXT:
 """
     raw = _grok([{"role": "user", "content": prompt}])
     if not raw:
-        return {f: None for f in TARGET_FIELDS}
+        return _fill_geological_profile({f: None for f in TARGET_FIELDS}, material)
     try:
         parsed = json.loads(raw)
         clean = {k: v for k, v in parsed.items() if k in TARGET_FIELDS}
         for f in TARGET_FIELDS:
             clean.setdefault(f, None)
+        clean = _fill_geological_profile(clean, material)
         found = sum(1 for v in clean.values() if v is not None)
         logger.info(f"[Extract] {found}/{len(TARGET_FIELDS)} fields extracted")
         return clean
     except json.JSONDecodeError as e:
         logger.error(f"[Extract] JSON error: {e}")
-        return {f: None for f in TARGET_FIELDS}
+        return _fill_geological_profile({f: None for f in TARGET_FIELDS}, material)
+
+
+# Controlled-vocab validation maps — Grok occasionally returns values outside
+# the vocabulary even when prompted. Validate against the actual taxonomy slugs.
+_VALID_SUBTYPES: frozenset[str] = frozenset({
+    "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+    "high_sulfidation_lithocap_porphyry",
+    "iocg_oxide", "iocg_sulfide", "iocg_hybrid", "oxide_iscr_supergene_blanket",
+    "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+    "intermediate_sulfidation_epithermal",
+    "greenstone_orogenic", "turbidite_orogenic", "bif_hosted_orogenic", "orogenic_general",
+    "sedex", "kupferschiefer_style", "manto_cu", "crd", "mvt", "redbed_cu",
+    "sediment_hosted_general", "vms_general", "carlin_general",
+    "cu_au_skarn", "fe_skarn", "zn_pb_skarn", "w_mo_skarn", "skarn_general",
+    "merensky_reef", "ug2_reef", "platreef",
+    "limonite_laterite", "saprolite_laterite", "laterite_general",
+    "komatiite_hosted", "conduit_hosted", "magmatic_sulphide_general",
+    "bif_general",
+})
+
+
+def _validate(value, allowed: frozenset) -> Optional[str]:
+    """Return value if it's in the allowed set (case-insensitive), else None."""
+    if not value or not isinstance(value, str):
+        return None
+    norm = value.strip().lower().replace(" ", "_").replace("-", "_")
+    return norm if norm in allowed else None
+
+
+def _fill_geological_profile(fields: dict, material: str) -> dict:
+    """
+    Validate the 6 geological profile fields against controlled vocabularies, then
+    fill any nulls using nodes/geo_taxonomy heuristic detectors over the freeform
+    text already extracted. Existing freeform deposit_type, mineralization_style,
+    processing_method, district, region, country drive the inference.
+    """
+    from nodes import geo_taxonomy
+
+    # Validate Grok output against vocabularies — fall back to heuristic on miss
+    fields["deposit_subtype"] = _validate(fields.get("deposit_subtype"), _VALID_SUBTYPES)
+    fields["mineralization_mode"] = _validate(
+        fields.get("mineralization_mode"), frozenset(geo_taxonomy.MINERALIZATION_MODES)
+    )
+    fields["tectonic_belt"] = _validate(
+        fields.get("tectonic_belt"), frozenset(geo_taxonomy.TECTONIC_BELTS.keys())
+    )
+    fields["metal_suite"] = _validate(fields.get("metal_suite"), frozenset(geo_taxonomy.METAL_SUITES))
+    fields["alteration_signature"] = _validate(
+        fields.get("alteration_signature"), frozenset(geo_taxonomy.ALTERATION_SIGNATURES)
+    )
+    fields["recovery_method"] = _validate(
+        fields.get("recovery_method"), frozenset(geo_taxonomy.RECOVERY_METHODS)
+    )
+
+    # Heuristic fallback for any still-null fields
+    if fields["deposit_subtype"] is None:
+        fields["deposit_subtype"] = geo_taxonomy.detect_subtype(
+            fields.get("deposit_type"), fields.get("mineralization_style"),
+            fields.get("alteration_signature"), fields.get("location_name"),
+        )
+    if fields["mineralization_mode"] is None:
+        fields["mineralization_mode"] = geo_taxonomy.detect_mode(
+            fields.get("processing_method"), fields.get("mineralization_style"),
+            fields.get("location_name"), fields.get("deposit_type"),
+        )
+    if fields["tectonic_belt"] is None:
+        fields["tectonic_belt"] = geo_taxonomy.detect_belt(
+            fields.get("country"), fields.get("region"), fields.get("district"),
+        )
+    if fields["metal_suite"] is None:
+        byproducts_text = ", ".join(fields.get("by_product_commodities") or [])
+        fields["metal_suite"] = geo_taxonomy.detect_metal_suite(
+            material, byproducts_text, fields.get("location_name"), fields.get("deposit_type"),
+        )
+    if fields["alteration_signature"] is None:
+        fields["alteration_signature"] = geo_taxonomy.detect_alteration_signature(
+            None, fields.get("location_name"), fields.get("deposit_type"),
+        )
+    if fields["recovery_method"] is None:
+        fields["recovery_method"] = geo_taxonomy.detect_recovery_method(
+            fields.get("processing_method"), fields.get("location_name"),
+            fields.get("deposit_type"),
+        )
+    return fields
 
 
 def judge_fields(
@@ -326,11 +487,22 @@ For each project extract:
   "grade_unit": string | null,           (unit string e.g. "g/t Ag", "% Cu", "% Ni")
   "project_stage": string | null,
   "mining_method": string | null,
+  "processing_method": string | null,    (e.g. "flotation", "heap leach", "ISCR", "CIL")
+  "region": string | null,               (sub-national region or state — e.g. "British Columbia", "Arizona")
+  "deposit_subtype": string | null,      (controlled vocab: alkalic_porphyry, laramide_porphyry, iocg_oxide, oxide_iscr_supergene_blanket, etc. — see field doc)
+  "mineralization_mode": string | null,  (primary_sulfide | supergene_oxide | mixed_oxide_sulfide | refractory_sulfide | free_milling_oxide | placer)
+  "tectonic_belt": string | null,        (bc_quesnel_stikine | andean | laramide_southwest | lachlan | etc.)
+  "metal_suite": string | null,          (cu_au | cu_mo | cu_au_co_sc | ni_cu_pge | au_only | etc.)
+  "alteration_signature": string | null, (potassic_phyllic | sodic_calcic | hematite_specularite | argillic_advanced_argillic | etc.)
+  "recovery_method": string | null,      (flotation | heap_leach | iscr | sx_ew | cn_leach | cil_cip | gravity | hpal)
   "source_url": string | null
 }}
 
 IMPORTANT: Extract "commodity" from the text — do not assume it is {material}.
-IMPORTANT: host_rock, mineralization_style, and district are critical for analog quality — extract them whenever mentioned.
+IMPORTANT: host_rock, mineralization_style, deposit_subtype, mineralization_mode, tectonic_belt, and recovery_method are critical for analog cascading-match quality — extract them whenever derivable from the text.
+For BC alkalic Cu-Au porphyries (Quesnel/Stikine: Mt. Milligan, Mt. Polley, Copper Mountain, Red Chris, Cadia) use deposit_subtype="alkalic_porphyry", tectonic_belt="bc_quesnel_stikine", mineralization_mode="primary_sulfide", recovery_method="flotation".
+For Arizona oxide ISCR projects (Florence, Van Dyke) use deposit_subtype="oxide_iscr_supergene_blanket", tectonic_belt="laramide_southwest", mineralization_mode="supergene_oxide", recovery_method="iscr".
+For Chile IOCG oxide (Marimaca) use deposit_subtype="iocg_oxide", tectonic_belt="andean", mineralization_mode="supergene_oxide", recovery_method="heap_leach".
 If the text describes a gold project, set commodity to "gold" even if the expected material is "{material}".
 
 Return ONLY a JSON array of project objects. No other text.
@@ -344,15 +516,72 @@ SOURCE TEXT:
     try:
         data = json.loads(raw)
         # Handle both array and {"projects": [...]} shapes
+        analogs: list[dict] = []
         if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
+            analogs = data
+        elif isinstance(data, dict):
             for key in ("projects", "analogs", "results"):
                 if isinstance(data.get(key), list):
-                    return data[key]
+                    analogs = data[key]
+                    break
+        # Validate + fill geological profile fields on each analog using its own
+        # extracted commodity (not the parent search material).
+        for a in analogs:
+            if not isinstance(a, dict):
+                continue
+            mat = (a.get("commodity") or material or "").strip().lower()
+            _fill_analog_profile(a, mat)
+        return analogs
     except json.JSONDecodeError:
         pass
     return []
+
+
+def _fill_analog_profile(analog: dict, material: str) -> None:
+    """In-place validate + heuristic-fill the 6 geological profile fields on an analog dict."""
+    from nodes import geo_taxonomy
+
+    analog["deposit_subtype"] = _validate(analog.get("deposit_subtype"), _VALID_SUBTYPES)
+    analog["mineralization_mode"] = _validate(
+        analog.get("mineralization_mode"), frozenset(geo_taxonomy.MINERALIZATION_MODES)
+    )
+    analog["tectonic_belt"] = _validate(
+        analog.get("tectonic_belt"), frozenset(geo_taxonomy.TECTONIC_BELTS.keys())
+    )
+    analog["metal_suite"] = _validate(analog.get("metal_suite"), frozenset(geo_taxonomy.METAL_SUITES))
+    analog["alteration_signature"] = _validate(
+        analog.get("alteration_signature"), frozenset(geo_taxonomy.ALTERATION_SIGNATURES)
+    )
+    analog["recovery_method"] = _validate(
+        analog.get("recovery_method"), frozenset(geo_taxonomy.RECOVERY_METHODS)
+    )
+
+    if analog["deposit_subtype"] is None:
+        analog["deposit_subtype"] = geo_taxonomy.detect_subtype(
+            analog.get("deposit_type"), analog.get("mineralization_style"),
+            analog.get("alteration_signature"), analog.get("district"),
+        )
+    if analog["mineralization_mode"] is None:
+        analog["mineralization_mode"] = geo_taxonomy.detect_mode(
+            analog.get("processing_method"), analog.get("mineralization_style"),
+            analog.get("district"), analog.get("deposit_type"),
+        )
+    if analog["tectonic_belt"] is None:
+        analog["tectonic_belt"] = geo_taxonomy.detect_belt(
+            analog.get("country"), analog.get("region"), analog.get("district"),
+        )
+    if analog["metal_suite"] is None:
+        analog["metal_suite"] = geo_taxonomy.detect_metal_suite(
+            material, None, analog.get("district"), analog.get("deposit_type"),
+        )
+    if analog["alteration_signature"] is None:
+        analog["alteration_signature"] = geo_taxonomy.detect_alteration_signature(
+            None, analog.get("district"), analog.get("deposit_type"),
+        )
+    if analog["recovery_method"] is None:
+        analog["recovery_method"] = geo_taxonomy.detect_recovery_method(
+            analog.get("processing_method"), analog.get("district"), analog.get("deposit_type"),
+        )
 
 
 def score_analogs(

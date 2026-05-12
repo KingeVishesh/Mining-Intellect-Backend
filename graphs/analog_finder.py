@@ -22,11 +22,11 @@ Changes from v1:
 from __future__ import annotations
 import logging
 import re
-from typing import Dict, List, Optional, TypedDict
+from typing import Dict, List, Optional, TypedDict, Tuple
 
 from langgraph.graph import StateGraph, END
 
-from nodes import exa_search, field_extractor, rules_engine, supabase_ops
+from nodes import exa_search, field_extractor, rules_engine, supabase_ops, geo_taxonomy
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,11 @@ class AnalogState(TypedDict, total=False):
     project_id: str
     project: Optional[Dict]
     analog_rule: Optional[Dict]         # matched analog_selection rule from compiled_rules
+    target_profile: Optional[Dict]      # geological identity of the target project
     library_analogs: List[Dict]         # from report_analogs (previously approved)
     exa_analogs: List[Dict]             # from Exa web search
     scored_analogs: List[Dict]
+    low_confidence: bool                # True when <2 candidates passed L1-L5
     human_approved: bool
     approved_analogs: List[Dict]
     saved: bool
@@ -248,104 +250,204 @@ def _geo_text_score(a: str, b: str, max_pts: float) -> float:
         return round(max_pts * 0.25, 1)
 
 
-def _score_candidate(project: dict, analog: dict) -> tuple[Optional[float], list[str]]:
+def _build_profile(row: dict) -> dict:
     """
-    Geology-first deterministic scoring. Returns (score | None, reasons).
-    score is None when < 2 factors can be evaluated (insufficient data).
-    Max possible: 100 pts.
-
-    Factor hierarchy — geological identity before numerical confirmation:
-      1. Mineralization style  35 pts  (primary geological identity — skipped if either null)
-      2. Host rock             25 pts  (secondary geological identity — skipped if either null)
-      3. Grade similarity      25 pts  (quantitative confirmation — skipped if either null)
-      4. District / country    15 pts  (geographical tiebreaker — always in pool if any country known)
-
-    Deposit type is a HARD GATE in combine_filter_score_node — it is not a scored factor here.
-    Tonnage and mining method are removed: too stage-dependent to be reliable similarity signals.
+    Build a geological identity profile for a project or analog. Reads the new
+    schema columns when present; falls back to geo_taxonomy heuristics over the
+    existing freeform text. Used identically for the target project and each
+    candidate so cascading match compares apples to apples.
     """
-    earned = 0.0
-    possible = 0.0
-    reasons: list[str] = []
-    factors_in_pool = 0
+    return {
+        "material":             (row.get("material") or "").strip().lower(),
+        "deposit_type_family":  _deposit_type_family(row.get("deposit_type") or ""),
+        "deposit_subtype":      row.get("deposit_subtype") or geo_taxonomy.detect_subtype(
+            row.get("deposit_type"), row.get("mineralization_style"),
+            row.get("alteration_signature"), row.get("district") or row.get("location_name"),
+        ),
+        "mineralization_mode":  row.get("mineralization_mode") or geo_taxonomy.detect_mode(
+            row.get("processing_method"), row.get("mineralization_style"),
+            row.get("district") or row.get("location_name"), row.get("deposit_type"),
+        ),
+        "tectonic_belt":        row.get("tectonic_belt") or geo_taxonomy.detect_belt(
+            row.get("country"), row.get("region"), row.get("district"),
+        ),
+        "metal_suite":          row.get("metal_suite") or geo_taxonomy.detect_metal_suite(
+            row.get("material"), None, row.get("district"), row.get("deposit_type"),
+        ),
+        "alteration_signature": row.get("alteration_signature") or geo_taxonomy.detect_alteration_signature(
+            None, row.get("district") or row.get("location_name"), row.get("deposit_type"),
+        ),
+        "recovery_method":      row.get("recovery_method") or geo_taxonomy.detect_recovery_method(
+            row.get("processing_method"), row.get("district") or row.get("location_name"),
+            row.get("deposit_type"),
+        ),
+        "grade_value":          row.get("grade_value"),
+        "grade_unit":           row.get("grade_unit"),
+        "tonnage_mt":           row.get("tonnage_mt"),
+        "country":              (row.get("country") or "").strip().lower(),
+        "district":             (row.get("district") or "").strip(),
+        "host_rock":            (row.get("host_rock") or "").strip(),
+        "mineralization_style": (row.get("mineralization_style") or "").strip(),
+    }
 
-    # ── Factor 1: Mineralization style (35 pts) ──────────────────────────────
-    p_ms = (project.get("mineralization_style") or "").strip()
-    a_ms = (analog.get("mineralization_style") or "").strip()
-    if p_ms and a_ms:
-        pts = _geo_text_score(p_ms, a_ms, 35.0)
-        earned += pts
-        possible += 35.0
-        factors_in_pool += 1
-        reasons.append(f"Min. style ({a_ms!r}): {int(pts)}/35 pts")
 
-    # ── Factor 2: Host rock (25 pts) ─────────────────────────────────────────
-    p_hr = (project.get("host_rock") or "").strip()
-    a_hr = (analog.get("host_rock") or "").strip()
-    if p_hr and a_hr:
-        pts = _geo_text_score(p_hr, a_hr, 25.0)
-        earned += pts
-        possible += 25.0
-        factors_in_pool += 1
-        reasons.append(f"Host rock ({a_hr!r}): {int(pts)}/25 pts")
+def _cascading_match(
+    target: dict,
+    candidate: dict,
+    analog_rule: Optional[dict] = None,
+) -> Tuple[bool, int, int, int, List[str], Optional[str]]:
+    """
+    Apply cascading geological-similarity match. Returns:
+      (passes_hard_filter, ranking_pts, dimensions_matched, dimensions_evaluated,
+       reasons, dropped_at)
 
-    # ── Factor 3: Grade similarity (25 pts) ──────────────────────────────────
-    p_g = float(project.get("grade_value") or 0)
-    a_g = float(analog.get("grade_value") or 0)
-    p_gu = project.get("grade_unit") or ""
-    a_gu = analog.get("grade_unit") or ""
-    if p_g > 0 and a_g > 0:
-        if not _grade_units_compatible(p_gu, a_gu):
-            reasons.append(f"Grade units incompatible ({p_gu!r} vs {a_gu!r}): skipped")
+    Levels L1-L5 are hard filters; L6-L11 contribute ranking points and matched-
+    dimension counts. `dropped_at` is the level slug ("L3","L4","L5") on rejection,
+    None on pass. Lesson IDs from the rule's `applies_lessons` are echoed in
+    reason strings for LangSmith observability.
+    """
+    reasons: List[str] = []
+    matched = 0
+    evaluated = 0
+    rank_pts = 0
+
+    rule_lessons = ",".join((analog_rule or {}).get("applies_lessons") or []) or "L36"
+
+    # ── L1: Same material ──────────────────────────────────────────────────
+    if target["material"] and candidate["material"]:
+        if not _materials_compatible(target["material"], candidate["material"]):
+            return False, 0, 0, 0, [f"L1 commodity mismatch ({candidate['material']} ≠ {target['material']}): {rule_lessons}"], "L1"
+        matched += 1
+        evaluated += 1
+        reasons.append(f"L1 material match ({candidate['material']}): {rule_lessons}")
+
+    # ── L2: Same deposit-type family ───────────────────────────────────────
+    t_fam = target["deposit_type_family"]
+    c_fam = candidate["deposit_type_family"]
+    if t_fam and c_fam:
+        if t_fam != c_fam:
+            return False, 0, 0, 0, [f"L2 deposit family mismatch ({c_fam} ≠ {t_fam}): {rule_lessons}"], "L2"
+        matched += 1
+        evaluated += 1
+        reasons.append(f"L2 deposit family match ({c_fam}): {rule_lessons}")
+
+    # ── L3: Same deposit sub-type (HARD — Lessons L86/L101/L124) ───────────
+    # Sub-type is the single most important geological similarity dimension.
+    # alkalic_porphyry ≠ laramide_porphyry ≠ iocg_oxide.
+    t_sub = target["deposit_subtype"]
+    c_sub = candidate["deposit_subtype"]
+    if t_sub and c_sub:
+        if t_sub != c_sub:
+            return False, 0, 0, 0, [f"L3 sub-type mismatch ({c_sub} ≠ {t_sub}): {rule_lessons}"], "L3"
+        matched += 1
+        evaluated += 1
+        rank_pts += 25  # heavy weight when both known and matching
+        reasons.append(f"L3 sub-type match ({c_sub}): {rule_lessons}")
+    elif t_sub and not c_sub:
+        # Target has subtype, candidate's is unknown. Don't drop — but record uncertainty.
+        evaluated += 1
+        reasons.append(f"L3 sub-type unknown on candidate (target={t_sub}): pass-through")
+
+    # ── L4: Mineralization mode (HARD — Lessons L86/L101) ──────────────────
+    # primary_sulfide ≠ supergene_oxide (different mineralogy + different metallurgy)
+    if not geo_taxonomy.mode_compatible(target["mineralization_mode"], candidate["mineralization_mode"]):
+        return False, 0, 0, 0, [
+            f"L4 mode mismatch ({candidate['mineralization_mode']} ≠ {target['mineralization_mode']}): {rule_lessons}"
+        ], "L4"
+    if target["mineralization_mode"] and candidate["mineralization_mode"]:
+        matched += 1
+        evaluated += 1
+        rank_pts += 15
+        reasons.append(f"L4 mode match ({candidate['mineralization_mode']}): {rule_lessons}")
+
+    # ── L5: Recovery method compatibility (HARD — Lessons L19/L73/L82) ─────
+    # flotation ≠ heap-leach ≠ ISCR — different metallurgical regime
+    if not geo_taxonomy.recovery_compatible(target["recovery_method"], candidate["recovery_method"]):
+        return False, 0, 0, 0, [
+            f"L5 recovery incompatible ({candidate['recovery_method']} vs {target['recovery_method']}): {rule_lessons}"
+        ], "L5"
+    if target["recovery_method"] and candidate["recovery_method"]:
+        if target["recovery_method"] == candidate["recovery_method"]:
+            matched += 1
+            evaluated += 1
+            rank_pts += 10
+            reasons.append(f"L5 recovery match ({candidate['recovery_method']}): {rule_lessons}")
+
+    # ── L6: Tectonic belt (RANK +30) ───────────────────────────────────────
+    if target["tectonic_belt"] and candidate["tectonic_belt"]:
+        evaluated += 1
+        if target["tectonic_belt"] == candidate["tectonic_belt"]:
+            matched += 1
+            rank_pts += 30
+            reasons.append(f"L6 belt match ({candidate['tectonic_belt']}): +30")
         else:
-            pts = _ratio_score(p_g, a_g, [(1.5, 25), (2.0, 18), (3.0, 10), (5.0, 3)])
-            ratio = round(max(p_g, a_g) / min(p_g, a_g), 1)
-            earned += pts
-            possible += 25.0
-            factors_in_pool += 1
-            reasons.append(f"Grade {ratio}× match: {int(pts)}/25 pts")
+            reasons.append(f"L6 belt different ({candidate['tectonic_belt']} ≠ {target['tectonic_belt']}): +0")
 
-    # ── Factor 4: District / country (15 pts) ────────────────────────────────
-    # Always added to possible when any country is known, but does NOT count toward
-    # the factors_in_pool minimum — it is a tiebreaker, not a primary similarity signal.
-    # Without this guard, a project with only grade+country (no geological text) could
-    # reach factors_in_pool=2 and score 0% instead of N/A when both earn 0 points.
-    p_dist = (project.get("district") or "").strip()
-    a_dist = (analog.get("district") or "").strip()
-    p_c = (project.get("country") or "").strip().lower()
-    a_c = (analog.get("country") or "").strip().lower()
-    if p_c or a_c:
-        possible += 15.0
-        # intentionally NOT incrementing factors_in_pool here
-        if p_dist and a_dist:
-            pts = _geo_text_score(p_dist, a_dist, 15.0)
-            if pts > 0:
-                earned += pts
-                reasons.append(f"District match ({a_dist!r}): {int(pts)}/15 pts")
-            elif p_c and a_c and p_c == a_c:
-                earned += 8.0
-                reasons.append(f"Same country ({a_c}): 8/15 pts")
-            else:
-                reasons.append("Different district/country: 0/15 pts")
-        elif p_c and a_c:
-            if p_c == a_c:
-                earned += 8.0
-                reasons.append(f"Same country ({a_c}): 8/15 pts")
-            else:
-                p_cont = _continent(p_c)
-                a_cont = _continent(a_c)
-                if p_cont and p_cont == a_cont:
-                    earned += 4.0
-                    reasons.append(f"Same region ({p_cont}): 4/15 pts")
-                else:
-                    reasons.append(f"Different country ({a_c}): 0/15 pts")
+    # ── L7: Metal suite (RANK +20) ─────────────────────────────────────────
+    if target["metal_suite"] and candidate["metal_suite"]:
+        evaluated += 1
+        if target["metal_suite"] == candidate["metal_suite"]:
+            matched += 1
+            rank_pts += 20
+            reasons.append(f"L7 metal suite match ({candidate['metal_suite']}): +20")
+
+    # ── L8: Grade band overlap (RANK +15) ──────────────────────────────────
+    p_g = float(target.get("grade_value") or 0)
+    c_g = float(candidate.get("grade_value") or 0)
+    if p_g > 0 and c_g > 0 and _grade_units_compatible(target.get("grade_unit") or "", candidate.get("grade_unit") or ""):
+        evaluated += 1
+        pts = _ratio_score(p_g, c_g, [(1.5, 15), (2.0, 10), (3.0, 5), (5.0, 1)])
+        if pts > 0:
+            matched += 1
+            rank_pts += int(pts)
+            ratio = round(max(p_g, c_g) / min(p_g, c_g), 1)
+            reasons.append(f"L8 grade {ratio}× match: +{int(pts)}")
+
+    # ── L9: Tonnage same order of magnitude (RANK +10) ─────────────────────
+    p_t = float(target.get("tonnage_mt") or 0)
+    c_t = float(candidate.get("tonnage_mt") or 0)
+    if p_t > 0 and c_t > 0:
+        evaluated += 1
+        ratio = max(p_t, c_t) / min(p_t, c_t)
+        if ratio <= 10:
+            matched += 1
+            pts = 10 if ratio <= 2 else (7 if ratio <= 5 else 4)
+            rank_pts += pts
+            reasons.append(f"L9 tonnage {ratio:.1f}× scale: +{pts}")
+
+    # ── L10: Same country (RANK +10) ───────────────────────────────────────
+    t_c = target.get("country", "")
+    c_c = candidate.get("country", "")
+    if t_c and c_c:
+        evaluated += 1
+        if t_c == c_c:
+            matched += 1
+            rank_pts += 10
+            reasons.append(f"L10 country match ({c_c}): +10")
         else:
-            reasons.append("Country unknown: 0/15 pts")
+            t_cont = _continent(t_c)
+            c_cont = _continent(c_c)
+            if t_cont and t_cont == c_cont:
+                rank_pts += 4
+                reasons.append(f"L10 same continent ({t_cont}): +4")
 
-    if factors_in_pool < 2:
-        return None, ["Insufficient geological data (< 2 factors available)"]
+    # ── L11: Free-text overlap on host rock / mineralization style (RANK +0-15) ─
+    if target.get("host_rock") and candidate.get("host_rock"):
+        evaluated += 1
+        pts = _geo_text_score(target["host_rock"], candidate["host_rock"], 8.0)
+        if pts > 0:
+            matched += 1
+            rank_pts += int(pts)
+            reasons.append(f"L11 host rock overlap: +{int(pts)}")
+    if target.get("mineralization_style") and candidate.get("mineralization_style"):
+        evaluated += 1
+        pts = _geo_text_score(target["mineralization_style"], candidate["mineralization_style"], 7.0)
+        if pts > 0:
+            matched += 1
+            rank_pts += int(pts)
+            reasons.append(f"L11 style overlap: +{int(pts)}")
 
-    score = round((earned / possible * 100) if possible > 0 else 0, 1)
-    return score, reasons
+    return True, rank_pts, matched, evaluated, reasons, None
 
 
 def _norm_name(name: str) -> str:
@@ -401,13 +503,34 @@ def load_project_and_rule_node(state: AnalogState) -> AnalogState:
 
     material = project.get("material") or ""
     deposit_type = project.get("deposit_type")
-    analog_rule = rules_engine.get_analog_rule(material, deposit_type)
+    # Subtype takes precedence — alkalic_porphyry routes to the dedicated alkalic
+    # rule even when deposit_type is just "porphyry copper-gold".
+    deposit_subtype = project.get("deposit_subtype") or geo_taxonomy.detect_subtype(
+        deposit_type, project.get("mineralization_style"),
+        project.get("alteration_signature"),
+        project.get("district") or project.get("location_name"),
+    )
+    analog_rule = rules_engine.get_analog_rule(material, deposit_type, deposit_subtype)
 
     logger.info(
         f"[load] {project.get('name')} | material={material} deposit={deposit_type} "
-        f"rule={'✓ ' + analog_rule.get('rule_id', '') if analog_rule else '✗ none'}"
+        f"subtype={deposit_subtype} rule={'✓ ' + analog_rule.get('rule_id', '') if analog_rule else '✗ none'}"
     )
     return {"project": project, "analog_rule": analog_rule, "error": None}
+
+
+def build_target_profile_node(state: AnalogState) -> AnalogState:
+    """Derive the target project's geological identity profile (used for cascading match)."""
+    if state.get("error"):
+        return {"target_profile": None}
+    project = state["project"] or {}
+    profile = _build_profile(project)
+    logger.info(
+        f"[profile] target subtype={profile['deposit_subtype']!r} "
+        f"mode={profile['mineralization_mode']!r} belt={profile['tectonic_belt']!r} "
+        f"metal={profile['metal_suite']!r} recovery={profile['recovery_method']!r}"
+    )
+    return {"target_profile": profile}
 
 
 def library_search_node(state: AnalogState) -> AnalogState:
@@ -446,6 +569,7 @@ def exa_search_node(state: AnalogState) -> AnalogState:
         country=project.get("country"),
         host_rock=project.get("host_rock"),
         mineralization_style=project.get("mineralization_style"),
+        target_profile=state.get("target_profile"),
     )
 
     exa_analogs = []
@@ -461,12 +585,21 @@ def exa_search_node(state: AnalogState) -> AnalogState:
                 "host_rock": a.get("host_rock"),
                 "mineralization_style": a.get("mineralization_style"),
                 "district": a.get("district"),
+                "region": a.get("region"),
                 "tonnage_mt": a.get("tonnage_mt"),
                 "grade_value": a.get("grade_value"),
                 "grade_unit": a.get("grade_unit"),
                 "country": a.get("country"),
                 "project_stage": a.get("project_stage"),
                 "mining_method": a.get("mining_method"),
+                "processing_method": a.get("processing_method"),
+                # Geological profile (cascading match)
+                "deposit_subtype":      a.get("deposit_subtype"),
+                "mineralization_mode":  a.get("mineralization_mode"),
+                "tectonic_belt":        a.get("tectonic_belt"),
+                "metal_suite":          a.get("metal_suite"),
+                "alteration_signature": a.get("alteration_signature"),
+                "recovery_method":      a.get("recovery_method"),
                 "source": "exa",
                 "source_url": a.get("source_url") or (sources[i] if i < len(sources) else None),
             })
@@ -476,152 +609,145 @@ def exa_search_node(state: AnalogState) -> AnalogState:
 
 
 def combine_filter_score_node(state: AnalogState) -> AnalogState:
-    """Combine library + Exa candidates, apply hard filters, score deterministically."""
+    """
+    Cascading-match analog selection. For each candidate:
+      L1-L5 are hard filters (commodity, deposit family, sub-type, mineralization
+        mode, recovery method). Any mismatch when BOTH sides have data → drop.
+      L6-L11 contribute ranking points (belt, metal suite, grade, tonnage,
+        country, free-text overlap).
+    Returns top 4-6 survivors sorted by ranking points. When fewer than 2
+    candidates survive L1-L5, sets low_confidence=True and returns the best
+    available without padding with bad analogs.
+    """
     if state.get("error"):
-        return {"scored_analogs": []}
+        return {"scored_analogs": [], "low_confidence": False}
 
     project = state["project"]
     analog_rule = state.get("analog_rule")
+    target_profile = state.get("target_profile") or _build_profile(project)
     library = state.get("library_analogs") or []
     exa = state.get("exa_analogs") or []
     all_candidates = library + exa
 
     project_name = project.get("name") or ""
-    target_material = (project.get("material") or "").lower()
-    target_deposit = (project.get("deposit_type") or "").lower()
-    p_tonnage = float(project.get("tonnage_mt") or 0)
+    rule_exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
+    # Structured exclusions from the rule (subtypes/modes/recovery the rule forbids)
+    excluded_subtypes = set((analog_rule or {}).get("excluded_subtypes") or [])
+    excluded_modes = set((analog_rule or {}).get("excluded_modes") or [])
+    excluded_recovery = set((analog_rule or {}).get("excluded_recovery") or [])
 
-    # Grade range from rule for deposit-level validation
-    rule_grade_min = float((analog_rule or {}).get("grade_min") or 0)
-    rule_grade_max = float((analog_rule or {}).get("grade_max") or 0)
-    exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
-    target_family = _deposit_type_family(target_deposit)
-    # When deposit_type is unknown, infer which families are geologically impossible
-    # from material + country (e.g. nickel laterite in Canada → exclude laterite family).
-    inferred_excluded_families = (
-        _infer_excluded_families(target_material, project.get("country") or "")
-        if not target_family else frozenset()
-    )
     logger.info(
-        f"[score] {len(library)} library + {len(exa)} exa = {len(all_candidates)} candidates | "
-        f"target_family={target_family!r} inferred_excluded={inferred_excluded_families} "
-        f"exclusions={exclusions}"
+        f"[cascade] {len(library)} library + {len(exa)} exa = {len(all_candidates)} "
+        f"| rule={(analog_rule or {}).get('rule_id','none')} "
+        f"target_subtype={target_profile['deposit_subtype']} "
+        f"target_belt={target_profile['tectonic_belt']}"
     )
 
     # ── Step A: Dedup by normalized name ───────────────────────────────────
     seen: dict[str, bool] = {}
-    deduped = []
+    deduped: list[dict] = []
     for c in all_candidates:
         norm = _norm_name(c.get("name") or "")
         if norm and norm not in seen:
             seen[norm] = True
             deduped.append(c)
-    logger.info(f"[score] {len(deduped)} after dedup")
+    logger.info(f"[cascade] {len(deduped)} after dedup")
 
-    # ── Step B: Hard disqualify ────────────────────────────────────────────
-    filtered = []
+    # ── Step B: Self-analog pre-filter (cheap; before profile build) ───────
+    pre_filtered: list[dict] = []
     for c in deduped:
-        name = c.get("name") or ""
-        c_material = (c.get("material") or "").lower()
-        c_dep = (c.get("deposit_type") or "").lower()
-        c_tonnage = float(c.get("tonnage_mt") or 0)
-        c_grade = float(c.get("grade_value") or 0)
+        if project_name and _is_self_analog(project_name, c.get("name") or ""):
+            logger.info(f"[cascade] DROP self-analog: {c.get('name')}")
+            continue
+        pre_filtered.append(c)
 
-        # 1. Self-analog
-        if project_name and _is_self_analog(project_name, name):
-            logger.info(f"[filter] DISQUALIFY (self-analog): {name}")
+    # ── Step C: Cascading match per candidate ──────────────────────────────
+    survivors: list[dict] = []
+    dropped_counts: dict[str, int] = {}
+    for c in pre_filtered:
+        cand_profile = _build_profile(c)
+
+        # Rule-driven structured exclusions (Lessons L86/L101 from the rule itself)
+        if cand_profile["deposit_subtype"] and cand_profile["deposit_subtype"] in excluded_subtypes:
+            logger.info(f"[cascade] DROP rule subtype-exclusion ({cand_profile['deposit_subtype']}): {c.get('name')}")
+            dropped_counts["rule_subtype"] = dropped_counts.get("rule_subtype", 0) + 1
+            continue
+        if cand_profile["mineralization_mode"] and cand_profile["mineralization_mode"] in excluded_modes:
+            logger.info(f"[cascade] DROP rule mode-exclusion ({cand_profile['mineralization_mode']}): {c.get('name')}")
+            dropped_counts["rule_mode"] = dropped_counts.get("rule_mode", 0) + 1
+            continue
+        if cand_profile["recovery_method"] and cand_profile["recovery_method"] in excluded_recovery:
+            logger.info(f"[cascade] DROP rule recovery-exclusion ({cand_profile['recovery_method']}): {c.get('name')}")
+            dropped_counts["rule_recovery"] = dropped_counts.get("rule_recovery", 0) + 1
             continue
 
-        # 2. Commodity mismatch — uses alias map so gold_silver passes for both gold and silver targets
-        if c_material and target_material and not _materials_compatible(target_material, c_material):
-            logger.info(f"[filter] DISQUALIFY (commodity mismatch): {name} — {c_material} ≠ {target_material}")
+        # Legacy "Exclude X analogs" text patterns (for rules without structured fields)
+        c_dep_lower = (c.get("deposit_type") or "").lower()
+        if c_dep_lower and rule_exclusions:
+            if any(excl in c_dep_lower for excl in rule_exclusions):
+                logger.info(f"[cascade] DROP rule text-exclusion: {c.get('name')}")
+                dropped_counts["rule_text"] = dropped_counts.get("rule_text", 0) + 1
+                continue
+
+        passes, rank_pts, matched, evaluated, reasons, dropped_at = _cascading_match(
+            target_profile, cand_profile, analog_rule,
+        )
+        if not passes:
+            logger.info(f"[cascade] DROP @{dropped_at}: {c.get('name')} — {reasons[0] if reasons else ''}")
+            dropped_counts[dropped_at or "unknown"] = dropped_counts.get(dropped_at or "unknown", 0) + 1
             continue
 
-        # 3. Deposit type family gate — incompatible geological families are hard disqualifications.
-        # Fires only when BOTH target AND candidate have a recognizable family.
-        # e.g. porphyry target + sediment-hosted candidate → disqualify (prevents La Joya-type errors)
-        # e.g. porphyry target + unknown candidate → pass through (give benefit of doubt)
-        if target_family and c_dep:
-            c_family = _deposit_type_family(c_dep)
-            if c_family and c_family != target_family:
-                logger.info(
-                    f"[filter] DISQUALIFY (deposit family {target_family!r} ≠ {c_family!r}): {name}"
-                )
-                continue
-
-        # 3b. Inferred family exclusion — when target deposit_type is unknown, use
-        # material + country to rule out impossible families (e.g. nickel laterite in Canada).
-        if inferred_excluded_families and c_dep:
-            c_family = _deposit_type_family(c_dep)
-            if c_family and c_family in inferred_excluded_families:
-                logger.info(
-                    f"[filter] DISQUALIFY (inferred excluded family {c_family!r} for "
-                    f"{target_material}/{project.get('country', '?')}): {name}"
-                )
-                continue
-
-        # 4. Tonnage >20x (extreme scale outlier — not a geological filter)
-        if p_tonnage > 0 and c_tonnage > 0:
-            ratio = max(p_tonnage, c_tonnage) / min(p_tonnage, c_tonnage)
-            if ratio > 20:
-                logger.info(f"[filter] DISQUALIFY (tonnage {ratio:.0f}×): {name}")
-                continue
-
-        # 5. Deposit type exclusion from rule criteria (expert-coded edge cases beyond family gate)
-        if c_dep and exclusions:
-            excluded = any(excl in c_dep for excl in exclusions)
-            if excluded:
-                logger.info(f"[filter] DISQUALIFY (excluded deposit type '{c_dep}'): {name}")
-                continue
-
-        # 6. Grade outside deposit-type range by >3x
-        if c_grade > 0 and rule_grade_min > 0 and rule_grade_max > 0:
-            if c_grade < rule_grade_min / 3 or c_grade > rule_grade_max * 3:
-                logger.info(f"[filter] DISQUALIFY (grade {c_grade} outside rule range {rule_grade_min}-{rule_grade_max} ×3): {name}")
-                continue
-
-        filtered.append(c)
-
-    logger.info(f"[score] {len(filtered)} candidates after hard filters")
-
-    # ── Step C: Score ──────────────────────────────────────────────────────
-    scored = []
-    for c in filtered:
-        score, reasons = _score_candidate(project, c)
-        scored.append({
+        # similarity_score = matched / evaluated (as percentage), or None when too few signals
+        score = (
+            round(matched / evaluated * 100, 1)
+            if evaluated >= 2 else None
+        )
+        survivors.append({
             **c,
             "similarity_score": score,
             "similarity_reasons": reasons,
+            "_rank_pts": rank_pts,
+            "_dimensions_matched": matched,
+            "_dimensions_evaluated": evaluated,
             "approved": False,
         })
 
-    # ── Step D: Select ─────────────────────────────────────────────────────
-    # Sort: scored candidates first (by score desc), then None-score candidates
-    ranked = sorted(
-        scored,
-        key=lambda x: (x.get("similarity_score") is None, -(x.get("similarity_score") or 0)),
+    logger.info(
+        f"[cascade] {len(survivors)} survivors | dropped: {dict(dropped_counts) or 'none'}"
     )
 
-    MIN_SCORE = 40
-    above = [a for a in ranked if a.get("similarity_score") is not None
-             and a["similarity_score"] >= MIN_SCORE]
-    # Take top 6 above threshold; fallback to top 4 if fewer than 2 pass
-    if len(above) >= 2:
-        top = above[:6]
+    # ── Step D: Rank by total points; take top 4-6 ─────────────────────────
+    ranked = sorted(survivors, key=lambda x: -x["_rank_pts"])
+    low_confidence = len(ranked) < 2
+    if low_confidence:
+        logger.warning(
+            f"[cascade] Only {len(ranked)} candidate(s) passed L1-L5 — "
+            f"flagging low_confidence; returning best available without padding"
+        )
+        top = ranked[:2]
     else:
-        top = ranked[:4]
-        logger.warning(f"[score] Fewer than 2 analogs above MIN_SCORE={MIN_SCORE} — using best available")
+        top = ranked[:6]
+        # If a clear best tier exists, prefer the top 4-6 with the highest scores;
+        # don't dilute with weak ones.
+        if len(top) > 4 and top[3]["_rank_pts"] < top[0]["_rank_pts"] / 2:
+            top = top[:4]
+
+    # Strip internal-only keys before returning
+    for s in top:
+        s.pop("_rank_pts", None)
+        s.pop("_dimensions_matched", None)
+        s.pop("_dimensions_evaluated", None)
 
     if top:
         best = top[0]
         logger.info(
-            f"[score] Best analog: {best.get('name')} "
+            f"[cascade] Best analog: {best.get('name')} "
             f"score={best.get('similarity_score')} source={best.get('source')}"
         )
     else:
-        logger.warning("[score] No analog candidates found")
+        logger.warning("[cascade] No analog candidates found")
 
-    return {"scored_analogs": top}
+    return {"scored_analogs": top, "low_confidence": low_confidence}
 
 
 def human_review_analog_node(state: AnalogState) -> AnalogState:
@@ -658,6 +784,7 @@ def _should_continue(state: AnalogState) -> str:
 builder = StateGraph(AnalogState)
 
 builder.add_node("load_project_and_rule", load_project_and_rule_node)
+builder.add_node("build_target_profile", build_target_profile_node)
 builder.add_node("library_search", library_search_node)
 builder.add_node("exa_search", exa_search_node)
 builder.add_node("combine_filter_score", combine_filter_score_node)
@@ -666,9 +793,10 @@ builder.add_node("save_analogs", save_analogs_node)
 
 builder.set_entry_point("load_project_and_rule")
 
-# Parallel fan-out: load → library + exa simultaneously
-builder.add_edge("load_project_and_rule", "library_search")
-builder.add_edge("load_project_and_rule", "exa_search")
+# load → build_target_profile → parallel fan-out (library + exa)
+builder.add_edge("load_project_and_rule", "build_target_profile")
+builder.add_edge("build_target_profile", "library_search")
+builder.add_edge("build_target_profile", "exa_search")
 
 # Fan-in: both feed into combine (LangGraph waits for both before running combine)
 builder.add_edge("library_search", "combine_filter_score")

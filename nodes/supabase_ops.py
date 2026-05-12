@@ -94,7 +94,10 @@ def get_approved_analogs(
             "analog_name,analog_material,analog_deposit_type,analog_country,"
             "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
             "similarity_score,analog_project_stage,"
-            "analog_host_rock,analog_mineralization_style,analog_district"
+            "analog_host_rock,analog_mineralization_style,analog_district,"
+            # Geological profile (cascading match)
+            "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
+            "analog_metal_suite,analog_alteration_signature,analog_recovery_method"
         )
         .in_("analog_material", keys)
         .eq("status", "approved")
@@ -129,6 +132,13 @@ def get_approved_analogs(
             "grade_unit": r.get("analog_grade_unit"),
             "source_url": r.get("source_url"),
             "project_stage": r.get("analog_project_stage"),
+            # Geological profile (used by cascading match)
+            "deposit_subtype":      r.get("analog_deposit_subtype"),
+            "mineralization_mode":  r.get("analog_mineralization_mode"),
+            "tectonic_belt":        r.get("analog_tectonic_belt"),
+            "metal_suite":          r.get("analog_metal_suite"),
+            "alteration_signature": r.get("analog_alteration_signature"),
+            "recovery_method":      r.get("analog_recovery_method"),
             "source": "library",
         })
     return candidates
@@ -481,8 +491,8 @@ def save_report_analogs(
     now = datetime.now(timezone.utc).isoformat()
     rows = []
 
-    for a in approved:
-        rows.append({
+    def _row(a: Dict, status: str) -> Dict:
+        return {
             "report_id": report_id,
             "project_id": project_id,
             "analog_name": a.get("name") or a.get("project_name") or "Unknown",
@@ -496,34 +506,24 @@ def save_report_analogs(
             "analog_grade_value": a.get("grade_value"),
             "analog_grade_unit": a.get("grade_unit"),
             "analog_project_stage": a.get("project_stage"),
+            # Geological profile (cascading match)
+            "analog_deposit_subtype":      a.get("deposit_subtype"),
+            "analog_mineralization_mode":  a.get("mineralization_mode"),
+            "analog_tectonic_belt":        a.get("tectonic_belt"),
+            "analog_metal_suite":          a.get("metal_suite"),
+            "analog_alteration_signature": a.get("alteration_signature"),
+            "analog_recovery_method":      a.get("recovery_method"),
             "similarity_score": a.get("similarity_score"),
             "source": a.get("source"),
             "source_url": a.get("source_url"),
-            "status": "approved",
+            "status": status,
             "created_at": now,
-        })
+        }
 
+    for a in approved:
+        rows.append(_row(a, "approved"))
     for a in rejected:
-        rows.append({
-            "report_id": report_id,
-            "project_id": project_id,
-            "analog_name": a.get("name") or a.get("project_name") or "Unknown",
-            "analog_material": a.get("material"),
-            "analog_deposit_type": a.get("deposit_type"),
-            "analog_host_rock": a.get("host_rock"),
-            "analog_mineralization_style": a.get("mineralization_style"),
-            "analog_district": a.get("district"),
-            "analog_country": a.get("country"),
-            "analog_tonnage_mt": a.get("tonnage_mt"),
-            "analog_grade_value": a.get("grade_value"),
-            "analog_grade_unit": a.get("grade_unit"),
-            "analog_project_stage": a.get("project_stage"),
-            "similarity_score": a.get("similarity_score"),
-            "source": a.get("source"),
-            "source_url": a.get("source_url"),
-            "status": "rejected",
-            "created_at": now,
-        })
+        rows.append(_row(a, "rejected"))
 
     if rows:
         get_client().table("report_analogs").insert(rows).execute()
