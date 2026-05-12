@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import settings
 from nodes.supabase_ops import get_client
+from schemas.analog_rule import AnalogRule
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -806,6 +807,28 @@ ANALOG_SELECTION_RULES = [
         "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
     },
 ]
+
+
+# Validate every analog_selection rule through the Pydantic schema at module
+# import time. A typo in a slug (e.g. "alkalik_porphyry") raises ValidationError
+# right here — the failure happens at deploy time, never at runtime. Validated
+# rules are kept as plain dicts for upsert compatibility with the DB row format.
+def _validate_analog_rules() -> None:
+    errors: list[str] = []
+    for raw in ANALOG_SELECTION_RULES:
+        try:
+            AnalogRule(**raw)
+        except Exception as e:
+            errors.append(f"  {raw.get('rule_id','<unknown>')}: {e}")
+    if errors:
+        raise ValueError(
+            "Schema validation failed for analog_selection rules:\n"
+            + "\n".join(errors)
+        )
+    logger.info(f"[seed] {len(ANALOG_SELECTION_RULES)} analog rules validated")
+
+
+_validate_analog_rules()
 
 
 # ── Confidence Adjustment Rules ────────────────────────────────────────────────

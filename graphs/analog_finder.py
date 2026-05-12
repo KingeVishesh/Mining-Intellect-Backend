@@ -26,9 +26,20 @@ from typing import Dict, List, Optional, TypedDict, Tuple
 
 from langgraph.graph import StateGraph, END
 
-from nodes import exa_search, field_extractor, rules_engine, supabase_ops, geo_taxonomy
+from nodes import exa_search, field_extractor, rules_engine, supabase_ops, geo_taxonomy, lessons
 
 logger = logging.getLogger(__name__)
+
+
+# ── Bootstrap: keep compiled_rules in sync with code on every backend boot ─
+# Runs once at module import. If the rule hash in DB differs from code, every
+# rule is upserted. UI edits to compiled_rules get overwritten — code is the
+# single source of truth. See nodes/bootstrap.py for the full mechanism.
+try:
+    from nodes.bootstrap import bootstrap_rules as _bootstrap_rules
+    _bootstrap_rules()
+except Exception as _boot_err:
+    logger.warning(f"[startup] bootstrap_rules failed (non-fatal): {_boot_err}")
 
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -42,6 +53,8 @@ class AnalogState(TypedDict, total=False):
     exa_analogs: List[Dict]             # from Exa web search
     scored_analogs: List[Dict]
     low_confidence: bool                # True when <2 candidates passed L1-L5
+    profile_warning: Optional[str]      # Human-readable message when profile too weak
+    audit_events: List[Dict]            # Per-candidate decision audit trail
     human_approved: bool
     approved_analogs: List[Dict]
     saved: bool
@@ -526,16 +539,30 @@ def load_project_and_rule_node(state: AnalogState) -> AnalogState:
     return {"project": project, "analog_rule": analog_rule, "error": None}
 
 
+_PROFILE_DIMENSIONS = (
+    "deposit_subtype", "mineralization_mode", "tectonic_belt",
+    "metal_suite", "alteration_signature", "recovery_method",
+)
+PROFILE_STRENGTH_MIN = 3  # need at least 3 of 6 fields populated for a strict rule
+
+
+def _profile_strength(profile: Dict) -> int:
+    """Count of non-null geological dimensions in a profile."""
+    return sum(1 for k in _PROFILE_DIMENSIONS if profile.get(k))
+
+
 def build_target_profile_node(state: AnalogState) -> AnalogState:
     """Derive the target project's geological identity profile (used for cascading match)."""
     if state.get("error"):
         return {"target_profile": None}
     project = state["project"] or {}
     profile = _build_profile(project)
+    strength = _profile_strength(profile)
     logger.info(
         f"[profile] target subtype={profile['deposit_subtype']!r} "
         f"mode={profile['mineralization_mode']!r} belt={profile['tectonic_belt']!r} "
-        f"metal={profile['metal_suite']!r} recovery={profile['recovery_method']!r}"
+        f"metal={profile['metal_suite']!r} recovery={profile['recovery_method']!r} "
+        f"strength={strength}/6"
     )
     return {"target_profile": profile}
 
@@ -637,6 +664,31 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     all_candidates = library + exa
 
     project_name = project.get("name") or ""
+
+    # Profile-strength gate: if the rule requires specific subtypes AND the
+    # target has fewer than 3 of 6 geological dimensions populated, refuse to
+    # run the cascade. Without enrichment, even strict rules can't filter
+    # candidates with null subtypes and we end up with garbage (the Hat
+    # Copper "100% match" failure mode). Surface the gap to the user instead.
+    required_subtypes_pregate = set((analog_rule or {}).get("required_subtypes") or [])
+    strength = _profile_strength(target_profile)
+    if required_subtypes_pregate and strength < PROFILE_STRENGTH_MIN:
+        missing = [d for d in _PROFILE_DIMENSIONS if not target_profile.get(d)]
+        logger.warning(
+            f"[cascade] PROFILE TOO WEAK for strict rule "
+            f"{(analog_rule or {}).get('rule_id','?')}: only {strength}/6 dimensions; "
+            f"missing {missing}. Refusing to score — flagging low_confidence."
+        )
+        return {
+            "scored_analogs": [],
+            "low_confidence": True,
+            "profile_warning": (
+                f"Project needs geological enrichment before analog selection can "
+                f"proceed reliably. Missing: {', '.join(missing)}. "
+                f"Run the research/enrichment pipeline first, or set these fields "
+                f"manually in the project record."
+            ),
+        }
     rule_exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
     # Structured exclusions from the rule (subtypes/modes/recovery the rule forbids)
     excluded_subtypes = set((analog_rule or {}).get("excluded_subtypes") or [])
@@ -665,11 +717,36 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             deduped.append(c)
     logger.info(f"[cascade] {len(deduped)} after dedup")
 
+    # ── Audit event accumulator (Phase 7) ─────────────────────────────────
+    # Every candidate (passed or dropped) gets a structured audit event so
+    # LangSmith traces, the admin dashboard, and the frontend Audit Trail
+    # tab can render exactly why each decision was made.
+    audit_events: list[dict] = []
+    rule_id_for_audit = (analog_rule or {}).get("rule_id")
+    rule_lesson_ids_for_audit = list((analog_rule or {}).get("applies_lessons") or [])
+
+    def _emit(decision: str, level: str, candidate: dict, profile: dict,
+              reason: str, rank_pts: int | None = None,
+              score: float | None = None) -> None:
+        audit_events.append({
+            "candidate_name": candidate.get("name") or "Unknown",
+            "candidate_source": candidate.get("source"),
+            "decision": decision,
+            "level": level,
+            "rule_id": rule_id_for_audit,
+            "lessons": lessons.resolve_lesson_ids(rule_lesson_ids_for_audit),
+            "detected_profile": {k: profile.get(k) for k in _PROFILE_DIMENSIONS},
+            "reason": reason,
+            "rank_pts": rank_pts,
+            "similarity_score": score,
+        })
+
     # ── Step B: Self-analog pre-filter (cheap; before profile build) ───────
     pre_filtered: list[dict] = []
     for c in deduped:
         if project_name and _is_self_analog(project_name, c.get("name") or ""):
             logger.info(f"[cascade] DROP self-analog: {c.get('name')}")
+            _emit("DROP", "self_analog", c, {}, "name fuzzy-matches target project")
             continue
         pre_filtered.append(c)
 
@@ -681,64 +758,66 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
 
         # Rule-driven structured exclusions (Lessons L86/L101 from the rule itself)
         if cand_profile["deposit_subtype"] and cand_profile["deposit_subtype"] in excluded_subtypes:
-            logger.info(f"[cascade] DROP rule subtype-exclusion ({cand_profile['deposit_subtype']}): {c.get('name')}")
+            reason = f"rule excluded sub-type ({cand_profile['deposit_subtype']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
             dropped_counts["rule_subtype"] = dropped_counts.get("rule_subtype", 0) + 1
+            _emit("DROP", "rule_subtype", c, cand_profile, reason)
             continue
         if cand_profile["mineralization_mode"] and cand_profile["mineralization_mode"] in excluded_modes:
-            logger.info(f"[cascade] DROP rule mode-exclusion ({cand_profile['mineralization_mode']}): {c.get('name')}")
+            reason = f"rule excluded mode ({cand_profile['mineralization_mode']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
             dropped_counts["rule_mode"] = dropped_counts.get("rule_mode", 0) + 1
+            _emit("DROP", "rule_mode", c, cand_profile, reason)
             continue
         if cand_profile["recovery_method"] and cand_profile["recovery_method"] in excluded_recovery:
-            logger.info(f"[cascade] DROP rule recovery-exclusion ({cand_profile['recovery_method']}): {c.get('name')}")
+            reason = f"rule excluded recovery ({cand_profile['recovery_method']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
             dropped_counts["rule_recovery"] = dropped_counts.get("rule_recovery", 0) + 1
+            _emit("DROP", "rule_recovery", c, cand_profile, reason)
             continue
 
         # Positive required_subtypes filter — when the rule pins a subtype list,
         # any candidate with a detected subtype OUTSIDE that list is dropped.
-        # This catches candidates that fell through the negative excluded_subtypes
-        # check because the exclusion list wasn't exhaustive (e.g. Jasperoide skarn
-        # for the alkalic-porphyry rule whose excluded list didn't enumerate skarn).
         if required_subtypes and cand_profile["deposit_subtype"]:
             if cand_profile["deposit_subtype"] not in required_subtypes:
-                logger.info(
-                    f"[cascade] DROP rule required-subtype mismatch "
-                    f"({cand_profile['deposit_subtype']} not in {sorted(required_subtypes)}): {c.get('name')}"
-                )
+                reason = (f"detected sub-type {cand_profile['deposit_subtype']} "
+                          f"not in required {sorted(required_subtypes)}")
+                logger.info(f"[cascade] DROP required-subtype mismatch: {c.get('name')}")
                 dropped_counts["rule_required_subtype"] = dropped_counts.get("rule_required_subtype", 0) + 1
+                _emit("DROP", "rule_required_subtype", c, cand_profile, reason)
                 continue
 
-        # Strict-mode drop for unenriched candidates — when the rule pins a
-        # subtype list, candidates with NO subtype AND NO deposit_type / no
-        # mineralization_style cannot be classified. Better to drop than
-        # include unsubstantiated analogs (the Hat Copper run picked
-        # La Granja and Sherridon precisely because they had no enrichment
-        # and the cascade had nothing to filter on).
+        # Strict-mode drop for unenriched candidates
         if required_subtypes and not cand_profile["deposit_subtype"]:
             has_text = bool(
                 (c.get("deposit_type") or "").strip()
                 or (c.get("mineralization_style") or "").strip()
             )
             if not has_text:
-                logger.info(
-                    f"[cascade] DROP unenriched (no subtype, no deposit_type, no min_style): {c.get('name')}"
-                )
+                reason = "candidate has no sub-type, no deposit_type, no mineralization_style"
+                logger.info(f"[cascade] DROP unenriched: {c.get('name')}")
                 dropped_counts["unenriched"] = dropped_counts.get("unenriched", 0) + 1
+                _emit("DROP", "unenriched", c, cand_profile, reason)
                 continue
 
-        # Legacy "Exclude X analogs" text patterns (for rules without structured fields)
+        # Legacy "Exclude X analogs" text patterns
         c_dep_lower = (c.get("deposit_type") or "").lower()
         if c_dep_lower and rule_exclusions:
             if any(excl in c_dep_lower for excl in rule_exclusions):
+                reason = f"deposit_type matches rule text-exclusion ({c_dep_lower})"
                 logger.info(f"[cascade] DROP rule text-exclusion: {c.get('name')}")
                 dropped_counts["rule_text"] = dropped_counts.get("rule_text", 0) + 1
+                _emit("DROP", "rule_text", c, cand_profile, reason)
                 continue
 
         passes, rank_pts, matched, evaluated, reasons, dropped_at = _cascading_match(
             target_profile, cand_profile, analog_rule,
         )
         if not passes:
-            logger.info(f"[cascade] DROP @{dropped_at}: {c.get('name')} — {reasons[0] if reasons else ''}")
+            reason = reasons[0] if reasons else "cascade rejection"
+            logger.info(f"[cascade] DROP @{dropped_at}: {c.get('name')} — {reason}")
             dropped_counts[dropped_at or "unknown"] = dropped_counts.get(dropped_at or "unknown", 0) + 1
+            _emit("DROP", dropped_at or "unknown", c, cand_profile, reason)
             continue
 
         # similarity_score = matched / evaluated (as percentage), or None when too few signals
@@ -746,15 +825,22 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             round(matched / evaluated * 100, 1)
             if evaluated >= 2 else None
         )
+        rule_lesson_ids = list((analog_rule or {}).get("applies_lessons") or [])
         survivors.append({
             **c,
             "similarity_score": score,
             "similarity_reasons": reasons,
+            # Resolve lesson IDs to full dicts (id + title + text + source_doc)
+            # so the frontend can render the "why was this picked?" tooltip.
+            "lessons": lessons.resolve_lesson_ids(rule_lesson_ids),
             "_rank_pts": rank_pts,
             "_dimensions_matched": matched,
             "_dimensions_evaluated": evaluated,
             "approved": False,
         })
+        _emit("PASS", "cascade", c, cand_profile,
+              f"matched {matched}/{evaluated} dimensions",
+              rank_pts=rank_pts, score=score)
 
     logger.info(
         f"[cascade] {len(survivors)} survivors | dropped: {dict(dropped_counts) or 'none'}"
@@ -789,7 +875,11 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     else:
         logger.warning("[cascade] No analog candidates found")
 
-    return {"scored_analogs": top, "low_confidence": low_confidence}
+    return {
+        "scored_analogs": top,
+        "low_confidence": low_confidence,
+        "audit_events": audit_events,
+    }
 
 
 def human_review_analog_node(state: AnalogState) -> AnalogState:
@@ -811,6 +901,14 @@ def save_analogs_node(state: AnalogState) -> AnalogState:
     try:
         supabase_ops.save_analogs(state["project_id"], analogs)
         logger.info(f"[save] Saved {len(analogs)} analogs for project {state['project_id']}")
+        # Persist audit trail (non-fatal if it fails — analogs are already saved)
+        audit_events = state.get("audit_events") or []
+        if audit_events:
+            try:
+                supabase_ops.save_analog_audit_events(state["project_id"], audit_events)
+                logger.info(f"[save] Persisted {len(audit_events)} audit events")
+            except Exception as ae:
+                logger.warning(f"[save] Audit-event persistence failed: {ae}")
         return {"saved": True, "error": None}
     except Exception as e:
         logger.error(f"[save] Error: {e}")

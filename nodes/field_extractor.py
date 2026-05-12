@@ -276,23 +276,17 @@ SOURCE TEXT:
         return _fill_geological_profile({f: None for f in TARGET_FIELDS}, material)
 
 
-# Controlled-vocab validation maps — Grok occasionally returns values outside
-# the vocabulary even when prompted. Validate against the actual taxonomy slugs.
-_VALID_SUBTYPES: frozenset[str] = frozenset({
-    "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
-    "high_sulfidation_lithocap_porphyry",
-    "iocg_oxide", "iocg_sulfide", "iocg_hybrid", "oxide_iscr_supergene_blanket",
-    "low_sulfidation_epithermal", "high_sulfidation_epithermal",
-    "intermediate_sulfidation_epithermal",
-    "greenstone_orogenic", "turbidite_orogenic", "bif_hosted_orogenic", "orogenic_general",
-    "sedex", "kupferschiefer_style", "manto_cu", "crd", "mvt", "redbed_cu",
-    "sediment_hosted_general", "vms_general", "carlin_general",
-    "cu_au_skarn", "fe_skarn", "zn_pb_skarn", "w_mo_skarn", "skarn_general",
-    "merensky_reef", "ug2_reef", "platreef",
-    "limonite_laterite", "saprolite_laterite", "laterite_general",
-    "komatiite_hosted", "conduit_hosted", "magmatic_sulphide_general",
-    "bif_general",
-})
+# Controlled-vocab validation — single source of truth is nodes/geo_taxonomy.py.
+# Importing the flat slug sets means new vocabulary added to the taxonomy is
+# automatically valid here; no second list to maintain.
+from nodes.geo_taxonomy import (
+    ALL_SUBTYPE_SLUGS,
+    ALL_MODE_SLUGS,
+    ALL_BELT_SLUGS,
+    ALL_SUITE_SLUGS,
+    ALL_ALTERATION_SLUGS,
+    ALL_RECOVERY_SLUGS,
+)
 
 
 def _validate(value, allowed: frozenset) -> Optional[str]:
@@ -313,20 +307,12 @@ def _fill_geological_profile(fields: dict, material: str) -> dict:
     from nodes import geo_taxonomy
 
     # Validate Grok output against vocabularies — fall back to heuristic on miss
-    fields["deposit_subtype"] = _validate(fields.get("deposit_subtype"), _VALID_SUBTYPES)
-    fields["mineralization_mode"] = _validate(
-        fields.get("mineralization_mode"), frozenset(geo_taxonomy.MINERALIZATION_MODES)
-    )
-    fields["tectonic_belt"] = _validate(
-        fields.get("tectonic_belt"), frozenset(geo_taxonomy.TECTONIC_BELTS.keys())
-    )
-    fields["metal_suite"] = _validate(fields.get("metal_suite"), frozenset(geo_taxonomy.METAL_SUITES))
-    fields["alteration_signature"] = _validate(
-        fields.get("alteration_signature"), frozenset(geo_taxonomy.ALTERATION_SIGNATURES)
-    )
-    fields["recovery_method"] = _validate(
-        fields.get("recovery_method"), frozenset(geo_taxonomy.RECOVERY_METHODS)
-    )
+    fields["deposit_subtype"]      = _validate(fields.get("deposit_subtype"),      ALL_SUBTYPE_SLUGS)
+    fields["mineralization_mode"]  = _validate(fields.get("mineralization_mode"),  ALL_MODE_SLUGS)
+    fields["tectonic_belt"]        = _validate(fields.get("tectonic_belt"),        ALL_BELT_SLUGS)
+    fields["metal_suite"]          = _validate(fields.get("metal_suite"),          ALL_SUITE_SLUGS)
+    fields["alteration_signature"] = _validate(fields.get("alteration_signature"), ALL_ALTERATION_SLUGS)
+    fields["recovery_method"]      = _validate(fields.get("recovery_method"),      ALL_RECOVERY_SLUGS)
 
     # Heuristic fallback for any still-null fields
     if fields["deposit_subtype"] is None:
@@ -541,20 +527,12 @@ def _fill_analog_profile(analog: dict, material: str) -> None:
     """In-place validate + heuristic-fill the 6 geological profile fields on an analog dict."""
     from nodes import geo_taxonomy
 
-    analog["deposit_subtype"] = _validate(analog.get("deposit_subtype"), _VALID_SUBTYPES)
-    analog["mineralization_mode"] = _validate(
-        analog.get("mineralization_mode"), frozenset(geo_taxonomy.MINERALIZATION_MODES)
-    )
-    analog["tectonic_belt"] = _validate(
-        analog.get("tectonic_belt"), frozenset(geo_taxonomy.TECTONIC_BELTS.keys())
-    )
-    analog["metal_suite"] = _validate(analog.get("metal_suite"), frozenset(geo_taxonomy.METAL_SUITES))
-    analog["alteration_signature"] = _validate(
-        analog.get("alteration_signature"), frozenset(geo_taxonomy.ALTERATION_SIGNATURES)
-    )
-    analog["recovery_method"] = _validate(
-        analog.get("recovery_method"), frozenset(geo_taxonomy.RECOVERY_METHODS)
-    )
+    analog["deposit_subtype"]      = _validate(analog.get("deposit_subtype"),      ALL_SUBTYPE_SLUGS)
+    analog["mineralization_mode"]  = _validate(analog.get("mineralization_mode"),  ALL_MODE_SLUGS)
+    analog["tectonic_belt"]        = _validate(analog.get("tectonic_belt"),        ALL_BELT_SLUGS)
+    analog["metal_suite"]          = _validate(analog.get("metal_suite"),          ALL_SUITE_SLUGS)
+    analog["alteration_signature"] = _validate(analog.get("alteration_signature"), ALL_ALTERATION_SLUGS)
+    analog["recovery_method"]      = _validate(analog.get("recovery_method"),      ALL_RECOVERY_SLUGS)
 
     if analog["deposit_subtype"] is None:
         analog["deposit_subtype"] = geo_taxonomy.detect_subtype(

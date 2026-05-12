@@ -1,0 +1,41 @@
+name: Tests
+
+# Run pytest on every push and pull request so that broken golden cases
+# (e.g. an analog_selection rule that drops Mt. Milligan) block the merge.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: Run analog-finder golden tests
+        env:
+          # Stubs — tests don't hit the real services
+          SUPABASE_URL: "http://localhost"
+          SUPABASE_SERVICE_ROLE_KEY: "test"
+          GROK_API_KEY: "test"
+          EXA_API_KEY: "test"
+          LANGCHAIN_API_KEY: "test"
+        run: |
+          python -m pytest tests/ -v --tb=short

@@ -16,25 +16,85 @@ from typing import Optional, Dict, List, FrozenSet
 
 
 # ── Vocabularies ─────────────────────────────────────────────────────────────
+#
+# SINGLE SOURCE OF TRUTH for every geological vocabulary used by the analog
+# finder. Every detect_*() heuristic, every rule's required/excluded slugs,
+# every Grok prompt enumeration, every Pydantic schema validator MUST derive
+# from these constants. Drift is prevented because there is no second copy.
 
-# Deposit sub-types — finer-grained than family. Keys are the family, values are
-# the allowed sub-types within that family.
+# Subtype → family map. The canonical list of every deposit sub-type slug used
+# at runtime, paired with its broad deposit family for L2 family-gate logic.
+# When `analog_finder._cascading_match()` checks "same deposit family" it now
+# looks up by subtype slug here rather than re-deriving from freeform text.
+SUBTYPE_TO_FAMILY: Dict[str, str] = {
+    # Porphyry family
+    "alkalic_porphyry":                    "porphyry",
+    "calc_alkalic_porphyry":               "porphyry",
+    "laramide_porphyry":                   "porphyry",
+    "high_sulfidation_lithocap_porphyry":  "porphyry",
+    # Oxide ISCR — semantically distinct family (different metallurgy)
+    "oxide_iscr_supergene_blanket":        "oxide_iscr",
+    # IOCG family
+    "iocg_oxide":                          "iocg",
+    "iocg_sulfide":                        "iocg",
+    "iocg_hybrid":                         "iocg",
+    # Epithermal family
+    "low_sulfidation_epithermal":          "epithermal",
+    "high_sulfidation_epithermal":         "epithermal",
+    "intermediate_sulfidation_epithermal": "epithermal",
+    # Orogenic family
+    "greenstone_orogenic":                 "orogenic",
+    "turbidite_orogenic":                  "orogenic",
+    "bif_hosted_orogenic":                 "orogenic",
+    "orogenic_general":                    "orogenic",
+    # Sediment-hosted family
+    "sedex":                               "sediment_hosted",
+    "kupferschiefer_style":                "sediment_hosted",
+    "manto_cu":                            "sediment_hosted",
+    "crd":                                 "sediment_hosted",
+    "mvt":                                 "sediment_hosted",
+    "redbed_cu":                           "sediment_hosted",
+    "sediment_hosted_general":             "sediment_hosted",
+    # VMS family
+    "vms_general":                         "vms",
+    # Carlin family
+    "carlin_general":                      "carlin",
+    # Skarn family
+    "cu_au_skarn":                         "skarn",
+    "fe_skarn":                            "skarn",
+    "zn_pb_skarn":                         "skarn",
+    "w_mo_skarn":                          "skarn",
+    "skarn_general":                       "skarn",
+    # PGM reef family
+    "merensky_reef":                       "pgm_reef",
+    "ug2_reef":                            "pgm_reef",
+    "platreef":                            "pgm_reef",
+    # Laterite family
+    "limonite_laterite":                   "laterite",
+    "saprolite_laterite":                  "laterite",
+    "laterite_general":                    "laterite",
+    # Magmatic sulphide family
+    "komatiite_hosted":                    "magmatic_sulphide",
+    "conduit_hosted":                      "magmatic_sulphide",
+    "magmatic_sulphide_general":           "magmatic_sulphide",
+    # BIF family
+    "bif_general":                         "bif",
+}
+
+# Flat set of every valid subtype slug — derived from SUBTYPE_TO_FAMILY so the
+# two can never drift. Used by Pydantic validators, field_extractor validation,
+# and Grok prompt enum generation.
+ALL_SUBTYPE_SLUGS: FrozenSet[str] = frozenset(SUBTYPE_TO_FAMILY.keys())
+
+# Set of distinct family names (porphyry, iocg, epithermal, …). Derived.
+ALL_FAMILY_SLUGS: FrozenSet[str] = frozenset(SUBTYPE_TO_FAMILY.values())
+
+# Kept for backward-compatibility / documentation. NOT the runtime gate.
+# (The previous nested structure used parts of slugs like "alkalic" rather than
+# compound slugs like "alkalic_porphyry", which made it dead code.)
 DEPOSIT_SUBTYPES: Dict[str, List[str]] = {
-    "porphyry":          ["alkalic", "calc_alkalic", "laramide", "high_sulfidation_lithocap"],
-    "iocg":              ["oxide", "sulfide", "hybrid"],
-    "epithermal":        ["low_sulfidation", "high_sulfidation", "intermediate_sulfidation"],
-    "orogenic":          ["greenstone", "turbidite_hosted", "bif_hosted"],
-    "vms":               ["bimodal_mafic", "bimodal_felsic", "mafic_ultramafic", "siliciclastic_felsic"],
-    "skarn":             ["cu_au_skarn", "fe_skarn", "zn_pb_skarn", "w_mo_skarn"],
-    "sediment_hosted":   ["sedex", "kupferschiefer_style", "manto", "crd", "mvt", "redbed_cu"],
-    "carlin":            ["jasperoid", "decalcified", "sedimentary_breccia"],
-    "magmatic_sulphide": ["komatiite", "intrusion_hosted", "conduit_hosted"],
-    "laterite":          ["limonite", "saprolite", "smectite"],
-    "bif":               ["high_grade_hematite", "magnetite_taconite", "channel_iron"],
-    "unconformity":      ["egress", "ingress"],
-    "rollfront":         ["sandstone_hosted"],
-    "pgm_reef":          ["merensky", "ug2", "platreef"],
-    "oxide_iscr":        ["supergene_blanket"],  # in-situ copper recovery — distinct from family
+    family: sorted(s for s, f in SUBTYPE_TO_FAMILY.items() if f == family)
+    for family in sorted(ALL_FAMILY_SLUGS)
 }
 
 
@@ -47,6 +107,7 @@ MINERALIZATION_MODES: List[str] = [
     "free_milling_oxide",
     "placer",
 ]
+ALL_MODE_SLUGS: FrozenSet[str] = frozenset(MINERALIZATION_MODES)
 
 
 # Tectonic belts — mineralization provinces with shared genesis. Lookup is by
@@ -86,7 +147,10 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
         "regions": ["carajás", "carajas", "minas gerais", "bahia", "goiás"],
     },
     "central_african_copperbelt": {
-        "countries": ["zambia", "drc", "congo", "democratic republic of the congo"],
+        "countries": [
+            "zambia", "drc", "dr congo", "congo",
+            "democratic republic of the congo", "democratic republic of congo",
+        ],
         "regions": ["copperbelt", "katanga", "lualaba"],
     },
     "bushveld": {
@@ -130,6 +194,7 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
         "regions": ["iberian pyrite belt", "ipb", "alentejo", "huelva"],
     },
 }
+ALL_BELT_SLUGS: FrozenSet[str] = frozenset(TECTONIC_BELTS.keys())
 
 
 # Metal suites — characteristic byproduct/co-product patterns
@@ -150,6 +215,7 @@ METAL_SUITES: List[str] = [
     "li_only",        # lithium brines/pegmatites
     "ree_only",       # rare-earth dominant
 ]
+ALL_SUITE_SLUGS: FrozenSet[str] = frozenset(METAL_SUITES)
 
 
 # Alteration signatures — characteristic assemblages
@@ -166,6 +232,7 @@ ALTERATION_SIGNATURES: List[str] = [
     "supergene_oxidation",       # weathering blanket
     "lateritic_weathering",      # laterite Ni
 ]
+ALL_ALTERATION_SLUGS: FrozenSet[str] = frozenset(ALTERATION_SIGNATURES)
 
 
 # Recovery methods
@@ -181,6 +248,7 @@ RECOVERY_METHODS: List[str] = [
     "atmospheric_leach", # laterite Ni atmospheric leach
     "hpal",          # high-pressure acid leach (laterite Ni)
 ]
+ALL_RECOVERY_SLUGS: FrozenSet[str] = frozenset(RECOVERY_METHODS)
 
 
 # Recovery incompatibility — pairs that cannot substitute for each other

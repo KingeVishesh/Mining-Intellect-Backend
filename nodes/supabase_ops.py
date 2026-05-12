@@ -289,6 +289,44 @@ def save_report(
 
 # ── Analogs ───────────────────────────────────────────────────────────────────
 
+def save_analog_audit_events(
+    project_id: str,
+    events: List[Dict],
+    report_id: Optional[str] = None,
+) -> None:
+    """
+    Persist per-candidate audit decisions emitted by graphs/analog_finder.py.
+
+    Each event is a structured record of why an analog candidate was passed
+    or dropped, including the rule_id, the lesson IDs that drove the decision,
+    the detected geological profile, and a human-readable reason. Used for
+    LangSmith traces, the admin "Audit Trail" tab, and future ML feedback
+    loops on rule quality.
+    """
+    if not events:
+        return
+    rows = []
+    for e in events:
+        rows.append({
+            "project_id":      project_id,
+            "report_id":       report_id,
+            "candidate_name":  e.get("candidate_name") or "Unknown",
+            "candidate_source": e.get("candidate_source"),
+            "decision":        e.get("decision") or "UNKNOWN",
+            "level":           e.get("level"),
+            "rule_id":         e.get("rule_id"),
+            "lessons":         e.get("lessons") or [],
+            "detected_profile": e.get("detected_profile") or {},
+            "reason":          e.get("reason"),
+            "rank_pts":        e.get("rank_pts"),
+            "similarity_score": e.get("similarity_score"),
+        })
+    # Insert in batches to stay under PostgREST size limits
+    BATCH = 50
+    for i in range(0, len(rows), BATCH):
+        get_client().table("analog_audit_events").insert(rows[i : i + BATCH]).execute()
+
+
 def save_analogs(project_id: str, analogs: List[Dict]) -> None:
     """
     Persist approved analogs into `workflow_states` as a JSON blob
