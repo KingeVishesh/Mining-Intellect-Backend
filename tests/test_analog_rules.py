@@ -172,3 +172,90 @@ def test_field_extractor_uses_taxonomy_directly():
         "_VALID_SUBTYPES re-introduced — vocabulary must come from "
         "nodes/geo_taxonomy.py to prevent drift"
     )
+
+
+# ── Profile-strength gate ──────────────────────────────────────────────────
+
+
+def test_profile_strength_gate_refuses_unenriched_target():
+    """
+    When the target project has <3 of 6 geological dimensions populated AND
+    the rule pins required_subtypes, the cascade must refuse to score and
+    return low_confidence=True with a profile_warning. This is the Hat
+    Copper "all geological columns null" failure mode — surface it to the
+    user instead of returning garbage analogs.
+    """
+    from graphs.analog_finder import combine_filter_score_node
+
+    sparse_target = {
+        "name": "Bare Project", "material": "copper",
+        # All geological dims null — simulates an unenriched DB row
+        "deposit_type": None, "country": None, "region": None, "district": None,
+    }
+    rule = _find_rule("analog_sel_copper_porphyry_alkalic")
+    state = {
+        "project": sparse_target,
+        "analog_rule": rule,
+        # No target_profile pre-built — combine_filter_score_node will derive
+        # an empty one from the sparse project dict.
+        "library_analogs": [],
+        "exa_analogs": [],
+    }
+    result = combine_filter_score_node(state)
+    assert result["low_confidence"] is True
+    assert "geological enrichment" in result["profile_warning"]
+    assert result["scored_analogs"] == []
+
+
+def test_profile_strength_gate_runs_when_target_has_data():
+    """A well-enriched target should NOT trigger the strength gate."""
+    from graphs.analog_finder import combine_filter_score_node
+    from tests.fixtures.golden_analogs import HAT_TARGET, MT_MILLIGAN
+
+    rule = _find_rule("analog_sel_copper_porphyry_alkalic")
+    state = {
+        "project": HAT_TARGET,
+        "analog_rule": rule,
+        "library_analogs": [MT_MILLIGAN],
+        "exa_analogs": [],
+    }
+    result = combine_filter_score_node(state)
+    # Mt. Milligan should pass — gate doesn't block a well-enriched target
+    assert any(a["name"] == "Mt. Milligan" for a in result["scored_analogs"])
+    # No profile warning because strength is 5+/6
+    assert "profile_warning" not in result or not result.get("profile_warning")
+
+
+# ── Audit event emission ───────────────────────────────────────────────────
+
+
+def test_audit_events_emitted_for_every_candidate():
+    """Every candidate considered must produce one audit event."""
+    from graphs.analog_finder import combine_filter_score_node
+    from tests.fixtures.golden_analogs import (
+        HAT_TARGET, MT_MILLIGAN, MARIMACA, KAMOA_KAKULA,
+    )
+
+    rule = _find_rule("analog_sel_copper_porphyry_alkalic")
+    state = {
+        "project": HAT_TARGET,
+        "analog_rule": rule,
+        "library_analogs": [MT_MILLIGAN, MARIMACA, KAMOA_KAKULA],
+        "exa_analogs": [],
+    }
+    result = combine_filter_score_node(state)
+    events = result["audit_events"]
+    assert len(events) == 3, f"expected 1 event per candidate, got {len(events)}"
+
+    by_name = {e["candidate_name"]: e for e in events}
+    assert by_name["Mt. Milligan"]["decision"] == "PASS"
+    assert by_name["Marimaca"]["decision"] == "DROP"
+    assert by_name["Kamoa-Kakula"]["decision"] == "DROP"
+
+    # Every event must carry the rule_id and at least one resolved lesson
+    for e in events:
+        assert e["rule_id"] == "analog_sel_copper_porphyry_alkalic"
+        assert isinstance(e["lessons"], list)
+        assert any(l.get("text") for l in e["lessons"])
+        assert e["detected_profile"]
+        assert e["reason"]
