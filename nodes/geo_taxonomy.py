@@ -325,7 +325,13 @@ def detect_subtype(
         return "laterite_general"
 
     # Magmatic sulphide Ni-Cu-PGE
-    if "magmatic sulphide" in blob or "magmatic sulfide" in blob or "komatiite" in blob:
+    has_magmatic_keyword = (
+        "magmatic sulphide" in blob or "magmatic sulfide" in blob
+        or "komatiite" in blob
+        or ("conduit" in blob and ("ni" in blob or "nickel" in blob))
+        or (("ni-cu" in blob or "ni cu" in blob) and ("sulphide" in blob or "sulfide" in blob))
+    )
+    if has_magmatic_keyword:
         if "komatiite" in blob:
             return "komatiite_hosted"
         if "conduit" in blob:

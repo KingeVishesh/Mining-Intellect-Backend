@@ -79,6 +79,30 @@ def activate_rules(project: Dict, rules: List[Dict]) -> List[Dict]:
     return activated
 
 
+_ANALOG_FILTER_KEYS = (
+    "required_subtypes", "excluded_subtypes",
+    "required_modes", "excluded_modes",
+    "excluded_recovery", "required_recovery",
+    "preferred_belts", "required_belts",
+    "preferred_alteration", "excluded_alteration",
+    "applies_lessons",
+)
+
+
+def _flatten_rule(rule: Dict) -> Dict:
+    """
+    Promote keys from analog_filters_json onto the top level of the rule dict so
+    callers can read `rule['excluded_subtypes']` directly without reaching into
+    the JSON blob. Mutates and returns the rule.
+    """
+    filters = rule.get("analog_filters_json") or {}
+    if isinstance(filters, dict):
+        for k in _ANALOG_FILTER_KEYS:
+            if k in filters and k not in rule:
+                rule[k] = filters[k]
+    return rule
+
+
 def get_analog_rule(
     material: str,
     deposit_type: Optional[str] = None,
@@ -111,6 +135,9 @@ def get_analog_rule(
     mat_lower = material.strip().lower()
     dep_lower = (deposit_type or "").strip().lower()
     sub_lower = (deposit_subtype or "").strip().lower()
+
+    # Flatten analog_filters_json onto top level for all rules upfront
+    rules = [_flatten_rule(r) for r in rules]
 
     # Pass 0: subtype-specific rule wins outright — its required_subtypes contains ours
     if sub_lower:

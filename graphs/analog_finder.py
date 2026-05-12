@@ -334,15 +334,22 @@ def _cascading_match(
     # ── L3: Same deposit sub-type (HARD — Lessons L86/L101/L124) ───────────
     # Sub-type is the single most important geological similarity dimension.
     # alkalic_porphyry ≠ laramide_porphyry ≠ iocg_oxide.
+    # Sibling sub-types listed together in the rule's required_subtypes are
+    # treated as compatible (e.g. greenstone_orogenic ≈ turbidite_orogenic
+    # both appear in analog_sel_gold_orogenic.required_subtypes).
     t_sub = target["deposit_subtype"]
     c_sub = candidate["deposit_subtype"]
+    rule_required = set((analog_rule or {}).get("required_subtypes") or [])
     if t_sub and c_sub:
-        if t_sub != c_sub:
+        siblings = t_sub in rule_required and c_sub in rule_required
+        if t_sub != c_sub and not siblings:
             return False, 0, 0, 0, [f"L3 sub-type mismatch ({c_sub} ≠ {t_sub}): {rule_lessons}"], "L3"
         matched += 1
         evaluated += 1
-        rank_pts += 25  # heavy weight when both known and matching
-        reasons.append(f"L3 sub-type match ({c_sub}): {rule_lessons}")
+        # Exact match gets +25; sibling match gets +18
+        rank_pts += 25 if t_sub == c_sub else 18
+        suffix = "" if t_sub == c_sub else f" sibling-of {t_sub}"
+        reasons.append(f"L3 sub-type match ({c_sub}{suffix}): {rule_lessons}")
     elif t_sub and not c_sub:
         # Target has subtype, candidate's is unknown. Don't drop — but record uncertainty.
         evaluated += 1
