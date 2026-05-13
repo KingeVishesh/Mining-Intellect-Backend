@@ -110,6 +110,46 @@ MINERALIZATION_MODES: List[str] = [
 ALL_MODE_SLUGS: FrozenSet[str] = frozenset(MINERALIZATION_MODES)
 
 
+# Mineralization patterns — the GEOMETRY of the orebody, orthogonal to
+# subtype/mode. Carlin can be bulk-disseminated (Marigold) OR replacement
+# (Trixie). Orogenic gold can be vein-hosted (Brucejack) OR bulk-disseminated
+# (Springpole). The cascade L4.5 hard-filters on rule.required_patterns so
+# orogenic-vein projects never get orogenic-bulk analogs and vice versa.
+MINERALIZATION_PATTERNS: List[str] = [
+    "disseminated_bulk",   # Marigold, Black Pine, Springpole, Douay
+    "vein_hosted",         # Brucejack, Red Lake, Fosterville
+    "stockwork",           # Most porphyry cores; Tower Gold mixed
+    "breccia_hosted",      # Some IOCG, White Gold
+    "replacement",         # CRD, manto, Trixie
+    "massive_sulphide",    # VMS lenses
+    "reef",                # Merensky, UG2, Platreef
+    "placer",              # alluvial gold
+    "blanket",             # supergene oxide / laterite
+]
+ALL_PATTERN_SLUGS: FrozenSet[str] = frozenset(MINERALIZATION_PATTERNS)
+
+
+# Host rock classes — coarse classification of the dominant host lithology,
+# orthogonal to deposit type. Orogenic gold in gabbro shear zones (True North,
+# Brucejack) mines differently from orogenic gold in gneiss breccia (White
+# Gold). Carlin gold in carbonate sediments (Black Pine) is non-comparable to
+# Carlin-style gold in clastic siltstones (Pipeline) when modelling continuity.
+HOST_ROCK_CLASSES: List[str] = [
+    "carbonate_sediment",     # limestone, dolomite — Carlin host
+    "clastic_sediment",       # sandstone, siltstone, shale — sediment-hosted Cu, roll-front U
+    "volcanic_mafic",         # basalt, gabbro flows, komatiite
+    "volcanic_felsic",        # rhyolite, dacite tuff — HS epithermal cap rock
+    "intrusive_mafic",        # gabbro, diorite — magmatic Ni-Cu, alkalic porphyry hosts
+    "intrusive_felsic",       # granite, granodiorite, syenite — porphyry, intrusive U
+    "metamorphic_high_grade", # gneiss, amphibolite — Yukon White Gold
+    "metamorphic_low_grade",  # greenstone, schist — Abitibi, Yilgarn orogenic gold
+    "bif",                    # banded iron formation — iron ore, BIF-hosted Au
+    "carbonatite",            # rare earths
+    "ultramafic",             # peridotite, dunite — laterite Ni, magmatic Ni
+]
+ALL_HOST_CLASS_SLUGS: FrozenSet[str] = frozenset(HOST_ROCK_CLASSES)
+
+
 # Tectonic belts — mineralization provinces with shared genesis. Lookup is by
 # (country, region|district). Order matters: more specific belts checked first.
 TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
@@ -622,6 +662,206 @@ def detect_recovery_method(
         return "gravity"
     if "flotation" in blob or "flot " in blob:
         return "flotation"
+    return None
+
+
+def detect_host_class(
+    host_rock: Optional[str] = None,
+    deposit_type: Optional[str] = None,
+    mineralization_style: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Classify the dominant host lithology into one coarse class. Returns one
+    of HOST_ROCK_CLASSES or None.
+    """
+    # Prefer the host_rock field strongly — it's specifically about lithology.
+    # mineralization_style and description often mention vein mineralogy
+    # ("quartz-carbonate veins") that should NOT be read as host lithology.
+    host_blob = _norm(host_rock)
+    aux_blob = " ".join(filter(None, [
+        _norm(deposit_type), _norm(mineralization_style), _norm(description),
+    ]))
+    if not host_blob and not aux_blob:
+        return None
+
+    def _hit(needles, *blobs):
+        for needle in needles:
+            for b in blobs:
+                if needle in b:
+                    return True
+        return False
+
+    # Carbonatite (very specific — REE host)
+    if _hit(("carbonatite",), host_blob, aux_blob):
+        return "carbonatite"
+
+    # BIF (sedimentary, but distinct iron-ore host)
+    if _hit(("bif", "banded iron formation", "iron formation",
+              "magnetite taconite", "itabira"), host_blob, aux_blob):
+        return "bif"
+
+    # Carbonate sediment — only count when it's a clearly sedimentary carbonate.
+    # Exclude "quartz-carbonate" (vein mineralogy) and "carbonate replacement"
+    # (depositional style, not necessarily carbonate host).
+    has_carbonate = _hit(
+        ("limestone", "dolostone", "calcarenite", "calcareous", "silty limestone"),
+        host_blob, aux_blob,
+    )
+    if not has_carbonate and "dolomite" in host_blob and "quartz-carbonate" not in host_blob:
+        has_carbonate = True
+    # bare "carbonate" mention only counts if it's in host_rock alone (not vein gangue context)
+    if not has_carbonate and "carbonate" in host_blob and "quartz-carbonate" not in host_blob:
+        has_carbonate = True
+    if has_carbonate:
+        return "carbonate_sediment"
+
+    # Metamorphic high-grade (gneiss / amphibolite / etc.) — checked BEFORE
+    # intrusive_felsic because orthogneiss is metamorphic, not igneous.
+    # Also before ultramafic so "gneiss with amphibolite and ultramafic units"
+    # (White Gold) gets the dominant host (gneiss) rather than the accessory.
+    if _hit(("gneiss", "amphibolite", "granulite", "migmatite",
+              "high-grade metamorphic"), host_blob, aux_blob):
+        return "metamorphic_high_grade"
+
+    # Metamorphic low-grade (greenstone, schist)
+    if _hit(("greenstone", "schist", "phyllite", "slate", "metavolcanic",
+              "metasediment", "metabasalt", "metaintrusive"), host_blob, aux_blob):
+        return "metamorphic_low_grade"
+
+    # Intrusive mafic (gabbro, diorite, monzodiorite) — Doubleview Hat, True North
+    # Check before ultramafic because some texts say "ultramafic intrusion" loosely.
+    if _hit(("gabbro", "diorite", "monzodiorite", "monzonite",
+              "norite", "anorthosite"), host_blob, aux_blob):
+        return "intrusive_mafic"
+
+    # Ultramafic (only narrow terms — peridotite, dunite, serpentinite)
+    if _hit(("peridotite", "dunite", "serpentinite"), host_blob, aux_blob):
+        return "ultramafic"
+    # Bare "ultramafic" mention — only if no other host class hit
+    if "ultramafic" in host_blob:
+        return "ultramafic"
+
+    # Intrusive felsic (granite, syenite)
+    if _hit(("granite", "granodiorite", "monzogranite", "leucogranite",
+              "syenite", "alaskite", "trachyte porphyry"), host_blob, aux_blob):
+        return "intrusive_felsic"
+
+    # Volcanic — felsic vs mafic
+    if _hit(("rhyolite", "dacite", "felsic tuff", "felsic volcanic",
+              "dacitic", "rhyolitic"), host_blob, aux_blob):
+        return "volcanic_felsic"
+    if _hit(("basalt", "andesite", "mafic volcanic", "mafic flow",
+              "komatiite", "pillow lava"), host_blob, aux_blob):
+        return "volcanic_mafic"
+
+    # Clastic sediment (sandstone, siltstone, shale)
+    if _hit(("sandstone", "siltstone", "shale", "mudstone",
+              "conglomerate", "arkose", "greywacke", "redbed"), host_blob, aux_blob):
+        return "clastic_sediment"
+
+    # Last-resort family inference
+    dep = _norm(deposit_type)
+    if "carlin" in dep:
+        return "carbonate_sediment"
+    if "porphyry" in dep:
+        return "intrusive_felsic"
+    if "bif" in dep:
+        return "bif"
+    if "laterite" in dep:
+        return "ultramafic"
+    return None
+
+
+def detect_pattern(
+    mineralization_style: Optional[str] = None,
+    mining_method: Optional[str] = None,
+    processing_method: Optional[str] = None,
+    deposit_type: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Detect the orebody geometry pattern. This is what determines mining method
+    and resource model shape — vein-hosted vs disseminated-bulk vs replacement
+    are mined and modelled completely differently even within the same
+    deposit subtype.
+
+    Returns one of MINERALIZATION_PATTERNS or None if no confident match.
+    """
+    blob = " ".join(filter(None, [
+        _norm(mineralization_style), _norm(mining_method),
+        _norm(processing_method), _norm(deposit_type),
+        _norm(description),
+    ]))
+    if not blob:
+        return None
+
+    # Strong signals first
+    if "placer" in blob or "alluvial" in blob:
+        return "placer"
+    if "reef" in blob and ("merensky" in blob or "ug2" in blob or "ug-2" in blob
+                            or "platreef" in blob or "pgm" in blob or "pge" in blob):
+        return "reef"
+    if ("massive sulphide" in blob or "massive sulfide" in blob
+            or "vms" in blob or "vhms" in blob):
+        return "massive_sulphide"
+    if ("oxide blanket" in blob or "supergene blanket" in blob or "laterite" in blob
+            or ("supergene" in blob and "blanket" in blob)):
+        return "blanket"
+
+    # Replacement (CRD, manto, Trixie-style polymetallic)
+    if ("carbonate replacement" in blob or "crd" in blob
+            or "manto" in blob or "replacement" in blob):
+        # Distinguish replacement-style from breccia-hosted within sediment-hosted
+        if "vein" in blob and "replacement" not in blob:
+            return "vein_hosted"
+        return "replacement"
+
+    # Vein-hosted — narrow, structurally controlled. Triggers on explicit
+    # vein/shear language, free gold + pyrite. Excludes when "stockwork" or
+    # "disseminated" dominates.
+    has_vein = any(k in blob for k in (
+        "vein", "quartz-carbonate vein", "quartz vein", "fault-fill",
+        "shear-hosted", "shear zone", "lode gold", "fissure",
+    ))
+    has_dissem = any(k in blob for k in (
+        "disseminated", "bulk tonnage", "bulk low-grade", "bulk low grade",
+        "low-grade halo", "halo-dominated", "low-grade bulk",
+    ))
+    has_stockwork = any(k in blob for k in ("stockwork", "stringer", "veinlet"))
+    has_breccia = "breccia" in blob
+
+    # If multiple signals: prefer the dominant style indicated by the words used
+    if has_vein and not has_dissem and not has_stockwork:
+        return "vein_hosted"
+    if has_dissem and not has_vein:
+        return "disseminated_bulk"
+    if has_stockwork and not has_vein:
+        return "stockwork"
+    if has_breccia and not has_vein and not has_dissem:
+        return "breccia_hosted"
+    # Mixed signals: the more aggressive geometry wins for mining-style purposes
+    if has_dissem:
+        return "disseminated_bulk"
+    if has_vein:
+        return "vein_hosted"
+    if has_stockwork:
+        return "stockwork"
+    if has_breccia:
+        return "breccia_hosted"
+
+    # Last-resort by deposit family inference
+    dep = _norm(deposit_type)
+    if "porphyry" in dep:
+        return "stockwork"
+    if "orogenic" in dep or "lode" in dep:
+        return "vein_hosted"
+    if "carlin" in dep or "sediment hosted" in dep:
+        return "disseminated_bulk"
+    if "iocg" in dep:
+        return "breccia_hosted"
+    if "epithermal" in dep:
+        return "vein_hosted"
     return None
 
 

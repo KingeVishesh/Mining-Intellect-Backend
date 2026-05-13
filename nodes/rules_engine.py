@@ -85,6 +85,9 @@ _ANALOG_FILTER_KEYS = (
     "excluded_recovery", "required_recovery",
     "preferred_belts", "required_belts",
     "preferred_alteration", "excluded_alteration",
+    "required_patterns", "excluded_patterns",
+    "required_host_classes", "excluded_host_classes",
+    "tonnage_match_max_ratio",
     "applies_lessons",
 )
 
@@ -107,23 +110,28 @@ def get_analog_rule(
     material: str,
     deposit_type: Optional[str] = None,
     deposit_subtype: Optional[str] = None,
+    mineralization_pattern: Optional[str] = None,
 ) -> Optional[Dict]:
     """Return the best matching analog_selection rule for this project.
 
     Priority:
-      1. Primary-material rule whose `required_subtypes` contains the project's subtype
-      2. Primary-material rule with matching deposit_type
-      3. Any rule with matching deposit_type (cross-material e.g. gold_silver)
-      4. None — when deposit_type is unknown, no rule is safer than the wrong rule.
+      0a. Primary-material rule whose required_subtypes ∋ subtype AND
+          required_patterns ∋ pattern — most specific (e.g. orogenic-vein
+          gold vs orogenic-bulk gold both share orogenic_general subtype).
+      0b. Primary-material rule whose required_subtypes ∋ subtype (no pattern).
+      1. Primary-material rule with matching deposit_type.
+      2. Any rule with matching deposit_type (cross-material e.g. gold_silver).
+      3. None — when deposit_type is unknown, no rule is safer than the wrong rule.
 
     Deliberately no material-only fallback: all compiled analog_selection rules are
     deposit-type-specific (e.g. nickel_laterite vs nickel_magmatic_sulphide). Returning
     the first rule alphabetically when deposit_type is unknown would silently apply the
     wrong rule. Callers should handle None by running a material-only Exa query.
 
-    Subtype takes precedence over deposit_type when provided — a Doubleview Hat Copper
-    project with deposit_subtype='alkalic_porphyry' will route to
-    analog_sel_copper_porphyry_alkalic rather than the generic porphyry rule.
+    Subtype + pattern + deposit_type are combined to pick the most specific
+    matching rule. Hat Copper (alkalic_porphyry) → alkalic rule; True North
+    (orogenic_general + vein_hosted) → orogenic_vein rule; Springpole
+    (orogenic_general + disseminated_bulk) → orogenic_bulk rule.
     """
     rules = get_compiled_rules(material, rule_type="analog_selection")
     if not rules:
@@ -135,16 +143,33 @@ def get_analog_rule(
     mat_lower = material.strip().lower()
     dep_lower = (deposit_type or "").strip().lower()
     sub_lower = (deposit_subtype or "").strip().lower()
+    pat_lower = (mineralization_pattern or "").strip().lower()
 
     # Flatten analog_filters_json onto top level for all rules upfront
     rules = [_flatten_rule(r) for r in rules]
 
-    # Pass 0: subtype-specific rule wins outright — its required_subtypes contains ours
+    # Pass 0a: most specific — subtype AND pattern both required by the rule
+    if sub_lower and pat_lower:
+        for r in rules:
+            r_mat = (r.get("source_material") or "").strip().lower()
+            req_sub = [s.lower() for s in (r.get("required_subtypes") or [])]
+            req_pat = [p.lower() for p in (r.get("required_patterns") or [])]
+            if (r_mat == mat_lower
+                    and sub_lower in req_sub
+                    and req_pat and pat_lower in req_pat):
+                return r
+
+    # Pass 0b: subtype-only match (skip rules that pin patterns we don't satisfy)
     if sub_lower:
         for r in rules:
             r_mat = (r.get("source_material") or "").strip().lower()
-            required = [s.lower() for s in (r.get("required_subtypes") or [])]
-            if r_mat == mat_lower and sub_lower in required:
+            req_sub = [s.lower() for s in (r.get("required_subtypes") or [])]
+            req_pat = [p.lower() for p in (r.get("required_patterns") or [])]
+            if r_mat == mat_lower and sub_lower in req_sub:
+                # If this rule pins patterns and we have a pattern that's NOT
+                # in its required list, skip — a more general rule is safer.
+                if req_pat and pat_lower and pat_lower not in req_pat:
+                    continue
                 return r
 
     if not dep_lower:

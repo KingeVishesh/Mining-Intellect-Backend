@@ -18,6 +18,8 @@ from nodes.geo_taxonomy import (
     ALL_BELT_SLUGS,
     ALL_ALTERATION_SLUGS,
     ALL_RECOVERY_SLUGS,
+    ALL_PATTERN_SLUGS,
+    ALL_HOST_CLASS_SLUGS,
 )
 
 
@@ -77,6 +79,18 @@ class AnalogRule(BaseModel):
     required_belts:    List[str] = Field(default_factory=list)
     preferred_alteration: List[str] = Field(default_factory=list)
     excluded_alteration:  List[str] = Field(default_factory=list)
+    # Mineralization pattern (orebody geometry) — vein vs disseminated_bulk vs
+    # stockwork vs breccia vs replacement. Drives L4.5 cascade filter.
+    required_patterns: List[str] = Field(default_factory=list)
+    excluded_patterns: List[str] = Field(default_factory=list)
+    # Host rock class — gives carbonate-sediment Carlin vs gneiss-hosted gold
+    # the right wedge between them. Drives L4.7 cascade filter.
+    required_host_classes: List[str] = Field(default_factory=list)
+    excluded_host_classes: List[str] = Field(default_factory=list)
+    # Hard tonnage tolerance — drop candidates whose tonnage diverges by more
+    # than this multiplicative ratio when both sides have data. None = no cap.
+    # See Gold Lesson 136 (>20–25% mismatch penalised heavily).
+    tonnage_match_max_ratio: Optional[float] = None
     applies_lessons:   List[str] = Field(default_factory=list)
 
     # ── Documentation and tuning ───────────────────────────────────────────
@@ -113,6 +127,25 @@ class AnalogRule(BaseModel):
     @classmethod
     def _validate_alteration_slugs(cls, v: List[str], info) -> List[str]:
         return _validate_slug_list(v, ALL_ALTERATION_SLUGS, info.field_name)
+
+    @field_validator("required_patterns", "excluded_patterns")
+    @classmethod
+    def _validate_pattern_slugs(cls, v: List[str], info) -> List[str]:
+        return _validate_slug_list(v, ALL_PATTERN_SLUGS, info.field_name)
+
+    @field_validator("required_host_classes", "excluded_host_classes")
+    @classmethod
+    def _validate_host_class_slugs(cls, v: List[str], info) -> List[str]:
+        return _validate_slug_list(v, ALL_HOST_CLASS_SLUGS, info.field_name)
+
+    @field_validator("tonnage_match_max_ratio")
+    @classmethod
+    def _validate_tonnage_ratio(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return v
+        if v < 1.0:
+            raise ValueError(f"tonnage_match_max_ratio must be ≥1.0 (got {v})")
+        return v
 
     @field_validator("applies_lessons")
     @classmethod

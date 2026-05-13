@@ -67,7 +67,11 @@ def _apply_rule_then_cascade(
     excluded_subtypes = set(rule.get("excluded_subtypes") or [])
     excluded_modes = set(rule.get("excluded_modes") or [])
     excluded_recovery = set(rule.get("excluded_recovery") or [])
+    excluded_patterns = set(rule.get("excluded_patterns") or [])
+    excluded_host_classes = set(rule.get("excluded_host_classes") or [])
     required_subtypes = set(rule.get("required_subtypes") or [])
+    required_patterns = set(rule.get("required_patterns") or [])
+    required_host_classes = set(rule.get("required_host_classes") or [])
 
     if cand_profile["deposit_subtype"] and cand_profile["deposit_subtype"] in excluded_subtypes:
         return False, "rule_subtype", [f"excluded subtype: {cand_profile['deposit_subtype']}"]
@@ -75,6 +79,20 @@ def _apply_rule_then_cascade(
         return False, "rule_mode", [f"excluded mode: {cand_profile['mineralization_mode']}"]
     if cand_profile["recovery_method"] and cand_profile["recovery_method"] in excluded_recovery:
         return False, "rule_recovery", [f"excluded recovery: {cand_profile['recovery_method']}"]
+    if cand_profile["mineralization_pattern"] and cand_profile["mineralization_pattern"] in excluded_patterns:
+        return False, "rule_pattern", [f"excluded pattern: {cand_profile['mineralization_pattern']}"]
+    if required_patterns and cand_profile["mineralization_pattern"]:
+        if cand_profile["mineralization_pattern"] not in required_patterns:
+            return False, "rule_required_pattern", [
+                f"{cand_profile['mineralization_pattern']} not in {sorted(required_patterns)}"
+            ]
+    if cand_profile["host_rock_class"] and cand_profile["host_rock_class"] in excluded_host_classes:
+        return False, "rule_host_class", [f"excluded host: {cand_profile['host_rock_class']}"]
+    if required_host_classes and cand_profile["host_rock_class"]:
+        if cand_profile["host_rock_class"] not in required_host_classes:
+            return False, "rule_required_host_class", [
+                f"{cand_profile['host_rock_class']} not in {sorted(required_host_classes)}"
+            ]
     if required_subtypes and cand_profile["deposit_subtype"]:
         if cand_profile["deposit_subtype"] not in required_subtypes:
             return False, "rule_required_subtype", [

@@ -97,7 +97,9 @@ def get_approved_analogs(
             "analog_host_rock,analog_mineralization_style,analog_district,"
             # Geological profile (cascading match)
             "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
-            "analog_metal_suite,analog_alteration_signature,analog_recovery_method"
+            "analog_metal_suite,analog_alteration_signature,analog_recovery_method,"
+            # Pattern + host class
+            "analog_mineralization_pattern,analog_host_rock_class"
         )
         .in_("analog_material", keys)
         .eq("status", "approved")
@@ -133,12 +135,14 @@ def get_approved_analogs(
             "source_url": r.get("source_url"),
             "project_stage": r.get("analog_project_stage"),
             # Geological profile (used by cascading match)
-            "deposit_subtype":      r.get("analog_deposit_subtype"),
-            "mineralization_mode":  r.get("analog_mineralization_mode"),
-            "tectonic_belt":        r.get("analog_tectonic_belt"),
-            "metal_suite":          r.get("analog_metal_suite"),
-            "alteration_signature": r.get("analog_alteration_signature"),
-            "recovery_method":      r.get("analog_recovery_method"),
+            "deposit_subtype":        r.get("analog_deposit_subtype"),
+            "mineralization_mode":    r.get("analog_mineralization_mode"),
+            "tectonic_belt":          r.get("analog_tectonic_belt"),
+            "metal_suite":            r.get("analog_metal_suite"),
+            "alteration_signature":   r.get("analog_alteration_signature"),
+            "recovery_method":        r.get("analog_recovery_method"),
+            "mineralization_pattern": r.get("analog_mineralization_pattern"),
+            "host_rock_class":        r.get("analog_host_rock_class"),
             "source": "library",
         })
     return candidates
@@ -545,12 +549,14 @@ def save_report_analogs(
             "analog_grade_unit": a.get("grade_unit"),
             "analog_project_stage": a.get("project_stage"),
             # Geological profile (cascading match)
-            "analog_deposit_subtype":      a.get("deposit_subtype"),
-            "analog_mineralization_mode":  a.get("mineralization_mode"),
-            "analog_tectonic_belt":        a.get("tectonic_belt"),
-            "analog_metal_suite":          a.get("metal_suite"),
-            "analog_alteration_signature": a.get("alteration_signature"),
-            "analog_recovery_method":      a.get("recovery_method"),
+            "analog_deposit_subtype":        a.get("deposit_subtype"),
+            "analog_mineralization_mode":    a.get("mineralization_mode"),
+            "analog_tectonic_belt":          a.get("tectonic_belt"),
+            "analog_metal_suite":            a.get("metal_suite"),
+            "analog_alteration_signature":   a.get("alteration_signature"),
+            "analog_recovery_method":        a.get("recovery_method"),
+            "analog_mineralization_pattern": a.get("mineralization_pattern"),
+            "analog_host_rock_class":        a.get("host_rock_class"),
             "similarity_score": a.get("similarity_score"),
             "source": a.get("source"),
             "source_url": a.get("source_url"),

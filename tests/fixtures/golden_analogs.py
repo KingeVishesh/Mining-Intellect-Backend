@@ -286,6 +286,195 @@ NI_SULPHIDE_TARGET = {
 }
 
 
+# ── More analogs for Liberty Gold Black Pine + 1911 Gold True North ─────────
+
+# Black Pine target (super-large bulk Carlin)
+BLACK_PINE_TARGET = {
+    "name": "Black Pine", "material": "gold",
+    "deposit_type": "Carlin-style sediment-hosted disseminated gold",
+    "deposit_subtype": "carlin_general",
+    "mineralization_mode": "supergene_oxide",
+    "mineralization_pattern": "disseminated_bulk",
+    "host_rock_class": "carbonate_sediment",
+    "tectonic_belt": "great_basin_carlin",
+    "recovery_method": "cn_leach",
+    "metal_suite": "au_only",
+    "country": "USA", "region": "Idaho", "district": "Black Pine",
+    "mineralization_style": "bulk low-grade disseminated gold in arsenian pyrite",
+    "host_rock": "Pennsylvanian limestone Oquirrh Formation",
+    "processing_method": "heap leach",
+    "tonnage_mt": 500.0, "grade_value": 0.3, "grade_unit": "g/t Au",
+}
+
+# Carlin super-large analogs (correct picks)
+MARIGOLD = {
+    "name": "Marigold", "material": "gold",
+    "deposit_type": "Carlin-style sediment-hosted disseminated",
+    "deposit_subtype": "carlin_general",
+    "mineralization_mode": "supergene_oxide",
+    "mineralization_pattern": "disseminated_bulk",
+    "host_rock_class": "clastic_sediment",
+    "tectonic_belt": "great_basin_carlin",
+    "recovery_method": "cn_leach",
+    "metal_suite": "au_only",
+    "country": "USA", "region": "Nevada", "district": "Battle Mountain",
+    "mineralization_style": "disseminated gold in oxidized arsenian pyrite",
+    "host_rock": "siltstone limestone",
+    "processing_method": "heap leach",
+    "tonnage_mt": 740.0, "grade_value": 0.42, "grade_unit": "g/t Au",
+}
+ROUND_MOUNTAIN = {
+    "name": "Round Mountain", "material": "gold",
+    "deposit_type": "Carlin-style bulk-disseminated",
+    "deposit_subtype": "carlin_general",
+    "mineralization_mode": "supergene_oxide",
+    "mineralization_pattern": "disseminated_bulk",
+    "host_rock_class": "carbonate_sediment",
+    "tectonic_belt": "great_basin_carlin",
+    "recovery_method": "cn_leach",
+    "metal_suite": "au_only",
+    "country": "USA", "region": "Nevada", "district": "Toiyabe",
+    "mineralization_style": "bulk low-grade disseminated",
+    "host_rock": "ash-flow tuff (volcanic-sedimentary)",
+    "processing_method": "heap leach",
+    "tonnage_mt": 800.0, "grade_value": 0.5, "grade_unit": "g/t Au",
+}
+# Pan Mine — geologically correct Carlin but TOO SMALL for super-large rule.
+PAN_MINE = {
+    "name": "Pan Mine", "material": "gold",
+    "deposit_type": "Carlin-style sediment-hosted disseminated",
+    "deposit_subtype": "carlin_general",
+    "mineralization_mode": "supergene_oxide",
+    "mineralization_pattern": "disseminated_bulk",
+    "host_rock_class": "carbonate_sediment",
+    "tectonic_belt": "great_basin_carlin",
+    "recovery_method": "cn_leach",
+    "metal_suite": "au_only",
+    "country": "USA", "region": "Nevada", "district": "White Pine",
+    "mineralization_style": "disseminated invisible gold",
+    "host_rock": "limestone",
+    "processing_method": "heap leach",
+    "tonnage_mt": 52.0, "grade_value": 0.45, "grade_unit": "g/t Au",
+}
+# Wrong analogs for Black Pine
+TRIXIE = {
+    "name": "Trixie", "material": "gold",
+    "deposit_type": "polymetallic vein/replacement",
+    "deposit_subtype": "crd",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "replacement",
+    "host_rock_class": "carbonate_sediment",
+    "tectonic_belt": "great_basin_carlin",
+    "recovery_method": "flotation",
+    "metal_suite": "ag_pb_zn",
+    "country": "USA", "region": "Utah", "district": "Tintic",
+    "mineralization_style": "high-grade quartz vein, base-metal sulphides",
+    "host_rock": "limestone carbonate",
+    "processing_method": "flotation",
+    "tonnage_mt": 5.0, "grade_value": 8.0, "grade_unit": "g/t Au",
+}
+FLORIDA_CANYON = {
+    "name": "Florida Canyon", "material": "gold",
+    "deposit_type": "low-sulfidation epithermal gold",
+    "deposit_subtype": "low_sulfidation_epithermal",
+    "mineralization_mode": "supergene_oxide",
+    "mineralization_pattern": "vein_hosted",
+    "host_rock_class": "clastic_sediment",
+    "tectonic_belt": "great_basin_carlin",
+    "recovery_method": "heap_leach",
+    "metal_suite": "au_ag",
+    "country": "USA", "region": "Nevada", "district": "Humboldt",
+    "mineralization_style": "stockwork quartz veins/microveinlets, epithermal",
+    "host_rock": "Triassic siltstone mudstone",
+    "processing_method": "heap leach",
+    "tonnage_mt": 150.0, "grade_value": 0.6, "grade_unit": "g/t Au",
+}
+
+# True North target (vein-orogenic)
+TRUE_NORTH_TARGET = {
+    "name": "True North", "material": "gold",
+    "deposit_type": "Archean orogenic gold",
+    "deposit_subtype": "orogenic_general",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "vein_hosted",
+    "host_rock_class": "intrusive_mafic",
+    "tectonic_belt": "abitibi",
+    "recovery_method": "cil_cip",
+    "metal_suite": "au_only",
+    "country": "Canada", "region": "Manitoba", "district": "Rice Lake greenstone",
+    "mineralization_style": "quartz-carbonate veins shear-hosted free gold",
+    "host_rock": "San Antonio gabbro sill, greenstone volcanics",
+    "processing_method": "CIL",
+    "tonnage_mt": 5.0, "grade_value": 6.0, "grade_unit": "g/t Au",
+}
+# Correct picks: Brucejack, Red Lake-style high-grade vein
+BRUCEJACK = {
+    "name": "Brucejack", "material": "gold",
+    "deposit_type": "orogenic gold high-grade veins",
+    "deposit_subtype": "orogenic_general",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "vein_hosted",
+    "host_rock_class": "volcanic_mafic",
+    "tectonic_belt": "bc_quesnel_stikine",
+    "recovery_method": "cil_cip",
+    "metal_suite": "au_only",
+    "country": "Canada", "region": "British Columbia", "district": "Sulphurets",
+    "mineralization_style": "quartz-carbonate veins shear-hosted free gold",
+    "host_rock": "andesite volcanic",
+    "processing_method": "CIL",
+    "tonnage_mt": 16.0, "grade_value": 8.4, "grade_unit": "g/t Au",
+}
+RED_LAKE = {
+    "name": "Red Lake", "material": "gold",
+    "deposit_type": "Archean orogenic gold veins",
+    "deposit_subtype": "greenstone_orogenic",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "vein_hosted",
+    "host_rock_class": "metamorphic_low_grade",
+    "tectonic_belt": "abitibi",
+    "recovery_method": "cil_cip",
+    "metal_suite": "au_only",
+    "country": "Canada", "region": "Ontario", "district": "Red Lake greenstone",
+    "mineralization_style": "quartz-carbonate veins shear-hosted",
+    "host_rock": "Archean greenstone schist",
+    "processing_method": "CIL",
+    "tonnage_mt": 8.0, "grade_value": 13.0, "grade_unit": "g/t Au",
+}
+# Wrong analogs for True North
+SPRINGPOLE = {
+    "name": "Springpole", "material": "gold",
+    "deposit_type": "alkaline porphyry-epithermal hybrid",
+    "deposit_subtype": "orogenic_general",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "disseminated_bulk",
+    "host_rock_class": "intrusive_felsic",
+    "tectonic_belt": "abitibi",
+    "recovery_method": "flotation",
+    "metal_suite": "au_ag",
+    "country": "Canada", "region": "Ontario", "district": "Birch-Uchi greenstone",
+    "mineralization_style": "bulk-tonnage low-grade disseminated, potassic biotite",
+    "host_rock": "trachyte porphyry, diatreme breccia",
+    "processing_method": "flotation",
+    "tonnage_mt": 191.0, "grade_value": 0.78, "grade_unit": "g/t Au",
+}
+WHITE_GOLD = {
+    "name": "White Gold (Golden Saddle)", "material": "gold",
+    "deposit_type": "orogenic gold gneiss-hosted",
+    "deposit_subtype": "orogenic_general",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "breccia_hosted",
+    "host_rock_class": "metamorphic_high_grade",
+    "tectonic_belt": "yukon_tintina",
+    "recovery_method": "cil_cip",
+    "metal_suite": "au_only",
+    "country": "Canada", "region": "Yukon", "district": "White Gold",
+    "mineralization_style": "high-grade breccia + disseminated in altered gneiss",
+    "host_rock": "felsic orthogneiss amphibolite",
+    "processing_method": "CIL",
+    "tonnage_mt": 30.0, "grade_value": 1.5, "grade_unit": "g/t Au",
+}
+
+
 GOLDEN_CASES: list[dict] = [
     {
         "name": "alkalic Cu-Au porphyry → BC analogs only",
@@ -308,7 +497,7 @@ GOLDEN_CASES: list[dict] = [
     },
     {
         "name": "orogenic gold → Abitibi/Yilgarn/Birimian, drop epi/Carlin/porphyry",
-        "rule_id": "analog_sel_gold_orogenic",
+        "rule_id": "analog_sel_gold_orogenic_vein",
         "target": ABITIBI_GOLD_TARGET,
         "must_pick": [DETOUR_LAKE, SUNRISE_DAM, KIBALI],
         "must_drop": [
@@ -333,6 +522,42 @@ GOLDEN_CASES: list[dict] = [
             # Marimaca is copper not nickel — caught at L1 or rule_subtype
             # (its iocg_oxide is in the magmatic-sulphide rule's exclusions).
             (MARIMACA,      {"L1", "rule_subtype", "rule_required_subtype"}),
+        ],
+    },
+    {
+        # Liberty Gold Black Pine — super-large Carlin. Picks Marigold &
+        # Round Mountain. Drops Pan at scale_mismatch (L5.5), Trixie at
+        # rule_pattern (replacement), Florida Canyon at rule_subtype
+        # (epithermal not Carlin).
+        "name": "Black Pine — super-large Carlin",
+        "rule_id": "analog_sel_gold_carlin_super_large",
+        "target": BLACK_PINE_TARGET,
+        "must_pick": [MARIGOLD, ROUND_MOUNTAIN],
+        "must_drop": [
+            (PAN_MINE,        {"L5.5"}),       # geologically perfect but too small
+            # Trixie hits rule_recovery first (flotation excluded for Carlin super-large)
+            # — its replacement pattern would catch it too at rule_pattern.
+            (TRIXIE,          {"rule_recovery", "rule_pattern", "rule_subtype",
+                                 "rule_required_pattern", "rule_required_subtype"}),
+            (FLORIDA_CANYON,  {"rule_pattern", "rule_subtype",
+                                "rule_required_pattern", "rule_required_subtype"}),
+        ],
+    },
+    {
+        # 1911 Gold True North — vein-orogenic. Picks Brucejack + Red Lake.
+        # Drops Springpole at rule_required_pattern (disseminated bulk not vein),
+        # White Gold at rule_required_pattern (breccia-hosted).
+        "name": "True North — vein-orogenic",
+        "rule_id": "analog_sel_gold_orogenic_vein",
+        "target": TRUE_NORTH_TARGET,
+        "must_pick": [BRUCEJACK, RED_LAKE],
+        "must_drop": [
+            (SPRINGPOLE,      {"rule_pattern", "rule_required_pattern", "L4.5"}),
+            (WHITE_GOLD,      {"rule_pattern", "rule_required_pattern", "L4.5"}),
+            # Marigold is gold but bulk Carlin not orogenic vein — drops at
+            # subtype level.
+            (MARIGOLD,        {"rule_subtype", "rule_required_subtype",
+                                "rule_pattern", "rule_required_pattern", "L2", "L3"}),
         ],
     },
 ]

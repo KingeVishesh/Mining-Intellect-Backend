@@ -294,6 +294,16 @@ def _build_profile(row: dict) -> dict:
             row.get("processing_method"), row.get("district") or row.get("location_name"),
             row.get("deposit_type"),
         ),
+        # Mineralization pattern (orebody geometry) — L4.5 filter
+        "mineralization_pattern": row.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
+            row.get("mineralization_style"), row.get("mining_method"),
+            row.get("processing_method"), row.get("deposit_type"),
+        ),
+        # Host rock class — L4.7 filter
+        "host_rock_class":      row.get("host_rock_class") or geo_taxonomy.detect_host_class(
+            row.get("host_rock"), row.get("deposit_type"),
+            row.get("mineralization_style"),
+        ),
         "grade_value":          row.get("grade_value"),
         "grade_unit":           row.get("grade_unit"),
         "tonnage_mt":           row.get("tonnage_mt"),
@@ -380,6 +390,37 @@ def _cascading_match(
         rank_pts += 15
         reasons.append(f"L4 mode match ({candidate['mineralization_mode']}): {rule_lessons}")
 
+    # ── L4.5: Mineralization pattern (HARD — Gold Lesson LG19) ────────────
+    # Vein-hosted ≠ disseminated_bulk ≠ stockwork ≠ replacement even within
+    # the same family + subtype. This is the wedge between True North (vein)
+    # and Springpole (bulk disseminated), and between Black Pine (bulk
+    # disseminated Carlin) and Trixie (replacement Carlin).
+    t_pattern = target["mineralization_pattern"]
+    c_pattern = candidate["mineralization_pattern"]
+    if t_pattern and c_pattern and t_pattern != c_pattern:
+        return False, 0, 0, 0, [
+            f"L4.5 pattern mismatch ({c_pattern} ≠ {t_pattern}): {rule_lessons}"
+        ], "L4.5"
+    if t_pattern and c_pattern:
+        matched += 1
+        evaluated += 1
+        rank_pts += 20
+        reasons.append(f"L4.5 pattern match ({c_pattern}): {rule_lessons}")
+
+    # ── L4.7: Host rock class (RANK +15, or HARD if rule pins host classes) ─
+    # Gabbro shear veins ≠ gneiss breccia ≠ syenite-hosted disseminated even
+    # when all are orogenic gold. Rule's required_host_classes drives the
+    # hard filter (checked in combine_filter_score_node); here we use it
+    # only as a ranking signal.
+    t_host = target["host_rock_class"]
+    c_host = candidate["host_rock_class"]
+    if t_host and c_host:
+        evaluated += 1
+        if t_host == c_host:
+            matched += 1
+            rank_pts += 15
+            reasons.append(f"L4.7 host class match ({c_host}): {rule_lessons}")
+
     # ── L5: Recovery method compatibility (HARD — Lessons L19/L73/L82) ─────
     # flotation ≠ heap-leach ≠ ISCR — different metallurgical regime
     if not geo_taxonomy.recovery_compatible(target["recovery_method"], candidate["recovery_method"]):
@@ -392,6 +433,24 @@ def _cascading_match(
             evaluated += 1
             rank_pts += 10
             reasons.append(f"L5 recovery match ({candidate['recovery_method']}): {rule_lessons}")
+
+    # ── L5.5: Tonnage tolerance (HARD when rule specifies) ─────────────────
+    # Gold Lesson LG136: >20–25% tonnage mismatch must be penalised heavily.
+    # Each rule can declare a tonnage_match_max_ratio (e.g. 5.0 for super-
+    # large Carlin, 4.0 for orogenic-vein) — beyond that ratio, drop. When
+    # the rule doesn't specify a tolerance, scale is just a ranking signal
+    # at L9 (untouched here).
+    tol = (analog_rule or {}).get("tonnage_match_max_ratio")
+    if tol is not None:
+        t_t = float(target.get("tonnage_mt") or 0)
+        c_t = float(candidate.get("tonnage_mt") or 0)
+        if t_t > 0 and c_t > 0:
+            ratio = max(t_t, c_t) / min(t_t, c_t)
+            if ratio > float(tol):
+                return False, 0, 0, 0, [
+                    f"L5.5 scale mismatch ({ratio:.1f}× > {tol}×, "
+                    f"{c_t:.0f} Mt vs target {t_t:.0f} Mt): {rule_lessons}"
+                ], "L5.5"
 
     # ── L6: Tectonic belt (RANK +30) ───────────────────────────────────────
     if target["tectonic_belt"] and candidate["tectonic_belt"]:
@@ -530,11 +589,19 @@ def load_project_and_rule_node(state: AnalogState) -> AnalogState:
         project.get("alteration_signature"),
         project.get("district") or project.get("location_name"),
     )
-    analog_rule = rules_engine.get_analog_rule(material, deposit_type, deposit_subtype)
+    # Mineralization pattern (vein vs disseminated_bulk etc.) — disambiguates
+    # sub-rules that share a subtype (orogenic-vein vs orogenic-bulk both have
+    # required_subtypes=["orogenic_general"] but different required_patterns).
+    pattern = project.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
+        project.get("mineralization_style"), project.get("mining_method"),
+        project.get("processing_method"), deposit_type,
+    )
+    analog_rule = rules_engine.get_analog_rule(material, deposit_type, deposit_subtype, pattern)
 
     logger.info(
         f"[load] {project.get('name')} | material={material} deposit={deposit_type} "
-        f"subtype={deposit_subtype} rule={'✓ ' + analog_rule.get('rule_id', '') if analog_rule else '✗ none'}"
+        f"subtype={deposit_subtype} pattern={pattern} "
+        f"rule={'✓ ' + analog_rule.get('rule_id', '') if analog_rule else '✗ none'}"
     )
     return {"project": project, "analog_rule": analog_rule, "error": None}
 
@@ -542,8 +609,9 @@ def load_project_and_rule_node(state: AnalogState) -> AnalogState:
 _PROFILE_DIMENSIONS = (
     "deposit_subtype", "mineralization_mode", "tectonic_belt",
     "metal_suite", "alteration_signature", "recovery_method",
+    "mineralization_pattern", "host_rock_class",
 )
-PROFILE_STRENGTH_MIN = 3  # need at least 3 of 6 fields populated for a strict rule
+PROFILE_STRENGTH_MIN = 4  # need at least 4 of 8 fields populated for a strict rule
 
 
 def _profile_strength(profile: Dict) -> int:
@@ -694,11 +762,16 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     excluded_subtypes = set((analog_rule or {}).get("excluded_subtypes") or [])
     excluded_modes = set((analog_rule or {}).get("excluded_modes") or [])
     excluded_recovery = set((analog_rule or {}).get("excluded_recovery") or [])
-    # Positive required list — when the rule specifies required_subtypes,
-    # any candidate with a CONFIDENTLY-DETECTED different subtype is dropped.
-    # Candidates with null subtype are NOT dropped here (would discard too many
-    # poorly-enriched library/exa candidates); they fall through to L3 instead.
+    excluded_patterns = set((analog_rule or {}).get("excluded_patterns") or [])
+    excluded_host_classes = set((analog_rule or {}).get("excluded_host_classes") or [])
+    # Positive required lists — when the rule specifies required_subtypes
+    # (or _patterns / _host_classes), any candidate with a CONFIDENTLY-DETECTED
+    # value outside the list is dropped. Candidates with null detection are
+    # NOT dropped here (would discard too many poorly-enriched library/exa
+    # candidates); they fall through to L3 / L4.5 / L4.7 instead.
     required_subtypes = set((analog_rule or {}).get("required_subtypes") or [])
+    required_patterns = set((analog_rule or {}).get("required_patterns") or [])
+    required_host_classes = set((analog_rule or {}).get("required_host_classes") or [])
 
     logger.info(
         f"[cascade] {len(library)} library + {len(exa)} exa = {len(all_candidates)} "
@@ -775,6 +848,38 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             dropped_counts["rule_recovery"] = dropped_counts.get("rule_recovery", 0) + 1
             _emit("DROP", "rule_recovery", c, cand_profile, reason)
             continue
+
+        # Rule-driven mineralization_pattern filters
+        if cand_profile["mineralization_pattern"] and cand_profile["mineralization_pattern"] in excluded_patterns:
+            reason = f"rule excluded pattern ({cand_profile['mineralization_pattern']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
+            dropped_counts["rule_pattern"] = dropped_counts.get("rule_pattern", 0) + 1
+            _emit("DROP", "rule_pattern", c, cand_profile, reason)
+            continue
+        if required_patterns and cand_profile["mineralization_pattern"]:
+            if cand_profile["mineralization_pattern"] not in required_patterns:
+                reason = (f"pattern {cand_profile['mineralization_pattern']} "
+                          f"not in required {sorted(required_patterns)}")
+                logger.info(f"[cascade] DROP required-pattern mismatch: {c.get('name')}")
+                dropped_counts["rule_required_pattern"] = dropped_counts.get("rule_required_pattern", 0) + 1
+                _emit("DROP", "rule_required_pattern", c, cand_profile, reason)
+                continue
+
+        # Rule-driven host_rock_class filters
+        if cand_profile["host_rock_class"] and cand_profile["host_rock_class"] in excluded_host_classes:
+            reason = f"rule excluded host class ({cand_profile['host_rock_class']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
+            dropped_counts["rule_host_class"] = dropped_counts.get("rule_host_class", 0) + 1
+            _emit("DROP", "rule_host_class", c, cand_profile, reason)
+            continue
+        if required_host_classes and cand_profile["host_rock_class"]:
+            if cand_profile["host_rock_class"] not in required_host_classes:
+                reason = (f"host class {cand_profile['host_rock_class']} "
+                          f"not in required {sorted(required_host_classes)}")
+                logger.info(f"[cascade] DROP required-host-class mismatch: {c.get('name')}")
+                dropped_counts["rule_required_host_class"] = dropped_counts.get("rule_required_host_class", 0) + 1
+                _emit("DROP", "rule_required_host_class", c, cand_profile, reason)
+                continue
 
         # Positive required_subtypes filter — when the rule pins a subtype list,
         # any candidate with a detected subtype OUTSIDE that list is dropped.

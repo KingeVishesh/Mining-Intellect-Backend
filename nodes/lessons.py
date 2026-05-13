@@ -127,6 +127,105 @@ LESSONS: Dict[str, Lesson] = {
         "source_doc": "Copper Lessons Learned, L138",
     },
 
+    # ── GOLD — numbered lessons cited by the Liberty Gold Black Pine and
+    #          1911 Gold True North project audits. Namespace prefix LG to
+    #          distinguish from Copper's bare-numeric IDs.
+    "LG1": {
+        "commodity": "gold",
+        "title": "Define deposit type and metallogenic context before selecting analogs",
+        "text": (
+            "The foundational rule: analog selection must start from a "
+            "≥95% match on deposit type, mineralization style, host rock, "
+            "structural controls, alteration/zonation, and metallogenic "
+            "belt. Misidentifying type (e.g. Carlin vs epithermal, or "
+            "vein vs disseminated within orogenic) skews tonnage, grade, "
+            "and continuity estimates by 15–50%+ — the Golddigger vs "
+            "Tonopah cautionary example."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 1",
+    },
+    "LG2": {
+        "commodity": "gold",
+        "title": "Tonnage match within the same deposit type",
+        "text": (
+            "Within an already type-matched analog pool, tonnage must "
+            "scale within tolerance to the target's expected resource. "
+            "Vastly larger or smaller analogs distort scale-dependent "
+            "modelling (cut-off grade, strip ratio, infrastructure)."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 2",
+    },
+    "LG3": {
+        "commodity": "gold",
+        "title": "Regional / metallogenic-belt preference",
+        "text": (
+            "Where multiple ≥95%-similar candidates exist, prefer those "
+            "from the same metallogenic belt or craton — they share "
+            "structural history, age constraints, and fluid chemistry."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 3",
+    },
+    "LG19": {
+        "commodity": "gold",
+        "title": "Style match — vein vs disseminated vs replacement",
+        "text": (
+            "Mineralization STYLE/PATTERN is a hard filter inside the "
+            "type match. Quartz-carbonate veins in shear zones (Brucejack, "
+            "Red Lake, True North) are not interchangeable with bulk "
+            "disseminated systems (Springpole, Douay) even when both are "
+            "labelled 'orogenic gold' — the extraction model, continuity, "
+            "and recovery curves diverge. Carlin replacement (Trixie) ≠ "
+            "Carlin disseminated (Black Pine, Marigold)."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 19",
+    },
+    "LG65": {
+        "commodity": "gold",
+        "title": "Bulk-Carlin scale tolerances (>15 km² footprint)",
+        "text": (
+            "Super-large Carlin systems (>500 Mt @ ~0.3 g/t Au with "
+            ">15 km² footprint and oxide heap-leach amenability) form a "
+            "distinct analog class. Marigold, Round Mountain, Bald "
+            "Mountain, Long Canyon. Smaller Carlin operations (Pan, "
+            "<200 Mt) do not represent the same halo extent."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 65",
+    },
+    "LG136": {
+        "commodity": "gold",
+        "title": "Analog weighting and >20–25% mismatch penalty",
+        "text": (
+            "Analog similarity scores must penalise tonnage / grade / "
+            "footprint deviations beyond 20–25% heavily, or cap the "
+            "candidate at very low weight. This prevents a geologically "
+            "matching but wildly different-scale analog from biasing "
+            "the resource model toward unrealistic values."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 136",
+    },
+    "LG154": {
+        "commodity": "gold",
+        "title": "Mining-method / footprint match for resource modelling",
+        "text": (
+            "Open-pit bulk vs underground vein operations have "
+            "fundamentally different cut-off, dilution, and recovery "
+            "assumptions. Mining method must match between target and "
+            "analog within the resource-modelling window."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 154",
+    },
+    "LG160": {
+        "commodity": "gold",
+        "title": "Footprint and halo extent for super-large Carlin",
+        "text": (
+            "For Carlin-style projects targeting >15 km² footprint and "
+            ">500 Mt bulk low-grade resources, analog selection must "
+            "match halo extent and shallow oxidation depth. Smaller "
+            "Carlin analogs underestimate halo continuity."
+        ),
+        "source_doc": "Gold Lessons Learned, Lesson 160",
+    },
+
     # ── GOLD ───────────────────────────────────────────────────────────────
     "L_ORO_01": {
         "commodity": "gold",

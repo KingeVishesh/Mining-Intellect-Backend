@@ -39,34 +39,90 @@ ANALOG_SELECTION_RULES = [
 
     # ── GOLD ──────────────────────────────────────────────────────────────────
     {
-        "rule_id": "analog_sel_gold_orogenic",
+        # Orogenic VEIN-hosted (UG, high-grade): Brucejack, Red Lake, Fosterville,
+        # Madsen, True North (1911 Gold). 4–7+ g/t Au, narrow quartz-carbonate
+        # veins in shear zones, mafic intrusive / volcanic / greenstone host.
+        "rule_id": "analog_sel_gold_orogenic_vein",
         "source_material": "gold",
-        "deposit_type": "orogenic",
-        "grade_min": 1.5, "grade_max": 20.0, "grade_unit": "g/t Au",
+        "deposit_type": "orogenic vein gold",
+        "grade_min": 2.5, "grade_max": 25.0, "grade_unit": "g/t Au",
         "tonnage_min_mt": None, "tonnage_max_mt": None,
         "drilling_stage": "moderate",
-        "title": "Orogenic Gold Analog Selection",
-        "description": "Select analogs for orogenic (lode) gold deposits hosted in shear zones, typically underground mining with narrow high-grade veins.",
-        "required_subtypes":   ["greenstone_orogenic", "turbidite_orogenic", "bif_hosted_orogenic", "orogenic_general"],
+        "title": "Orogenic Gold — Vein-hosted (UG)",
+        "description": (
+            "Vein-hosted orogenic / lode gold in shear zones, "
+            "underground mining, narrow high-grade quartz-carbonate veins "
+            "in mafic intrusive or low-grade metamorphic / volcanic host. "
+            "Implements Gold Lessons LG1/LG3/LG19/LG136/LG154."
+        ),
+        "required_subtypes":   ["greenstone_orogenic", "turbidite_orogenic",
+                                 "bif_hosted_orogenic", "orogenic_general"],
+        "required_patterns":   ["vein_hosted"],
         "required_modes":      ["primary_sulfide", "free_milling_oxide"],
-        "preferred_belts":     ["abitibi", "yilgarn", "west_african_birimian", "tanzania_archean", "fennoscandian"],
+        "preferred_belts":     ["abitibi", "yilgarn", "west_african_birimian",
+                                 "tanzania_archean", "fennoscandian",
+                                 "bc_quesnel_stikine"],
         "excluded_subtypes":   [
             "low_sulfidation_epithermal", "high_sulfidation_epithermal",
             "intermediate_sulfidation_epithermal",
             "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
-            "carlin_general",
+            "carlin_general", "vms_general",
         ],
+        "excluded_patterns":   ["disseminated_bulk", "stockwork", "breccia_hosted",
+                                 "replacement", "reef", "blanket", "placer"],
         "preferred_alteration":["sericitic_quartz", "chlorite_carbonate"],
         "excluded_recovery":   ["iscr", "sx_ew", "hpal"],
-        "applies_lessons":     ["L_ORO_01", "L_ORO_02"],
+        "tonnage_match_max_ratio": 5.0,  # Gold L136: tonnage match ≤ 5×
+        "applies_lessons":     ["LG1", "LG3", "LG19", "LG136", "LG154",
+                                 "L_ORO_01", "L_ORO_02"],
         "analog_criteria": [
-            "Same craton or orogenic belt setting (Yilgarn, Superior/Abitibi, West African Birimian, Tanzanian Archean)",
-            "Similar structural hosting: shear zone, fault-controlled veins, BIF-hosted shear",
-            "Comparable plunge depth and underground mining method",
-            "Match gold grade band: 2-8 g/t Au preferred, >1.5 g/t Au required",
-            "Similar continuity ratio (>0.85) along strike",
-            "Exclude epithermal, porphyry, and Carlin analogs — deposit controls are fundamentally different",
-            "Prefer analogs with similar width-to-strike ratio",
+            "Quartz-carbonate veins in brittle-ductile shear zones",
+            "Underground mining method; bulk-disseminated open-pit projects excluded",
+            "Same craton/greenstone belt (Abitibi, Yilgarn, Birimian, Tanzanian, Rice Lake)",
+            "Mafic intrusive (gabbro, diorite) or greenstone host preferred",
+            "Match gold grade band: 4-10 g/t Au preferred, >2.5 g/t Au required",
+            "Exclude disseminated/breccia/stockwork orogenic gold — different mining model",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+    {
+        # Orogenic BULK-DISSEMINATED (OP, low-grade): Springpole, Tower Gold,
+        # Douay. ~1 g/t Au, large tonnage, syenite/porphyry intrusive host, open
+        # pit. NOT comparable to vein-orogenic projects.
+        "rule_id": "analog_sel_gold_orogenic_bulk",
+        "source_material": "gold",
+        "deposit_type": "orogenic disseminated gold",
+        "grade_min": 0.5, "grade_max": 2.5, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 50.0, "tonnage_max_mt": None,
+        "drilling_stage": "moderate",
+        "title": "Orogenic Gold — Bulk-disseminated (OP)",
+        "description": (
+            "Large-tonnage, low-grade disseminated gold associated with "
+            "alkaline/syenite intrusions or BIF-hosted bulk-tonnage zones. "
+            "Open-pit, low-grade. NOT comparable to vein-orogenic UG projects."
+        ),
+        "required_subtypes":   ["orogenic_general", "bif_hosted_orogenic"],
+        "required_patterns":   ["disseminated_bulk", "stockwork"],
+        "required_modes":      ["primary_sulfide", "refractory_sulfide",
+                                 "free_milling_oxide"],
+        "preferred_belts":     ["abitibi", "yilgarn", "west_african_birimian",
+                                 "fennoscandian"],
+        "excluded_subtypes":   [
+            "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+            "high_sulfidation_lithocap_porphyry",
+            "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+            "carlin_general", "vms_general",
+        ],
+        "excluded_patterns":   ["vein_hosted", "reef", "blanket", "placer"],
+        "excluded_recovery":   ["iscr", "sx_ew", "hpal"],
+        "tonnage_match_max_ratio": 8.0,
+        "applies_lessons":     ["LG1", "LG19", "LG136", "L_ORO_02"],
+        "analog_criteria": [
+            "Bulk-tonnage disseminated gold (typically >50 Mt @ 0.5–2.5 g/t)",
+            "Open-pit mining; UG vein-orogenic projects excluded",
+            "Intrusive-related (syenite, porphyry) or BIF-hosted",
+            "Springpole, Tower Gold, Douay are the type examples",
+            "Exclude high-grade vein-hosted orogenic — different mining model",
         ],
         "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
     },
@@ -162,32 +218,93 @@ ANALOG_SELECTION_RULES = [
         "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
     },
     {
-        "rule_id": "analog_sel_gold_carlin",
+        # SUPER-LARGE Carlin (>300 Mt, >15 km² footprint, oxide heap-leach):
+        # Marigold, Round Mountain, Bald Mountain, Long Canyon, Black Pine.
+        # Smaller Carlin operations (Pan) do not represent the same halo extent.
+        "rule_id": "analog_sel_gold_carlin_super_large",
         "source_material": "gold",
-        "deposit_type": "carlin",
-        "grade_min": 0.5, "grade_max": 5.0, "grade_unit": "g/t Au",
-        "tonnage_min_mt": 5.0, "tonnage_max_mt": None,
+        "deposit_type": "carlin super-large bulk-disseminated",
+        "grade_min": 0.2, "grade_max": 0.8, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 200.0, "tonnage_max_mt": None,
         "drilling_stage": "moderate",
-        "title": "Carlin-Type Gold Analog Selection",
-        "description": "Select analogs for Carlin-type disseminated gold — Nevada Basin and Range, carbonate dissolution, invisible gold in arsenian pyrite.",
+        "title": "Carlin Gold — Super-Large Bulk-Disseminated",
+        "description": (
+            "Super-large Carlin-style bulk-disseminated oxide gold projects "
+            "(>200 Mt, ~0.3 g/t Au, oxide heap-leach amenable, >10 km² "
+            "footprint). Implements Gold Lessons LG1/LG19/LG65/LG136/LG160. "
+            "Type examples: Marigold, Round Mountain, Bald Mountain, "
+            "Long Canyon, Black Pine."
+        ),
         "required_subtypes":   ["carlin_general"],
-        "required_modes":      ["refractory_sulfide", "primary_sulfide"],
+        "required_patterns":   ["disseminated_bulk"],
+        "required_modes":      ["refractory_sulfide", "supergene_oxide",
+                                 "free_milling_oxide", "primary_sulfide",
+                                 "mixed_oxide_sulfide"],
         "preferred_belts":     ["great_basin_carlin"],
+        "required_host_classes": ["carbonate_sediment", "clastic_sediment"],
+        "excluded_subtypes":   [
+            "greenstone_orogenic", "turbidite_orogenic", "bif_hosted_orogenic",
+            "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+            "intermediate_sulfidation_epithermal",
+            "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+            "vms_general",
+        ],
+        "excluded_patterns":   ["vein_hosted", "replacement", "reef",
+                                 "massive_sulphide", "placer"],
+        "preferred_alteration":["silicification_decalcified"],
+        "excluded_recovery":   ["flotation", "iscr"],
+        "tonnage_match_max_ratio": 5.0,  # Lesson LG65/LG160: super-large halo extent
+        "applies_lessons":     ["LG1", "LG19", "LG65", "LG136", "LG160",
+                                 "L_CAR_01", "L_CAR_02"],
+        "analog_criteria": [
+            "Bulk-disseminated Carlin gold; >200 Mt at 0.2–0.5 g/t Au",
+            "Open-pit heap-leach amenable; oxide-dominant mineralization",
+            "Great Basin context off main Carlin Trend permitted",
+            "Carbonate-sediment or clastic-sediment host",
+            "Exclude replacement-style (Trixie), vein-hosted, or smaller-scale Carlin",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+    {
+        # STANDARD-scale Carlin (50–300 Mt): Pan Mine, etc. Same geology,
+        # different scale class. Keeping as a separate rule lets the cascade
+        # match Pan-style projects without mixing with super-large like Marigold.
+        "rule_id": "analog_sel_gold_carlin_standard",
+        "source_material": "gold",
+        "deposit_type": "carlin standard bulk-disseminated",
+        "grade_min": 0.3, "grade_max": 1.5, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 20.0, "tonnage_max_mt": 300.0,
+        "drilling_stage": "moderate",
+        "title": "Carlin Gold — Standard Scale Bulk-Disseminated",
+        "description": (
+            "Standard-scale Carlin-type disseminated gold (50–300 Mt). "
+            "Pan Mine and similar smaller operations belong here, not in "
+            "the super-large rule used for Marigold/Round Mountain."
+        ),
+        "required_subtypes":   ["carlin_general"],
+        "required_patterns":   ["disseminated_bulk"],
+        "required_modes":      ["refractory_sulfide", "supergene_oxide",
+                                 "free_milling_oxide", "primary_sulfide",
+                                 "mixed_oxide_sulfide"],
+        "preferred_belts":     ["great_basin_carlin"],
+        "required_host_classes": ["carbonate_sediment", "clastic_sediment"],
         "excluded_subtypes":   [
             "greenstone_orogenic", "turbidite_orogenic",
             "low_sulfidation_epithermal", "high_sulfidation_epithermal",
             "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
             "vms_general",
         ],
+        "excluded_patterns":   ["vein_hosted", "replacement", "reef",
+                                 "massive_sulphide", "placer"],
         "preferred_alteration":["silicification_decalcified"],
         "excluded_recovery":   ["flotation", "iscr"],
-        "applies_lessons":     ["L_CAR_01", "L_CAR_02"],
+        "tonnage_match_max_ratio": 5.0,
+        "applies_lessons":     ["LG1", "LG19", "LG136", "L_CAR_01", "L_CAR_02"],
         "analog_criteria": [
-            "Nevada Basin and Range or analogous extensional tectonic setting (Great Basin)",
-            "Sediment-hosted disseminated gold in decalcified carbonates",
-            "Refractory sulfide mineralization (arsenian pyrite) — autoclave or roaster needed",
-            "Match structural complexity (windows, horsts, graben)",
-            "Exclude structurally-hosted vein analogs (orogenic, epithermal)",
+            "Sediment-hosted disseminated gold, smaller-scale than super-large class",
+            "50–300 Mt typical; oxide or transitional ore",
+            "Same Great Basin / Carlin Trend setting",
+            "Exclude replacement-style and vein-hosted analogs",
         ],
         "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
     },
@@ -932,6 +1049,10 @@ def build_rows(rules_list: list, rule_type: str, extra_commodities: list | None 
         "excluded_recovery", "required_recovery",
         "preferred_belts", "required_belts",
         "preferred_alteration", "excluded_alteration",
+        # New pattern / host-class dimensions and scale tolerance
+        "required_patterns", "excluded_patterns",
+        "required_host_classes", "excluded_host_classes",
+        "tonnage_match_max_ratio",
         "applies_lessons",
     )
 

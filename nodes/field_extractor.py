@@ -42,6 +42,7 @@ TARGET_FIELDS = [
     # Geological profile (used by analog_finder cascading match)
     "deposit_subtype", "mineralization_mode", "tectonic_belt",
     "metal_suite", "alteration_signature", "recovery_method",
+    "mineralization_pattern", "host_rock_class",
 ]
 
 
@@ -203,6 +204,32 @@ Geological profile fields (CRITICAL for analog matching — use ONLY values from
     "gravity" / "smelting" / "atmospheric_leach" / "hpal"
     null if not stated.
 
+33. mineralization_pattern: the ORE BODY GEOMETRY (independent of subtype). ONE of:
+    "disseminated_bulk"  — bulk low-grade disseminated, large footprint (Marigold, Black Pine, Springpole, Douay)
+    "vein_hosted"        — narrow quartz-carbonate veins, shear-hosted, UG mining (Brucejack, Red Lake, Fosterville, True North)
+    "stockwork"          — porphyry stockwork + stringer (Cadia, Bingham core)
+    "breccia_hosted"     — explosive/hydrothermal breccia (White Gold, IOCG breccia complexes)
+    "replacement"        — carbonate replacement / manto / CRD (Trixie, Mexican CRDs)
+    "massive_sulphide"   — VMS lenses (Kidd Creek, Neves-Corvo)
+    "reef"               — thin continuous PGM reef (Merensky, UG2, Platreef)
+    "placer"             — alluvial / placer
+    "blanket"            — supergene oxide blanket / laterite (Florence, Ramu, Goro)
+    null if not derivable.
+
+34. host_rock_class: COARSE host lithology classification. ONE of:
+    "carbonate_sediment"     — limestone, dolomite, calcareous sediment (Carlin gold)
+    "clastic_sediment"       — sandstone, siltstone, shale (roll-front U, sed-hosted Cu)
+    "volcanic_mafic"         — basalt, andesite, mafic flows (some orogenic Au)
+    "volcanic_felsic"        — rhyolite, dacite tuff (HS epithermal)
+    "intrusive_mafic"        — gabbro, diorite, monzodiorite (Doubleview Hat, True North gabbro sill)
+    "intrusive_felsic"       — granite, granodiorite, syenite, trachyte porphyry (porphyry, Springpole)
+    "metamorphic_high_grade" — gneiss, amphibolite, granulite (White Gold)
+    "metamorphic_low_grade"  — greenstone, schist, phyllite (Abitibi orogenic Au)
+    "bif"                    — banded iron formation
+    "carbonatite"            — REE host
+    "ultramafic"             — peridotite, dunite, serpentinite (laterite Ni)
+    null if not derivable.
+
 Output ONLY this JSON object, no other text:
 
 {{
@@ -251,7 +278,9 @@ Output ONLY this JSON object, no other text:
   "tectonic_belt": string | null,
   "metal_suite": string | null,
   "alteration_signature": string | null,
-  "recovery_method": string | null
+  "recovery_method": string | null,
+  "mineralization_pattern": string | null,
+  "host_rock_class": string | null
 }}
 
 Project context: {company} - {project_name} ({material})
@@ -286,6 +315,8 @@ from nodes.geo_taxonomy import (
     ALL_SUITE_SLUGS,
     ALL_ALTERATION_SLUGS,
     ALL_RECOVERY_SLUGS,
+    ALL_PATTERN_SLUGS,
+    ALL_HOST_CLASS_SLUGS,
 )
 
 
@@ -307,12 +338,14 @@ def _fill_geological_profile(fields: dict, material: str) -> dict:
     from nodes import geo_taxonomy
 
     # Validate Grok output against vocabularies — fall back to heuristic on miss
-    fields["deposit_subtype"]      = _validate(fields.get("deposit_subtype"),      ALL_SUBTYPE_SLUGS)
-    fields["mineralization_mode"]  = _validate(fields.get("mineralization_mode"),  ALL_MODE_SLUGS)
-    fields["tectonic_belt"]        = _validate(fields.get("tectonic_belt"),        ALL_BELT_SLUGS)
-    fields["metal_suite"]          = _validate(fields.get("metal_suite"),          ALL_SUITE_SLUGS)
-    fields["alteration_signature"] = _validate(fields.get("alteration_signature"), ALL_ALTERATION_SLUGS)
-    fields["recovery_method"]      = _validate(fields.get("recovery_method"),      ALL_RECOVERY_SLUGS)
+    fields["deposit_subtype"]        = _validate(fields.get("deposit_subtype"),        ALL_SUBTYPE_SLUGS)
+    fields["mineralization_mode"]    = _validate(fields.get("mineralization_mode"),    ALL_MODE_SLUGS)
+    fields["tectonic_belt"]          = _validate(fields.get("tectonic_belt"),          ALL_BELT_SLUGS)
+    fields["metal_suite"]            = _validate(fields.get("metal_suite"),            ALL_SUITE_SLUGS)
+    fields["alteration_signature"]   = _validate(fields.get("alteration_signature"),   ALL_ALTERATION_SLUGS)
+    fields["recovery_method"]        = _validate(fields.get("recovery_method"),        ALL_RECOVERY_SLUGS)
+    fields["mineralization_pattern"] = _validate(fields.get("mineralization_pattern"), ALL_PATTERN_SLUGS)
+    fields["host_rock_class"]        = _validate(fields.get("host_rock_class"),        ALL_HOST_CLASS_SLUGS)
 
     # Heuristic fallback for any still-null fields
     if fields["deposit_subtype"] is None:
@@ -342,6 +375,16 @@ def _fill_geological_profile(fields: dict, material: str) -> dict:
         fields["recovery_method"] = geo_taxonomy.detect_recovery_method(
             fields.get("processing_method"), fields.get("location_name"),
             fields.get("deposit_type"),
+        )
+    if fields["mineralization_pattern"] is None:
+        fields["mineralization_pattern"] = geo_taxonomy.detect_pattern(
+            fields.get("mineralization_style"), fields.get("mining_method"),
+            fields.get("processing_method"), fields.get("deposit_type"),
+        )
+    if fields["host_rock_class"] is None:
+        fields["host_rock_class"] = geo_taxonomy.detect_host_class(
+            fields.get("host_rock"), fields.get("deposit_type"),
+            fields.get("mineralization_style"),
         )
     return fields
 
@@ -481,6 +524,8 @@ For each project extract:
   "metal_suite": string | null,          (cu_au | cu_mo | cu_au_co_sc | ni_cu_pge | au_only | etc.)
   "alteration_signature": string | null, (potassic_phyllic | sodic_calcic | hematite_specularite | argillic_advanced_argillic | etc.)
   "recovery_method": string | null,      (flotation | heap_leach | iscr | sx_ew | cn_leach | cil_cip | gravity | hpal)
+  "mineralization_pattern": string | null, (disseminated_bulk | vein_hosted | stockwork | breccia_hosted | replacement | massive_sulphide | reef | placer | blanket)
+  "host_rock_class": string | null,      (carbonate_sediment | clastic_sediment | volcanic_mafic | volcanic_felsic | intrusive_mafic | intrusive_felsic | metamorphic_high_grade | metamorphic_low_grade | bif | carbonatite | ultramafic)
   "source_url": string | null
 }}
 
@@ -527,12 +572,14 @@ def _fill_analog_profile(analog: dict, material: str) -> None:
     """In-place validate + heuristic-fill the 6 geological profile fields on an analog dict."""
     from nodes import geo_taxonomy
 
-    analog["deposit_subtype"]      = _validate(analog.get("deposit_subtype"),      ALL_SUBTYPE_SLUGS)
-    analog["mineralization_mode"]  = _validate(analog.get("mineralization_mode"),  ALL_MODE_SLUGS)
-    analog["tectonic_belt"]        = _validate(analog.get("tectonic_belt"),        ALL_BELT_SLUGS)
-    analog["metal_suite"]          = _validate(analog.get("metal_suite"),          ALL_SUITE_SLUGS)
-    analog["alteration_signature"] = _validate(analog.get("alteration_signature"), ALL_ALTERATION_SLUGS)
-    analog["recovery_method"]      = _validate(analog.get("recovery_method"),      ALL_RECOVERY_SLUGS)
+    analog["deposit_subtype"]        = _validate(analog.get("deposit_subtype"),        ALL_SUBTYPE_SLUGS)
+    analog["mineralization_mode"]    = _validate(analog.get("mineralization_mode"),    ALL_MODE_SLUGS)
+    analog["tectonic_belt"]          = _validate(analog.get("tectonic_belt"),          ALL_BELT_SLUGS)
+    analog["metal_suite"]            = _validate(analog.get("metal_suite"),            ALL_SUITE_SLUGS)
+    analog["alteration_signature"]   = _validate(analog.get("alteration_signature"),   ALL_ALTERATION_SLUGS)
+    analog["recovery_method"]        = _validate(analog.get("recovery_method"),        ALL_RECOVERY_SLUGS)
+    analog["mineralization_pattern"] = _validate(analog.get("mineralization_pattern"), ALL_PATTERN_SLUGS)
+    analog["host_rock_class"]        = _validate(analog.get("host_rock_class"),        ALL_HOST_CLASS_SLUGS)
 
     if analog["deposit_subtype"] is None:
         analog["deposit_subtype"] = geo_taxonomy.detect_subtype(
@@ -559,6 +606,16 @@ def _fill_analog_profile(analog: dict, material: str) -> None:
     if analog["recovery_method"] is None:
         analog["recovery_method"] = geo_taxonomy.detect_recovery_method(
             analog.get("processing_method"), analog.get("district"), analog.get("deposit_type"),
+        )
+    if analog["mineralization_pattern"] is None:
+        analog["mineralization_pattern"] = geo_taxonomy.detect_pattern(
+            analog.get("mineralization_style"), analog.get("mining_method"),
+            analog.get("processing_method"), analog.get("deposit_type"),
+        )
+    if analog["host_rock_class"] is None:
+        analog["host_rock_class"] = geo_taxonomy.detect_host_class(
+            analog.get("host_rock"), analog.get("deposit_type"),
+            analog.get("mineralization_style"),
         )
 
 
