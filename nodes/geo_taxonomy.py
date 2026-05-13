@@ -150,6 +150,131 @@ HOST_ROCK_CLASSES: List[str] = [
 ALL_HOST_CLASS_SLUGS: FrozenSet[str] = frozenset(HOST_ROCK_CLASSES)
 
 
+# Project stage classes — drives the L4.6 hard filter. Comparing analogs at
+# different stages of development to the target inflates or deflates resource
+# estimates (production reconciliation vs greenfield drill grid).
+PROJECT_STAGES: List[str] = [
+    "exploration",            # grass-roots to advanced exploration, no resource
+    "resource_inferred",      # initial inferred resource only
+    "resource_m_and_i",       # measured + indicated resource defined
+    "pea",                    # preliminary economic assessment / scoping
+    "pfs",                    # pre-feasibility
+    "feasibility",            # bankable feasibility / DFS
+    "construction",
+    "production",
+    "care_maintenance",       # closed but resource still on the books
+    "closed",                 # rehabilitated, no future production
+]
+ALL_STAGE_SLUGS: FrozenSet[str] = frozenset(PROJECT_STAGES)
+
+
+# Mining method classes — drives the L4.8 hard filter. An open-pit bulk
+# project should not be analogged by an underground vein mine and vice versa
+# (cut-off grade, dilution, recovery, capex all differ fundamentally).
+MINING_METHOD_CLASSES: List[str] = [
+    "open_pit_bulk",          # bulk-tonnage open pit (Marigold, Bingham)
+    "open_pit_selective",     # selective open pit with high stripping (Carlin trend)
+    "underground_vein",       # narrow-vein UG (Brucejack, Red Lake)
+    "underground_bulk",       # bulk UG (sublevel caving, panel caving)
+    "block_cave",             # very-bulk UG (Cadia East, El Teniente)
+    "iscr_in_situ",           # in-situ leach (uranium, oxide Cu)
+    "heap_leach_pad",         # surface heap-leach (oxide gold, oxide copper)
+    "dredging",               # placer / alluvial
+    "highwall",               # specific bulk variant
+    "solution_mining",        # potash, salt
+]
+ALL_MINING_METHOD_SLUGS: FrozenSet[str] = frozenset(MINING_METHOD_CLASSES)
+
+
+# Resource category classes — drives the L4.9 hard filter. Inferred-only
+# analogs are weaker than M&I analogs; modelling against an inferred-only
+# reference inflates uncertainty in the wrong direction.
+RESOURCE_CATEGORY_CLASSES: List[str] = [
+    "measured",
+    "indicated",
+    "m_and_i",                # measured + indicated combined
+    "inferred",
+    "m_and_i_plus_inferred",  # M+I+I total resource
+    "reserve_proven",
+    "reserve_probable",
+    "reserve_p_and_p",
+    "exploration_target",     # NOT a resource, lowest reliability
+    "historical",             # non-compliant historical resource
+]
+ALL_RESOURCE_CATEGORY_SLUGS: FrozenSet[str] = frozenset(RESOURCE_CATEGORY_CLASSES)
+
+
+# Resource compliance standards — drives the L4.95 hard filter. Modern
+# compliant resources (NI 43-101 post-2010, JORC 2012, SK-1300) are
+# substantially different documents from a 1985 press-release "tonnage".
+RESOURCE_COMPLIANCE_STANDARDS: List[str] = [
+    "ni_43_101",
+    "jorc",
+    "sk_1300",
+    "samrec",
+    "pera",                   # Peruvian / Russian / other regional codes
+    "historical",             # explicitly non-compliant historical estimate
+    "press_release",          # company announcement, no qualified-person sign-off
+    "internal",               # company-internal, never publicly compliant
+]
+ALL_COMPLIANCE_SLUGS: FrozenSet[str] = frozenset(RESOURCE_COMPLIANCE_STANDARDS)
+
+
+# Stage compatibility — analogs MUST share a stage class with the target
+# OR be one of these compatible substitutes. Production-stage projects can
+# inform M&I-stage targets (lots of reconciliation data); the reverse is
+# weaker but acceptable.
+STAGE_COMPATIBILITY: Dict[str, FrozenSet[str]] = {
+    "exploration":         frozenset({"exploration", "resource_inferred"}),
+    "resource_inferred":   frozenset({"exploration", "resource_inferred", "resource_m_and_i"}),
+    "resource_m_and_i":    frozenset({"resource_inferred", "resource_m_and_i", "pea", "pfs"}),
+    "pea":                 frozenset({"resource_m_and_i", "pea", "pfs", "feasibility"}),
+    "pfs":                 frozenset({"pea", "pfs", "feasibility", "construction"}),
+    "feasibility":         frozenset({"pfs", "feasibility", "construction", "production"}),
+    "construction":        frozenset({"feasibility", "construction", "production"}),
+    "production":          frozenset({"production", "feasibility", "construction", "care_maintenance"}),
+    "care_maintenance":    frozenset({"production", "care_maintenance"}),
+    "closed":              frozenset({"closed", "care_maintenance"}),
+}
+
+
+# Mining-method incompatibility — pairs that absolutely cannot substitute.
+# Underground vein mining has no shared assumptions with surface ISCR.
+MINING_METHOD_INCOMPATIBILITY: Dict[str, FrozenSet[str]] = {
+    "open_pit_bulk":      frozenset({"underground_vein", "iscr_in_situ"}),
+    "open_pit_selective": frozenset({"underground_vein", "iscr_in_situ"}),
+    "underground_vein":   frozenset({"open_pit_bulk", "open_pit_selective",
+                                       "iscr_in_situ", "heap_leach_pad", "block_cave"}),
+    "underground_bulk":   frozenset({"underground_vein", "iscr_in_situ",
+                                       "heap_leach_pad", "dredging"}),
+    "block_cave":         frozenset({"underground_vein", "iscr_in_situ",
+                                       "heap_leach_pad", "dredging"}),
+    "iscr_in_situ":       frozenset({"open_pit_bulk", "open_pit_selective",
+                                       "underground_vein", "underground_bulk",
+                                       "block_cave", "heap_leach_pad", "dredging"}),
+    "heap_leach_pad":     frozenset({"underground_vein", "iscr_in_situ", "dredging"}),
+    "dredging":           frozenset({"underground_vein", "underground_bulk",
+                                       "iscr_in_situ", "heap_leach_pad", "block_cave"}),
+}
+
+
+# Resource-category compatibility — for L4.9 hard filter when a rule pins
+# min_resource_category. Inferred-only analogs are rejected when the rule
+# demands at least M&I quality.
+RESOURCE_CATEGORY_RANK: Dict[str, int] = {
+    "reserve_p_and_p":         100,
+    "reserve_proven":          95,
+    "reserve_probable":        90,
+    "m_and_i":                 80,
+    "measured":                85,
+    "indicated":               75,
+    "m_and_i_plus_inferred":   70,
+    "inferred":                40,
+    "historical":              20,
+    "exploration_target":      10,
+}
+
+
 # Tectonic belts — mineralization provinces with shared genesis. Lookup is by
 # (country, region|district). Order matters: more specific belts checked first.
 TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
@@ -865,6 +990,160 @@ def detect_pattern(
     return None
 
 
+def detect_stage_class(
+    project_stage: Optional[str] = None,
+    has_mre: Optional[bool] = None,
+    description: Optional[str] = None,
+) -> Optional[str]:
+    """Map the freeform project_stage string onto a PROJECT_STAGES slug."""
+    s = _norm(project_stage)
+    blob = " ".join(filter(None, [s, _norm(description)]))
+    if not blob:
+        return None
+    if any(k in blob for k in ("production", "operating", "in operation", "producing mine")):
+        return "production"
+    if any(k in blob for k in ("construction", "under construction")):
+        return "construction"
+    # Check pre-feasibility first — "feasibility study" appears in "pre-feasibility study"
+    if any(k in blob for k in ("pre-feasibility", "prefeasibility", " pfs", "pre feasibility")):
+        return "pfs"
+    if any(k in blob for k in ("feasibility study", "bankable", "definitive feasibility",
+                                  " bfs", " dfs", " fs ")):
+        return "feasibility"
+    if any(k in blob for k in ("pea", "preliminary economic assessment", "scoping study",
+                                 "preliminary assessment", "economic assessment")):
+        return "pea"
+    if any(k in blob for k in ("care and maintenance", "care & maintenance",
+                                 "suspended", "on care")):
+        return "care_maintenance"
+    if any(k in blob for k in ("closed", "rehabilitated", "decommissioned")):
+        return "closed"
+    if any(k in blob for k in ("measured and indicated", "m+i", "m&i", "indicated resource",
+                                 "measured resource", "ni 43-101 resource",
+                                 "compliant resource")):
+        return "resource_m_and_i"
+    if any(k in blob for k in ("inferred resource", "initial resource", "maiden resource")):
+        return "resource_inferred"
+    if any(k in blob for k in ("exploration", "grassroots", "drilling", "advanced exploration",
+                                 "early exploration", "target")):
+        return "exploration"
+    return None
+
+
+def detect_mining_method_class(
+    mining_method: Optional[str] = None,
+    processing_method: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Optional[str]:
+    """Map freeform mining-method strings to a MINING_METHOD_CLASSES slug."""
+    blob = " ".join(filter(None, [
+        _norm(mining_method), _norm(processing_method), _norm(description),
+    ]))
+    if not blob:
+        return None
+
+    if "iscr" in blob or "in-situ copper recovery" in blob or "in situ recovery" in blob:
+        return "iscr_in_situ"
+    if "in-situ leach" in blob or "in situ leach" in blob or "isl" in blob:
+        return "iscr_in_situ"
+    if "block cave" in blob or "block-cave" in blob or "panel cave" in blob:
+        return "block_cave"
+    if "dredging" in blob or "dredge" in blob or "alluvial" in blob:
+        return "dredging"
+    if "heap leach" in blob or "heap-leach" in blob:
+        return "heap_leach_pad"
+    if "solution mining" in blob or "brine" in blob:
+        return "solution_mining"
+    if "highwall" in blob:
+        return "highwall"
+    has_ug = any(k in blob for k in ("underground", "ug ", " ug,", "shaft", "decline",
+                                        "sublevel", "stoping", "cut and fill", "longhole"))
+    has_op = any(k in blob for k in ("open pit", "open-pit", "open cut", "open-cut",
+                                        "strip mine"))
+    has_vein_signal = any(k in blob for k in ("vein", "narrow-vein", "shear-hosted",
+                                                  "narrow vein", "lode"))
+    has_bulk_signal = any(k in blob for k in ("bulk", "low-grade", "low grade",
+                                                  "high tonnage", "stockwork", "disseminated"))
+
+    if has_ug and has_vein_signal:
+        return "underground_vein"
+    if has_ug and has_bulk_signal:
+        return "underground_bulk"
+    if has_ug:
+        # default UG to vein when no scale signal — narrow-vein is the most
+        # common UG mining mode globally
+        return "underground_vein"
+    if has_op and has_bulk_signal:
+        return "open_pit_bulk"
+    if has_op:
+        return "open_pit_selective"
+    return None
+
+
+def detect_resource_category_class(
+    resource_category: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Optional[str]:
+    """Map freeform resource_category strings to a RESOURCE_CATEGORY_CLASSES slug."""
+    blob = " ".join(filter(None, [_norm(resource_category), _norm(description)]))
+    if not blob:
+        return None
+    has_meas = "measured" in blob
+    has_ind  = "indicated" in blob
+    has_inf  = "inferred" in blob
+    has_prov = "proven" in blob or "proved" in blob
+    has_prob = "probable" in blob
+    if has_prov and has_prob:
+        return "reserve_p_and_p"
+    if has_prov:
+        return "reserve_proven"
+    if has_prob:
+        return "reserve_probable"
+    if has_meas and has_ind and has_inf:
+        return "m_and_i_plus_inferred"
+    if has_meas and has_ind:
+        return "m_and_i"
+    if has_meas:
+        return "measured"
+    if has_ind:
+        return "indicated"
+    if has_inf:
+        return "inferred"
+    if "exploration target" in blob:
+        return "exploration_target"
+    if "historical" in blob or "non-compliant" in blob:
+        return "historical"
+    return None
+
+
+def detect_resource_compliance(
+    resource_category: Optional[str] = None,
+    description: Optional[str] = None,
+    source_url: Optional[str] = None,
+) -> Optional[str]:
+    """Map text mentions of NI 43-101 / JORC / etc. to a compliance slug."""
+    blob = " ".join(filter(None, [
+        _norm(resource_category), _norm(description), _norm(source_url),
+    ]))
+    if not blob:
+        return None
+    if "ni 43-101" in blob or "ni43-101" in blob or "ni-43-101" in blob or "43-101" in blob:
+        return "ni_43_101"
+    if "jorc" in blob:
+        return "jorc"
+    if "sk-1300" in blob or "sk 1300" in blob or "s-k 1300" in blob or "sk1300" in blob:
+        return "sk_1300"
+    if "samrec" in blob:
+        return "samrec"
+    if "historical" in blob or "non-compliant" in blob or "non compliant" in blob:
+        return "historical"
+    if "press release" in blob or "company announcement" in blob:
+        return "press_release"
+    if "internal" in blob and "resource" in blob:
+        return "internal"
+    return None
+
+
 # ── Compatibility checks ─────────────────────────────────────────────────────
 
 def recovery_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
@@ -907,3 +1186,60 @@ def mode_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
     if "mixed" in (target, candidate):
         return True
     return False
+
+
+def stage_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
+    """
+    True when project stage classes are compatible per STAGE_COMPATIBILITY.
+    Unknown stages on either side are permissive (the cascade won't strict-fail
+    on missing metadata; the rule's required_stages list does that).
+    """
+    if not target or not candidate:
+        return True
+    if target == candidate:
+        return True
+    return candidate in STAGE_COMPATIBILITY.get(target, frozenset())
+
+
+def mining_method_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
+    """True when mining methods can substitute for each other in resource modelling."""
+    if not target or not candidate:
+        return True
+    if target == candidate:
+        return True
+    incompatible = MINING_METHOD_INCOMPATIBILITY.get(target, frozenset())
+    return candidate not in incompatible
+
+
+def resource_category_at_least(
+    candidate: Optional[str], minimum: Optional[str],
+) -> bool:
+    """
+    True when the candidate's resource category meets or exceeds the rule's
+    minimum (using RESOURCE_CATEGORY_RANK). Unknowns are permissive — the
+    rule's structured required_categories list does strict gating.
+    """
+    if not minimum or not candidate:
+        return True
+    c_rank = RESOURCE_CATEGORY_RANK.get(candidate, 0)
+    m_rank = RESOURCE_CATEGORY_RANK.get(minimum, 0)
+    return c_rank >= m_rank
+
+
+def compliance_acceptable(
+    candidate: Optional[str], min_year: Optional[int] = None,
+    vintage_year: Optional[int] = None,
+) -> bool:
+    """
+    True when a candidate's resource compliance standard is acceptable for
+    modelling. Historical / press_release / internal are non-compliant — drop
+    unconditionally. Compliant standards (NI 43-101, JORC, SK-1300, SAMREC,
+    PERA) must also satisfy `min_year` if both are provided.
+    """
+    if candidate is None:
+        return True  # unknown — let through, other gates handle it
+    if candidate in {"historical", "press_release", "internal"}:
+        return False
+    if min_year is not None and vintage_year is not None:
+        return vintage_year >= min_year
+    return True

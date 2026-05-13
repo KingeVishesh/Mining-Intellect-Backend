@@ -43,6 +43,10 @@ TARGET_FIELDS = [
     "deposit_subtype", "mineralization_mode", "tectonic_belt",
     "metal_suite", "alteration_signature", "recovery_method",
     "mineralization_pattern", "host_rock_class",
+    # Stage / mining / category / vintage / compliance
+    "project_stage_class", "mining_method_class",
+    "resource_category_class", "resource_compliance_standard",
+    "resource_vintage_year",
 ]
 
 
@@ -317,6 +321,10 @@ from nodes.geo_taxonomy import (
     ALL_RECOVERY_SLUGS,
     ALL_PATTERN_SLUGS,
     ALL_HOST_CLASS_SLUGS,
+    ALL_STAGE_SLUGS,
+    ALL_MINING_METHOD_SLUGS,
+    ALL_RESOURCE_CATEGORY_SLUGS,
+    ALL_COMPLIANCE_SLUGS,
 )
 
 
@@ -344,8 +352,18 @@ def _fill_geological_profile(fields: dict, material: str) -> dict:
     fields["metal_suite"]            = _validate(fields.get("metal_suite"),            ALL_SUITE_SLUGS)
     fields["alteration_signature"]   = _validate(fields.get("alteration_signature"),   ALL_ALTERATION_SLUGS)
     fields["recovery_method"]        = _validate(fields.get("recovery_method"),        ALL_RECOVERY_SLUGS)
-    fields["mineralization_pattern"] = _validate(fields.get("mineralization_pattern"), ALL_PATTERN_SLUGS)
-    fields["host_rock_class"]        = _validate(fields.get("host_rock_class"),        ALL_HOST_CLASS_SLUGS)
+    fields["mineralization_pattern"]      = _validate(fields.get("mineralization_pattern"),      ALL_PATTERN_SLUGS)
+    fields["host_rock_class"]             = _validate(fields.get("host_rock_class"),             ALL_HOST_CLASS_SLUGS)
+    fields["project_stage_class"]         = _validate(fields.get("project_stage_class"),         ALL_STAGE_SLUGS)
+    fields["mining_method_class"]         = _validate(fields.get("mining_method_class"),         ALL_MINING_METHOD_SLUGS)
+    fields["resource_category_class"]     = _validate(fields.get("resource_category_class"),     ALL_RESOURCE_CATEGORY_SLUGS)
+    fields["resource_compliance_standard"] = _validate(fields.get("resource_compliance_standard"), ALL_COMPLIANCE_SLUGS)
+    # vintage year is numeric — accept if int-like
+    v = fields.get("resource_vintage_year")
+    try:
+        fields["resource_vintage_year"] = int(v) if v is not None else None
+    except (TypeError, ValueError):
+        fields["resource_vintage_year"] = None
 
     # Heuristic fallback for any still-null fields
     if fields["deposit_subtype"] is None:
@@ -385,6 +403,24 @@ def _fill_geological_profile(fields: dict, material: str) -> dict:
         fields["host_rock_class"] = geo_taxonomy.detect_host_class(
             fields.get("host_rock"), fields.get("deposit_type"),
             fields.get("mineralization_style"),
+        )
+    if fields["project_stage_class"] is None:
+        fields["project_stage_class"] = geo_taxonomy.detect_stage_class(
+            fields.get("project_stage"), None, fields.get("location_name"),
+        )
+    if fields["mining_method_class"] is None:
+        fields["mining_method_class"] = geo_taxonomy.detect_mining_method_class(
+            fields.get("mining_method"), fields.get("processing_method"),
+            fields.get("location_name"),
+        )
+    if fields["resource_category_class"] is None:
+        fields["resource_category_class"] = geo_taxonomy.detect_resource_category_class(
+            fields.get("resource_category"), fields.get("location_name"),
+        )
+    if fields["resource_compliance_standard"] is None:
+        fields["resource_compliance_standard"] = geo_taxonomy.detect_resource_compliance(
+            fields.get("resource_category"), fields.get("location_name"),
+            None,
         )
     return fields
 
@@ -578,8 +614,17 @@ def _fill_analog_profile(analog: dict, material: str) -> None:
     analog["metal_suite"]            = _validate(analog.get("metal_suite"),            ALL_SUITE_SLUGS)
     analog["alteration_signature"]   = _validate(analog.get("alteration_signature"),   ALL_ALTERATION_SLUGS)
     analog["recovery_method"]        = _validate(analog.get("recovery_method"),        ALL_RECOVERY_SLUGS)
-    analog["mineralization_pattern"] = _validate(analog.get("mineralization_pattern"), ALL_PATTERN_SLUGS)
-    analog["host_rock_class"]        = _validate(analog.get("host_rock_class"),        ALL_HOST_CLASS_SLUGS)
+    analog["mineralization_pattern"]      = _validate(analog.get("mineralization_pattern"),      ALL_PATTERN_SLUGS)
+    analog["host_rock_class"]             = _validate(analog.get("host_rock_class"),             ALL_HOST_CLASS_SLUGS)
+    analog["project_stage_class"]         = _validate(analog.get("project_stage_class"),         ALL_STAGE_SLUGS)
+    analog["mining_method_class"]         = _validate(analog.get("mining_method_class"),         ALL_MINING_METHOD_SLUGS)
+    analog["resource_category_class"]     = _validate(analog.get("resource_category_class"),     ALL_RESOURCE_CATEGORY_SLUGS)
+    analog["resource_compliance_standard"] = _validate(analog.get("resource_compliance_standard"), ALL_COMPLIANCE_SLUGS)
+    v = analog.get("resource_vintage_year")
+    try:
+        analog["resource_vintage_year"] = int(v) if v is not None else None
+    except (TypeError, ValueError):
+        analog["resource_vintage_year"] = None
 
     if analog["deposit_subtype"] is None:
         analog["deposit_subtype"] = geo_taxonomy.detect_subtype(
@@ -616,6 +661,24 @@ def _fill_analog_profile(analog: dict, material: str) -> None:
         analog["host_rock_class"] = geo_taxonomy.detect_host_class(
             analog.get("host_rock"), analog.get("deposit_type"),
             analog.get("mineralization_style"),
+        )
+    if analog["project_stage_class"] is None:
+        analog["project_stage_class"] = geo_taxonomy.detect_stage_class(
+            analog.get("project_stage"), None, analog.get("district"),
+        )
+    if analog["mining_method_class"] is None:
+        analog["mining_method_class"] = geo_taxonomy.detect_mining_method_class(
+            analog.get("mining_method"), analog.get("processing_method"),
+            analog.get("district"),
+        )
+    if analog["resource_category_class"] is None:
+        analog["resource_category_class"] = geo_taxonomy.detect_resource_category_class(
+            analog.get("resource_category"), analog.get("district"),
+        )
+    if analog["resource_compliance_standard"] is None:
+        analog["resource_compliance_standard"] = geo_taxonomy.detect_resource_compliance(
+            analog.get("resource_category"), analog.get("district"),
+            analog.get("source_url"),
         )
 
 

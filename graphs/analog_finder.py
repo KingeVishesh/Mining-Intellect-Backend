@@ -304,6 +304,29 @@ def _build_profile(row: dict) -> dict:
             row.get("host_rock"), row.get("deposit_type"),
             row.get("mineralization_style"),
         ),
+        # Project stage class — L4.6 filter
+        "project_stage_class":  row.get("project_stage_class") or geo_taxonomy.detect_stage_class(
+            row.get("project_stage"), None, row.get("location_name"),
+        ),
+        # Mining method class — L4.8 filter
+        "mining_method_class":  row.get("mining_method_class") or geo_taxonomy.detect_mining_method_class(
+            row.get("mining_method"), row.get("processing_method"),
+            row.get("location_name"),
+        ),
+        # Resource category class — L4.9 filter
+        "resource_category_class": (
+            row.get("resource_category_class")
+            or geo_taxonomy.detect_resource_category_class(row.get("resource_category"))
+        ),
+        # Compliance + vintage — L4.95 filter
+        "resource_compliance_standard": (
+            row.get("resource_compliance_standard")
+            or geo_taxonomy.detect_resource_compliance(
+                row.get("resource_category"), row.get("location_name"),
+                row.get("source_url"),
+            )
+        ),
+        "resource_vintage_year": row.get("resource_vintage_year"),
         "grade_value":          row.get("grade_value"),
         "grade_unit":           row.get("grade_unit"),
         "tonnage_mt":           row.get("tonnage_mt"),
@@ -311,6 +334,9 @@ def _build_profile(row: dict) -> dict:
         "district":             (row.get("district") or "").strip(),
         "host_rock":            (row.get("host_rock") or "").strip(),
         "mineralization_style": (row.get("mineralization_style") or "").strip(),
+        "source_url":           row.get("source_url"),
+        "company_name":         (row.get("company_name") or "").strip().lower(),
+        "project_id":           row.get("project_id") or row.get("id"),
     }
 
 
@@ -390,6 +416,22 @@ def _cascading_match(
         rank_pts += 15
         reasons.append(f"L4 mode match ({candidate['mineralization_mode']}): {rule_lessons}")
 
+    # ── L4.4: Project stage compatibility (HARD when both sides have data) ─
+    # Comparing exploration-stage to production-stage analogs inflates
+    # over-confidence. STAGE_COMPATIBILITY allows adjacent stages.
+    t_stage = target["project_stage_class"]
+    c_stage = candidate["project_stage_class"]
+    if t_stage and c_stage:
+        if not geo_taxonomy.stage_compatible(t_stage, c_stage):
+            return False, 0, 0, 0, [
+                f"L4.4 stage mismatch ({c_stage} not compatible with {t_stage}): {rule_lessons}"
+            ], "L4.4"
+        if t_stage == c_stage:
+            matched += 1
+            evaluated += 1
+            rank_pts += 10
+            reasons.append(f"L4.4 stage match ({c_stage}): {rule_lessons}")
+
     # ── L4.5: Mineralization pattern (HARD — Gold Lesson LG19) ────────────
     # Vein-hosted ≠ disseminated_bulk ≠ stockwork ≠ replacement even within
     # the same family + subtype. This is the wedge between True North (vein)
@@ -421,6 +463,46 @@ def _cascading_match(
             rank_pts += 15
             reasons.append(f"L4.7 host class match ({c_host}): {rule_lessons}")
 
+    # ── L4.8: Mining method compatibility (HARD — Gold Lesson LG154) ───────
+    # Open-pit bulk ≠ underground vein ≠ ISCR. Different cut-off, dilution,
+    # recovery economics.
+    t_mining = target["mining_method_class"]
+    c_mining = candidate["mining_method_class"]
+    if t_mining and c_mining:
+        if not geo_taxonomy.mining_method_compatible(t_mining, c_mining):
+            return False, 0, 0, 0, [
+                f"L4.8 mining-method mismatch ({c_mining} ≠ {t_mining}): {rule_lessons}"
+            ], "L4.8"
+        if t_mining == c_mining:
+            matched += 1
+            evaluated += 1
+            rank_pts += 10
+            reasons.append(f"L4.8 mining-method match ({c_mining}): {rule_lessons}")
+
+    # ── L4.9: Resource category meets rule minimum (HARD when rule pins it) ─
+    min_cat = (analog_rule or {}).get("min_resource_category")
+    if min_cat:
+        c_cat = candidate["resource_category_class"]
+        if c_cat and not geo_taxonomy.resource_category_at_least(c_cat, min_cat):
+            return False, 0, 0, 0, [
+                f"L4.9 resource category {c_cat} below rule minimum {min_cat}: {rule_lessons}"
+            ], "L4.9"
+
+    # ── L4.95: Compliance + vintage (HARD when standard is non-compliant) ─
+    # Historical / press-release / internal estimates are never modellable.
+    # If the rule sets min_resource_year, vintage_year must meet it.
+    c_compliance = candidate["resource_compliance_standard"]
+    min_year = (analog_rule or {}).get("min_resource_year")
+    c_year = candidate.get("resource_vintage_year")
+    if c_compliance in ("historical", "press_release", "internal"):
+        return False, 0, 0, 0, [
+            f"L4.95 non-compliant resource ({c_compliance}): {rule_lessons}"
+        ], "L4.95"
+    if min_year and c_year and c_year < int(min_year):
+        return False, 0, 0, 0, [
+            f"L4.95 resource vintage {c_year} < required {min_year}: {rule_lessons}"
+        ], "L4.95"
+
     # ── L5: Recovery method compatibility (HARD — Lessons L19/L73/L82) ─────
     # flotation ≠ heap-leach ≠ ISCR — different metallurgical regime
     if not geo_taxonomy.recovery_compatible(target["recovery_method"], candidate["recovery_method"]):
@@ -451,6 +533,21 @@ def _cascading_match(
                     f"L5.5 scale mismatch ({ratio:.1f}× > {tol}×, "
                     f"{c_t:.0f} Mt vs target {t_t:.0f} Mt): {rule_lessons}"
                 ], "L5.5"
+
+    # ── L5.6: Grade tolerance (HARD when rule specifies) — Gold L136 ──────
+    g_tol = (analog_rule or {}).get("grade_match_max_ratio")
+    if g_tol is not None:
+        t_g = float(target.get("grade_value") or 0)
+        c_g = float(candidate.get("grade_value") or 0)
+        if t_g > 0 and c_g > 0 and _grade_units_compatible(
+            target.get("grade_unit") or "", candidate.get("grade_unit") or ""
+        ):
+            ratio = max(t_g, c_g) / min(t_g, c_g)
+            if ratio > float(g_tol):
+                return False, 0, 0, 0, [
+                    f"L5.6 grade mismatch ({ratio:.1f}× > {g_tol}×, "
+                    f"{c_g} vs target {t_g} {target.get('grade_unit')}): {rule_lessons}"
+                ], "L5.6"
 
     # ── L6: Tectonic belt (RANK +30) ───────────────────────────────────────
     if target["tectonic_belt"] and candidate["tectonic_belt"]:
@@ -538,10 +635,25 @@ def _norm_name(name: str) -> str:
     return " ".join(sorted(words))
 
 
-def _is_self_analog(project_name: str, candidate_name: str) -> bool:
-    """True if candidate is likely the same project as the target."""
-    p = _norm_name(project_name)
-    c = _norm_name(candidate_name)
+def _is_self_analog(
+    project_name: str, candidate_name: str,
+    project_id: Optional[str] = None, candidate_project_id: Optional[str] = None,
+    project_company: Optional[str] = None, candidate_company: Optional[str] = None,
+) -> bool:
+    """True if candidate is likely the same project as the target.
+
+    Three-level check:
+      1. project_id equality (exact, when the candidate originated from the
+         `projects` table — the most authoritative signal)
+      2. company match + name fuzzy match (e.g., 'Doubleview Hat' vs 'Hat
+         Copper' both owned by 'Doubleview Gold')
+      3. Pure name fuzzy match (>=70% word overlap on normalised names)
+    """
+    # Level 1: project_id
+    if project_id and candidate_project_id and str(project_id) == str(candidate_project_id):
+        return True
+    p = _norm_name(project_name or "")
+    c = _norm_name(candidate_name or "")
     if not p or not c:
         return False
     if p == c:
@@ -551,8 +663,16 @@ def _is_self_analog(project_name: str, candidate_name: str) -> bool:
     if not p_words or not c_words:
         return False
     overlap = len(p_words & c_words)
-    # >70% word overlap in the shorter name → same project
-    return overlap / min(len(p_words), len(c_words)) >= 0.70
+    name_overlap = overlap / min(len(p_words), len(c_words))
+    # Level 2: company match + lower name overlap threshold (≥40%)
+    if project_company and candidate_company:
+        pc = project_company.strip().lower()
+        cc = candidate_company.strip().lower()
+        if pc and cc and (pc == cc or pc in cc or cc in pc):
+            if name_overlap >= 0.40:
+                return True
+    # Level 3: pure name fuzzy
+    return name_overlap >= 0.70
 
 
 def _parse_exclusions(analog_criteria: list) -> list[str]:
@@ -610,8 +730,9 @@ _PROFILE_DIMENSIONS = (
     "deposit_subtype", "mineralization_mode", "tectonic_belt",
     "metal_suite", "alteration_signature", "recovery_method",
     "mineralization_pattern", "host_rock_class",
+    "project_stage_class", "mining_method_class",
 )
-PROFILE_STRENGTH_MIN = 4  # need at least 4 of 8 fields populated for a strict rule
+PROFILE_STRENGTH_DEFAULT = 4  # default; per-rule override via rule.min_profile_strength
 
 
 def _profile_strength(profile: Dict) -> int:
@@ -733,19 +854,44 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
 
     project_name = project.get("name") or ""
 
-    # Profile-strength gate: if the rule requires specific subtypes AND the
-    # target has fewer than 3 of 6 geological dimensions populated, refuse to
-    # run the cascade. Without enrichment, even strict rules can't filter
-    # candidates with null subtypes and we end up with garbage (the Hat
-    # Copper "100% match" failure mode). Surface the gap to the user instead.
-    required_subtypes_pregate = set((analog_rule or {}).get("required_subtypes") or [])
+    # No-rule fallback — if get_analog_rule returned None we don't have a
+    # commodity/subtype-specific rule loaded. Refuse to run the strict
+    # cascade; surface a clear "no rule for this deposit class" message to
+    # the user so they enrich the project or add a rule.
+    if analog_rule is None:
+        logger.warning(
+            f"[cascade] NO RULE for project material={project.get('material','?')} "
+            f"deposit_type={project.get('deposit_type','?')} — refusing to score, "
+            f"flagging low_confidence."
+        )
+        return {
+            "scored_analogs": [],
+            "low_confidence": True,
+            "profile_warning": (
+                f"No analog_selection rule for "
+                f"{project.get('material','?')} / "
+                f"{project.get('deposit_type','?')}. The cascading filter would "
+                f"degrade to commodity-only matching, which is unreliable. Add "
+                f"the rule to scripts/seed_analog_rules.py, or set the project's "
+                f"deposit_type / deposit_subtype to one we already cover."
+            ),
+            "audit_events": [],
+        }
+
+    # Profile-strength gate — per-rule minimum (default 4 of 10 dimensions).
+    # A strict rule (alkalic copper porphyry, super-large Carlin) can demand
+    # 6+; a permissive rule (early-stage exploration) can allow 3. Without
+    # this gate, an unenriched target gets garbage analogs.
+    required_subtypes_pregate = set(analog_rule.get("required_subtypes") or [])
+    min_strength = int(analog_rule.get("min_profile_strength") or PROFILE_STRENGTH_DEFAULT)
     strength = _profile_strength(target_profile)
-    if required_subtypes_pregate and strength < PROFILE_STRENGTH_MIN:
+    if required_subtypes_pregate and strength < min_strength:
         missing = [d for d in _PROFILE_DIMENSIONS if not target_profile.get(d)]
         logger.warning(
             f"[cascade] PROFILE TOO WEAK for strict rule "
-            f"{(analog_rule or {}).get('rule_id','?')}: only {strength}/6 dimensions; "
-            f"missing {missing}. Refusing to score — flagging low_confidence."
+            f"{analog_rule.get('rule_id','?')}: only {strength}/{len(_PROFILE_DIMENSIONS)} "
+            f"dimensions (rule requires {min_strength}); missing {missing}. "
+            f"Refusing to score — flagging low_confidence."
         )
         return {
             "scored_analogs": [],
@@ -756,6 +902,7 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
                 f"Run the research/enrichment pipeline first, or set these fields "
                 f"manually in the project record."
             ),
+            "audit_events": [],
         }
     rule_exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
     # Structured exclusions from the rule (subtypes/modes/recovery the rule forbids)
@@ -764,6 +911,10 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     excluded_recovery = set((analog_rule or {}).get("excluded_recovery") or [])
     excluded_patterns = set((analog_rule or {}).get("excluded_patterns") or [])
     excluded_host_classes = set((analog_rule or {}).get("excluded_host_classes") or [])
+    excluded_stages = set((analog_rule or {}).get("excluded_stages") or [])
+    excluded_mining_methods = set((analog_rule or {}).get("excluded_mining_methods") or [])
+    excluded_resource_categories = set((analog_rule or {}).get("excluded_resource_categories") or [])
+    excluded_metal_suites = set((analog_rule or {}).get("excluded_metal_suites") or [])
     # Positive required lists — when the rule specifies required_subtypes
     # (or _patterns / _host_classes), any candidate with a CONFIDENTLY-DETECTED
     # value outside the list is dropped. Candidates with null detection are
@@ -772,6 +923,9 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     required_subtypes = set((analog_rule or {}).get("required_subtypes") or [])
     required_patterns = set((analog_rule or {}).get("required_patterns") or [])
     required_host_classes = set((analog_rule or {}).get("required_host_classes") or [])
+    required_stages = set((analog_rule or {}).get("required_stages") or [])
+    required_mining_methods = set((analog_rule or {}).get("required_mining_methods") or [])
+    required_metal_suites = set((analog_rule or {}).get("required_metal_suites") or [])
 
     logger.info(
         f"[cascade] {len(library)} library + {len(exa)} exa = {len(all_candidates)} "
@@ -801,10 +955,16 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     def _emit(decision: str, level: str, candidate: dict, profile: dict,
               reason: str, rank_pts: int | None = None,
               score: float | None = None) -> None:
+        # Library candidates that get dropped emit REVOKED_LIBRARY instead of
+        # plain DROP — flags rules that have tightened since the analog was
+        # approved (Batch D: library rot prevention).
+        effective_decision = decision
+        if decision == "DROP" and (candidate.get("source") == "library"):
+            effective_decision = "REVOKED_LIBRARY"
         audit_events.append({
             "candidate_name": candidate.get("name") or "Unknown",
             "candidate_source": candidate.get("source"),
-            "decision": decision,
+            "decision": effective_decision,
             "level": level,
             "rule_id": rule_id_for_audit,
             "lessons": lessons.resolve_lesson_ids(rule_lesson_ids_for_audit),
@@ -814,13 +974,31 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             "similarity_score": score,
         })
 
-    # ── Step B: Self-analog pre-filter (cheap; before profile build) ───────
+    # ── Step B: Self-analog pre-filter + hallucination guard ───────────────
+    project_id_str = state.get("project_id")
+    project_company = (project.get("company_name") or "").strip()
     pre_filtered: list[dict] = []
     for c in deduped:
-        if project_name and _is_self_analog(project_name, c.get("name") or ""):
+        # Self-analog (3-level check: id, company+name, name fuzzy)
+        if project_name and _is_self_analog(
+            project_name, c.get("name") or "",
+            project_id_str, c.get("project_id") or c.get("id"),
+            project_company, c.get("company_name") or c.get("company"),
+        ):
             logger.info(f"[cascade] DROP self-analog: {c.get('name')}")
-            _emit("DROP", "self_analog", c, {}, "name fuzzy-matches target project")
+            _emit("DROP", "self_analog", c, {}, "matches target project (name/id/company)")
             continue
+        # Hallucination guard — an Exa-sourced candidate with NO source_url AND
+        # NO numeric tonnage AND NO grade is almost certainly Grok inventing
+        # a plausible-sounding project name. Drop with SUSPECTED_HALLUCINATION.
+        if c.get("source") == "exa":
+            has_url = bool((c.get("source_url") or "").strip())
+            has_numbers = bool(c.get("tonnage_mt")) or bool(c.get("grade_value"))
+            if not has_url and not has_numbers:
+                logger.info(f"[cascade] DROP suspected hallucination (no URL, no numbers): {c.get('name')}")
+                _emit("DROP", "suspected_hallucination", c, {},
+                      "no source_url and no tonnage/grade — likely Grok-invented")
+                continue
         pre_filtered.append(c)
 
     # ── Step C: Cascading match per candidate ──────────────────────────────
@@ -848,6 +1026,62 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             dropped_counts["rule_recovery"] = dropped_counts.get("rule_recovery", 0) + 1
             _emit("DROP", "rule_recovery", c, cand_profile, reason)
             continue
+
+        # Rule-driven stage filters
+        if cand_profile["project_stage_class"] and cand_profile["project_stage_class"] in excluded_stages:
+            reason = f"rule excluded stage ({cand_profile['project_stage_class']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
+            dropped_counts["rule_stage"] = dropped_counts.get("rule_stage", 0) + 1
+            _emit("DROP", "rule_stage", c, cand_profile, reason)
+            continue
+        if required_stages and cand_profile["project_stage_class"]:
+            if cand_profile["project_stage_class"] not in required_stages:
+                reason = (f"stage {cand_profile['project_stage_class']} "
+                          f"not in required {sorted(required_stages)}")
+                logger.info(f"[cascade] DROP required-stage mismatch: {c.get('name')}")
+                dropped_counts["rule_required_stage"] = dropped_counts.get("rule_required_stage", 0) + 1
+                _emit("DROP", "rule_required_stage", c, cand_profile, reason)
+                continue
+
+        # Rule-driven mining method filters
+        if cand_profile["mining_method_class"] and cand_profile["mining_method_class"] in excluded_mining_methods:
+            reason = f"rule excluded mining method ({cand_profile['mining_method_class']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
+            dropped_counts["rule_mining_method"] = dropped_counts.get("rule_mining_method", 0) + 1
+            _emit("DROP", "rule_mining_method", c, cand_profile, reason)
+            continue
+        if required_mining_methods and cand_profile["mining_method_class"]:
+            if cand_profile["mining_method_class"] not in required_mining_methods:
+                reason = (f"mining method {cand_profile['mining_method_class']} "
+                          f"not in required {sorted(required_mining_methods)}")
+                logger.info(f"[cascade] DROP required-mining-method mismatch: {c.get('name')}")
+                dropped_counts["rule_required_mining_method"] = dropped_counts.get("rule_required_mining_method", 0) + 1
+                _emit("DROP", "rule_required_mining_method", c, cand_profile, reason)
+                continue
+
+        # Rule-driven resource category exclusion (e.g., exclude historical)
+        if cand_profile["resource_category_class"] and cand_profile["resource_category_class"] in excluded_resource_categories:
+            reason = f"rule excluded resource category ({cand_profile['resource_category_class']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
+            dropped_counts["rule_resource_category"] = dropped_counts.get("rule_resource_category", 0) + 1
+            _emit("DROP", "rule_resource_category", c, cand_profile, reason)
+            continue
+
+        # Rule-driven metal suite filters
+        if cand_profile["metal_suite"] and cand_profile["metal_suite"] in excluded_metal_suites:
+            reason = f"rule excluded metal suite ({cand_profile['metal_suite']})"
+            logger.info(f"[cascade] DROP {reason}: {c.get('name')}")
+            dropped_counts["rule_metal_suite"] = dropped_counts.get("rule_metal_suite", 0) + 1
+            _emit("DROP", "rule_metal_suite", c, cand_profile, reason)
+            continue
+        if required_metal_suites and cand_profile["metal_suite"]:
+            if cand_profile["metal_suite"] not in required_metal_suites:
+                reason = (f"metal suite {cand_profile['metal_suite']} "
+                          f"not in required {sorted(required_metal_suites)}")
+                logger.info(f"[cascade] DROP required-metal-suite mismatch: {c.get('name')}")
+                dropped_counts["rule_required_metal_suite"] = dropped_counts.get("rule_required_metal_suite", 0) + 1
+                _emit("DROP", "rule_required_metal_suite", c, cand_profile, reason)
+                continue
 
         # Rule-driven mineralization_pattern filters
         if cand_profile["mineralization_pattern"] and cand_profile["mineralization_pattern"] in excluded_patterns:
@@ -964,6 +1198,25 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         top = ranked[:2]
     else:
         top = ranked[:4]
+
+    # Near-miss observability — survivors that passed every hard filter but
+    # were squeezed out by the top-4 cap get a NEAR_MISS audit event. Makes
+    # the cap auditable: if a strong 5th candidate exists, it's visible in
+    # the audit trail rather than silently lost.
+    near_misses = ranked[4:7]  # top-3 just below the cap
+    for nm in near_misses:
+        audit_events.append({
+            "candidate_name": nm.get("name") or "Unknown",
+            "candidate_source": nm.get("source"),
+            "decision": "NEAR_MISS",
+            "level": "below_top_cap",
+            "rule_id": rule_id_for_audit,
+            "lessons": lessons.resolve_lesson_ids(rule_lesson_ids_for_audit),
+            "detected_profile": {k: nm.get(k) for k in _PROFILE_DIMENSIONS},
+            "reason": f"passed cascade but ranked outside top-4 cap (rank_pts={nm.get('_rank_pts')})",
+            "rank_pts": nm.get("_rank_pts"),
+            "similarity_score": nm.get("similarity_score"),
+        })
 
     # Strip internal-only keys before returning
     for s in top:

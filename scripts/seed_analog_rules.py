@@ -72,7 +72,13 @@ ANALOG_SELECTION_RULES = [
                                  "replacement", "reef", "blanket", "placer"],
         "preferred_alteration":["sericitic_quartz", "chlorite_carbonate"],
         "excluded_recovery":   ["iscr", "sx_ew", "hpal"],
+        "required_mining_methods": ["underground_vein", "underground_bulk"],
+        "excluded_mining_methods": ["iscr_in_situ", "heap_leach_pad", "open_pit_bulk", "dredging"],
         "tonnage_match_max_ratio": 5.0,  # Gold L136: tonnage match ≤ 5×
+        "grade_match_max_ratio":   3.0,
+        "min_resource_year":   2010,
+        "min_profile_strength": 5,
+        "rule_priority":       200,
         "applies_lessons":     ["LG1", "LG3", "LG19", "LG136", "LG154",
                                  "L_ORO_01", "L_ORO_02"],
         "analog_criteria": [
@@ -115,7 +121,11 @@ ANALOG_SELECTION_RULES = [
         ],
         "excluded_patterns":   ["vein_hosted", "reef", "blanket", "placer"],
         "excluded_recovery":   ["iscr", "sx_ew", "hpal"],
+        "required_mining_methods": ["open_pit_bulk", "open_pit_selective"],
+        "excluded_mining_methods": ["underground_vein", "iscr_in_situ", "dredging"],
         "tonnage_match_max_ratio": 8.0,
+        "min_resource_year":   2010,
+        "rule_priority":       180,
         "applies_lessons":     ["LG1", "LG19", "LG136", "L_ORO_02"],
         "analog_criteria": [
             "Bulk-tonnage disseminated gold (typically >50 Mt @ 0.5–2.5 g/t)",
@@ -253,7 +263,13 @@ ANALOG_SELECTION_RULES = [
                                  "massive_sulphide", "placer"],
         "preferred_alteration":["silicification_decalcified"],
         "excluded_recovery":   ["flotation", "iscr"],
+        "required_mining_methods": ["open_pit_bulk", "heap_leach_pad", "open_pit_selective"],
+        "excluded_mining_methods": ["underground_vein", "iscr_in_situ", "block_cave", "dredging"],
         "tonnage_match_max_ratio": 5.0,  # Lesson LG65/LG160: super-large halo extent
+        "grade_match_max_ratio":   4.0,
+        "min_resource_year":   2010,
+        "min_profile_strength": 5,
+        "rule_priority":       200,
         "applies_lessons":     ["LG1", "LG19", "LG65", "LG136", "LG160",
                                  "L_CAR_01", "L_CAR_02"],
         "analog_criteria": [
@@ -298,7 +314,12 @@ ANALOG_SELECTION_RULES = [
                                  "massive_sulphide", "placer"],
         "preferred_alteration":["silicification_decalcified"],
         "excluded_recovery":   ["flotation", "iscr"],
+        "required_mining_methods": ["open_pit_bulk", "open_pit_selective", "heap_leach_pad"],
+        "excluded_mining_methods": ["underground_vein", "iscr_in_situ", "block_cave"],
         "tonnage_match_max_ratio": 5.0,
+        "grade_match_max_ratio":   4.0,
+        "min_resource_year":   2010,
+        "rule_priority":       180,
         "applies_lessons":     ["LG1", "LG19", "LG136", "L_CAR_01", "L_CAR_02"],
         "analog_criteria": [
             "Sediment-hosted disseminated gold, smaller-scale than super-large class",
@@ -429,6 +450,11 @@ ANALOG_SELECTION_RULES = [
         "excluded_modes":      ["supergene_oxide", "free_milling_oxide"],
         "excluded_recovery":   ["heap_leach", "iscr", "sx_ew"],
         "preferred_alteration":["potassic_phyllic", "potassic_propylitic"],
+        "required_mining_methods": ["open_pit_bulk", "block_cave", "underground_bulk"],
+        "excluded_mining_methods": ["iscr_in_situ", "heap_leach_pad", "underground_vein", "dredging"],
+        "min_resource_year":   2010,
+        "min_profile_strength": 5,
+        "rule_priority":       200,
         "applies_lessons":     ["L36", "L86", "L101", "L102", "L124", "L138"],
         "analog_criteria": [
             "Same tectonic belt: BC Quesnel/Stikine (Mt. Milligan, Mt. Polley, Copper Mountain, Red Chris) or Lachlan alkalic arc (Cadia)",
@@ -1049,10 +1075,17 @@ def build_rows(rules_list: list, rule_type: str, extra_commodities: list | None 
         "excluded_recovery", "required_recovery",
         "preferred_belts", "required_belts",
         "preferred_alteration", "excluded_alteration",
-        # New pattern / host-class dimensions and scale tolerance
+        # Pattern + host-class dimensions
         "required_patterns", "excluded_patterns",
         "required_host_classes", "excluded_host_classes",
-        "tonnage_match_max_ratio",
+        # Stage / mining / category / vintage / metal-suite / priority
+        "required_stages", "excluded_stages",
+        "required_mining_methods", "excluded_mining_methods",
+        "min_resource_category", "excluded_resource_categories",
+        "required_metal_suites", "excluded_metal_suites",
+        "min_resource_year",
+        "tonnage_match_max_ratio", "grade_match_max_ratio",
+        "min_profile_strength", "rule_priority",
         "applies_lessons",
     )
 

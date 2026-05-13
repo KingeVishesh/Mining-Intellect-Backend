@@ -99,7 +99,11 @@ def get_approved_analogs(
             "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
             "analog_metal_suite,analog_alteration_signature,analog_recovery_method,"
             # Pattern + host class
-            "analog_mineralization_pattern,analog_host_rock_class"
+            "analog_mineralization_pattern,analog_host_rock_class,"
+            # Stage / mining / category / vintage / compliance
+            "analog_project_stage_class,analog_mining_method_class,"
+            "analog_resource_category_class,analog_resource_compliance_standard,"
+            "analog_resource_vintage_year"
         )
         .in_("analog_material", keys)
         .eq("status", "approved")
@@ -143,6 +147,11 @@ def get_approved_analogs(
             "recovery_method":        r.get("analog_recovery_method"),
             "mineralization_pattern": r.get("analog_mineralization_pattern"),
             "host_rock_class":        r.get("analog_host_rock_class"),
+            "project_stage_class":         r.get("analog_project_stage_class"),
+            "mining_method_class":         r.get("analog_mining_method_class"),
+            "resource_category_class":     r.get("analog_resource_category_class"),
+            "resource_compliance_standard": r.get("analog_resource_compliance_standard"),
+            "resource_vintage_year":       r.get("analog_resource_vintage_year"),
             "source": "library",
         })
     return candidates
@@ -555,8 +564,13 @@ def save_report_analogs(
             "analog_metal_suite":            a.get("metal_suite"),
             "analog_alteration_signature":   a.get("alteration_signature"),
             "analog_recovery_method":        a.get("recovery_method"),
-            "analog_mineralization_pattern": a.get("mineralization_pattern"),
-            "analog_host_rock_class":        a.get("host_rock_class"),
+            "analog_mineralization_pattern":      a.get("mineralization_pattern"),
+            "analog_host_rock_class":             a.get("host_rock_class"),
+            "analog_project_stage_class":         a.get("project_stage_class"),
+            "analog_mining_method_class":         a.get("mining_method_class"),
+            "analog_resource_category_class":     a.get("resource_category_class"),
+            "analog_resource_compliance_standard": a.get("resource_compliance_standard"),
+            "analog_resource_vintage_year":       a.get("resource_vintage_year"),
             "similarity_score": a.get("similarity_score"),
             "source": a.get("source"),
             "source_url": a.get("source_url"),

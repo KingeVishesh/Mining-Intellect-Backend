@@ -20,6 +20,10 @@ from nodes.geo_taxonomy import (
     ALL_RECOVERY_SLUGS,
     ALL_PATTERN_SLUGS,
     ALL_HOST_CLASS_SLUGS,
+    ALL_STAGE_SLUGS,
+    ALL_MINING_METHOD_SLUGS,
+    ALL_RESOURCE_CATEGORY_SLUGS,
+    ALL_SUITE_SLUGS,
 )
 
 
@@ -91,6 +95,30 @@ class AnalogRule(BaseModel):
     # than this multiplicative ratio when both sides have data. None = no cap.
     # See Gold Lesson 136 (>20–25% mismatch penalised heavily).
     tonnage_match_max_ratio: Optional[float] = None
+    grade_match_max_ratio:   Optional[float] = None
+    # Project stage — L4.6 cascade gate. Resource-stage analogs for an
+    # exploration-stage target give over-confident models.
+    required_stages: List[str] = Field(default_factory=list)
+    excluded_stages: List[str] = Field(default_factory=list)
+    # Mining method — L4.8 cascade gate. Open-pit bulk analogs for an
+    # underground-vein target gives wrong cut-off / dilution / recovery.
+    required_mining_methods: List[str] = Field(default_factory=list)
+    excluded_mining_methods: List[str] = Field(default_factory=list)
+    # Resource category — L4.9 cascade gate. Inferred-only analogs for an
+    # M&I-stage model are too weak.
+    min_resource_category: Optional[str] = None     # e.g. "m_and_i"
+    excluded_resource_categories: List[str] = Field(default_factory=list)
+    # Resource vintage — L4.95 cascade gate. Historical / press-release / pre-2010
+    # estimates are blocked when the rule sets min_resource_year.
+    min_resource_year: Optional[int] = None
+    # Metal suite gating (was rank-only; now optional hard filter)
+    required_metal_suites: List[str] = Field(default_factory=list)
+    excluded_metal_suites: List[str] = Field(default_factory=list)
+    # Per-rule profile-strength minimum (default 4 of 10 dimensions).
+    min_profile_strength: int = 4
+    # Rule priority — higher = checked first when multiple rules match.
+    # Sub-rules (alkalic_porphyry vs generic porphyry) get higher priority.
+    rule_priority: int = 100
     applies_lessons:   List[str] = Field(default_factory=list)
 
     # ── Documentation and tuning ───────────────────────────────────────────
@@ -138,13 +166,68 @@ class AnalogRule(BaseModel):
     def _validate_host_class_slugs(cls, v: List[str], info) -> List[str]:
         return _validate_slug_list(v, ALL_HOST_CLASS_SLUGS, info.field_name)
 
-    @field_validator("tonnage_match_max_ratio")
+    @field_validator("tonnage_match_max_ratio", "grade_match_max_ratio")
     @classmethod
-    def _validate_tonnage_ratio(cls, v: Optional[float]) -> Optional[float]:
+    def _validate_match_ratio(cls, v: Optional[float], info) -> Optional[float]:
         if v is None:
             return v
         if v < 1.0:
-            raise ValueError(f"tonnage_match_max_ratio must be ≥1.0 (got {v})")
+            raise ValueError(f"{info.field_name} must be ≥1.0 (got {v})")
+        return v
+
+    @field_validator("required_stages", "excluded_stages")
+    @classmethod
+    def _validate_stage_slugs(cls, v: List[str], info) -> List[str]:
+        return _validate_slug_list(v, ALL_STAGE_SLUGS, info.field_name)
+
+    @field_validator("required_mining_methods", "excluded_mining_methods")
+    @classmethod
+    def _validate_mining_method_slugs(cls, v: List[str], info) -> List[str]:
+        return _validate_slug_list(v, ALL_MINING_METHOD_SLUGS, info.field_name)
+
+    @field_validator("min_resource_category")
+    @classmethod
+    def _validate_min_resource_category(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if v not in ALL_RESOURCE_CATEGORY_SLUGS:
+            raise ValueError(
+                f"Unknown min_resource_category slug: {v!r}. "
+                f"Valid: {sorted(ALL_RESOURCE_CATEGORY_SLUGS)}"
+            )
+        return v
+
+    @field_validator("excluded_resource_categories")
+    @classmethod
+    def _validate_excluded_categories(cls, v: List[str], info) -> List[str]:
+        return _validate_slug_list(v, ALL_RESOURCE_CATEGORY_SLUGS, info.field_name)
+
+    @field_validator("required_metal_suites", "excluded_metal_suites")
+    @classmethod
+    def _validate_metal_suite_slugs(cls, v: List[str], info) -> List[str]:
+        return _validate_slug_list(v, ALL_SUITE_SLUGS, info.field_name)
+
+    @field_validator("min_resource_year")
+    @classmethod
+    def _validate_min_year(cls, v: Optional[int]) -> Optional[int]:
+        if v is None:
+            return v
+        if v < 1900 or v > 2100:
+            raise ValueError(f"min_resource_year out of range (got {v})")
+        return v
+
+    @field_validator("min_profile_strength")
+    @classmethod
+    def _validate_min_strength(cls, v: int) -> int:
+        if v < 0 or v > 10:
+            raise ValueError(f"min_profile_strength must be in [0,10] (got {v})")
+        return v
+
+    @field_validator("rule_priority")
+    @classmethod
+    def _validate_priority(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(f"rule_priority must be ≥0 (got {v})")
         return v
 
     @field_validator("applies_lessons")

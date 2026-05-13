@@ -247,6 +247,148 @@ def test_profile_strength_gate_runs_when_target_has_data():
 # ── Audit event emission ───────────────────────────────────────────────────
 
 
+def test_no_rule_returns_low_confidence_with_warning():
+    """When get_analog_rule returns None, the cascade refuses to score and
+    returns a profile_warning instead of running family-only matching."""
+    from graphs.analog_finder import combine_filter_score_node
+    state = {
+        "project": {"name": "Mystery", "material": "vanadium",
+                     "deposit_type": "shale-hosted vanadium"},
+        "analog_rule": None,
+        "target_profile": {"material": "vanadium"},
+        "library_analogs": [{"name": "Some V Analog", "material": "vanadium"}],
+        "exa_analogs": [],
+    }
+    result = combine_filter_score_node(state)
+    assert result["low_confidence"] is True
+    assert result["scored_analogs"] == []
+    assert "No analog_selection rule" in result["profile_warning"]
+
+
+def test_rule_priority_routes_to_most_specific():
+    """alkalic_porphyry + stockwork pattern should route to the alkalic rule
+    (priority 200) ahead of the generic copper porphyry (priority 100)."""
+    from nodes.rules_engine import get_analog_rule
+    rule = get_analog_rule("copper", "alkalic porphyry copper-gold",
+                            "alkalic_porphyry", "stockwork")
+    assert rule is not None
+    assert rule["rule_id"] == "analog_sel_copper_porphyry_alkalic"
+
+
+def test_mining_method_hard_filter_drops_ug_vein_for_op_carlin():
+    """A Carlin super-large target must drop an underground-vein analog at L4.8."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    from tests.fixtures.golden_analogs import BLACK_PINE_TARGET
+    rule = _find_rule("analog_sel_gold_carlin_super_large")
+    target = _build_profile(BLACK_PINE_TARGET)
+    ug_vein_cand = _build_profile({
+        "name": "Some UG Vein Au", "material": "gold",
+        "deposit_subtype": "carlin_general",  # bypass subtype
+        "mineralization_pattern": "disseminated_bulk",  # bypass pattern
+        "mining_method_class": "underground_vein",
+        "tonnage_mt": 600.0, "grade_value": 0.3, "grade_unit": "g/t Au",
+    })
+    passes, _, _, _, reasons, dropped = _cascading_match(target, ug_vein_cand, rule)
+    assert not passes
+    # Could be L4.8 (cascade), or rule_mining_method (rule-driven)
+    # Both are correct outcomes — we hit a mining-method gate
+    assert dropped in ("L4.8", "rule_mining_method", "rule_required_mining_method")
+
+
+def test_vintage_filter_drops_historical_resource():
+    """Pre-2010 vintage should be dropped at L4.95 when the rule sets min_resource_year."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    from tests.fixtures.golden_analogs import BLACK_PINE_TARGET
+    rule = _find_rule("analog_sel_gold_carlin_super_large")
+    target = _build_profile(BLACK_PINE_TARGET)
+    old_cand = _build_profile({
+        "name": "1985 Historical Carlin", "material": "gold",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "mining_method_class": "open_pit_bulk",
+        "resource_compliance_standard": "ni_43_101",
+        "resource_vintage_year": 1985,
+        "tonnage_mt": 500.0, "grade_value": 0.3, "grade_unit": "g/t Au",
+    })
+    passes, _, _, _, reasons, dropped = _cascading_match(target, old_cand, rule)
+    assert not passes
+    assert dropped == "L4.95"
+
+
+def test_compliance_filter_drops_press_release():
+    """A press-release-grade resource should never pass."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    from tests.fixtures.golden_analogs import BLACK_PINE_TARGET
+    rule = _find_rule("analog_sel_gold_carlin_super_large")
+    target = _build_profile(BLACK_PINE_TARGET)
+    pr_cand = _build_profile({
+        "name": "Press-Release Resource", "material": "gold",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "mining_method_class": "open_pit_bulk",
+        "resource_compliance_standard": "press_release",
+        "resource_vintage_year": 2020,
+        "tonnage_mt": 400.0, "grade_value": 0.3, "grade_unit": "g/t Au",
+    })
+    passes, _, _, _, _, dropped = _cascading_match(target, pr_cand, rule)
+    assert not passes
+    assert dropped == "L4.95"
+
+
+def test_grade_tolerance_drops_wildly_off_grade():
+    """An 8 g/t Au analog (28×) for a 0.3 g/t Au super-large Carlin target
+    drops at L5.6 grade mismatch."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    from tests.fixtures.golden_analogs import BLACK_PINE_TARGET
+    rule = _find_rule("analog_sel_gold_carlin_super_large")
+    target = _build_profile(BLACK_PINE_TARGET)
+    high_g_cand = _build_profile({
+        "name": "High-Grade Carlin", "material": "gold",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "mining_method_class": "open_pit_bulk",
+        "resource_compliance_standard": "ni_43_101",
+        "resource_vintage_year": 2020,
+        "tonnage_mt": 500.0, "grade_value": 8.0, "grade_unit": "g/t Au",
+    })
+    passes, _, _, _, _, dropped = _cascading_match(target, high_g_cand, rule)
+    assert not passes
+    assert dropped == "L5.6"
+
+
+def test_hallucination_guard_drops_sourceless_exa():
+    """Exa-sourced candidate with no source_url AND no tonnage/grade should
+    be flagged as suspected_hallucination in audit and dropped pre-cascade."""
+    from graphs.analog_finder import combine_filter_score_node
+    from tests.fixtures.golden_analogs import HAT_TARGET
+    rule = _find_rule("analog_sel_copper_porphyry_alkalic")
+    state = {
+        "project": HAT_TARGET, "project_id": "test-id",
+        "analog_rule": rule,
+        "target_profile": None,  # let the node derive it
+        "library_analogs": [],
+        "exa_analogs": [{
+            "name": "Phantom Copper Project", "material": "copper",
+            "source": "exa",
+            # No URL, no tonnage, no grade → suspected hallucination
+        }],
+    }
+    result = combine_filter_score_node(state)
+    halluc_events = [e for e in result["audit_events"]
+                     if e["level"] == "suspected_hallucination"]
+    assert len(halluc_events) == 1
+    assert halluc_events[0]["candidate_name"] == "Phantom Copper Project"
+
+
+def test_self_analog_by_project_id():
+    """Same project_id on both sides should be detected even with different names."""
+    from graphs.analog_finder import _is_self_analog
+    assert _is_self_analog("Hat Copper", "Doubleview Hat Project",
+                             project_id="abc-123", candidate_project_id="abc-123")
+    assert not _is_self_analog("Hat Copper", "Mt. Milligan",
+                                 project_id="abc-123", candidate_project_id="xyz-789")
+
+
 def test_audit_events_emitted_for_every_candidate():
     """Every candidate considered must produce one audit event."""
     from graphs.analog_finder import combine_filter_score_node

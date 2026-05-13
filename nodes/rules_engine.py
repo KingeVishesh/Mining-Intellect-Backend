@@ -87,7 +87,13 @@ _ANALOG_FILTER_KEYS = (
     "preferred_alteration", "excluded_alteration",
     "required_patterns", "excluded_patterns",
     "required_host_classes", "excluded_host_classes",
-    "tonnage_match_max_ratio",
+    "required_stages", "excluded_stages",
+    "required_mining_methods", "excluded_mining_methods",
+    "min_resource_category", "excluded_resource_categories",
+    "required_metal_suites", "excluded_metal_suites",
+    "min_resource_year",
+    "tonnage_match_max_ratio", "grade_match_max_ratio",
+    "min_profile_strength", "rule_priority",
     "applies_lessons",
 )
 
@@ -145,8 +151,14 @@ def get_analog_rule(
     sub_lower = (deposit_subtype or "").strip().lower()
     pat_lower = (mineralization_pattern or "").strip().lower()
 
-    # Flatten analog_filters_json onto top level for all rules upfront
+    # Flatten analog_filters_json onto top level for all rules upfront, then
+    # sort by rule_priority DESC so the more-specific sub-rules (alkalic
+    # porphyry, orogenic vein, super-large Carlin) get matched before the
+    # generic catch-alls. Same priority → fall back to rule_id alphabetical
+    # for deterministic order.
     rules = [_flatten_rule(r) for r in rules]
+    rules.sort(key=lambda r: (-int(r.get("rule_priority") or 100),
+                                str(r.get("rule_id") or "")))
 
     # Pass 0a: most specific — subtype AND pattern both required by the rule
     if sub_lower and pat_lower:
