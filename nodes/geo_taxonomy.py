@@ -340,7 +340,17 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
     },
     "fennoscandian": {
         "countries": ["finland", "norway", "sweden"],
-        "regions": ["fennoscandian", "baltic shield"],
+        "regions": [
+            "fennoscandian", "baltic shield",
+            # Finnish gold/Cu/Ni belts
+            "lapland", "central lapland", "kuusamo", "kittilä", "kittila",
+            "outokumpu", "ostrobothnia", "kuhmo",
+            # Swedish belts
+            "skellefte", "skellefteå", "skelleftea", "norrbotten",
+            "kiruna", "bergslagen",
+            # Norwegian
+            "finnmark",
+        ],
     },
     "central_asian_orogenic": {
         "countries": ["kazakhstan", "uzbekistan", "kyrgyzstan", "mongolia", "russia"],
@@ -642,14 +652,17 @@ def detect_belt(
                 if not belt_countries or c in belt_countries:
                     return belt
 
-    # No region hit — look at country-only belts (single-country belts only)
+    # No region hit — fall back to country-only when the country uniquely
+    # maps to a single belt (Finland → fennoscandian; New Caledonia → its
+    # laterite belt). Multi-belt countries (Canada has 4 belts) skip this
+    # to avoid mis-attribution.
     if c:
-        for belt, criteria in TECTONIC_BELTS.items():
-            belt_countries = criteria.get("countries", [])
-            # Only attribute by country alone if the belt has a single country
-            # (avoids mis-attributing all-Canada projects to Quesnel/Stikine)
-            if len(belt_countries) == 1 and c in belt_countries and not criteria.get("regions"):
-                return belt
+        country_belts = [
+            belt for belt, criteria in TECTONIC_BELTS.items()
+            if c in criteria.get("countries", [])
+        ]
+        if len(country_belts) == 1:
+            return country_belts[0]
     return None
 
 

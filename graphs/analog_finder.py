@@ -879,31 +879,41 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         }
 
     # Profile-strength gate — per-rule minimum (default 4 of 10 dimensions).
-    # A strict rule (alkalic copper porphyry, super-large Carlin) can demand
-    # 6+; a permissive rule (early-stage exploration) can allow 3. Without
-    # this gate, an unenriched target gets garbage analogs.
+    # When the target is below the rule's strictness threshold, we DON'T refuse
+    # to score (that produces silent 0-analog results). Instead we drop into
+    # "relaxed mode": skip the rule's required_* lists (so we don't filter on
+    # dimensions the target itself doesn't have) but keep all excluded_* lists
+    # and the cascade hard gates. The user still gets analogs, but flagged
+    # low_confidence with a clear warning explaining the trade-off.
     required_subtypes_pregate = set(analog_rule.get("required_subtypes") or [])
     min_strength = int(analog_rule.get("min_profile_strength") or PROFILE_STRENGTH_DEFAULT)
     strength = _profile_strength(target_profile)
+    relaxed_mode = False
+    relaxed_warning = None
     if required_subtypes_pregate and strength < min_strength:
         missing = [d for d in _PROFILE_DIMENSIONS if not target_profile.get(d)]
         logger.warning(
             f"[cascade] PROFILE TOO WEAK for strict rule "
             f"{analog_rule.get('rule_id','?')}: only {strength}/{len(_PROFILE_DIMENSIONS)} "
-            f"dimensions (rule requires {min_strength}); missing {missing}. "
-            f"Refusing to score — flagging low_confidence."
+            f"dimensions (rule requires {min_strength}); "
+            f"missing {missing}. Falling back to RELAXED MODE."
         )
-        return {
-            "scored_analogs": [],
-            "low_confidence": True,
-            "profile_warning": (
-                f"Project needs geological enrichment before analog selection can "
-                f"proceed reliably. Missing: {', '.join(missing)}. "
-                f"Run the research/enrichment pipeline first, or set these fields "
-                f"manually in the project record."
-            ),
-            "audit_events": [],
-        }
+        relaxed_mode = True
+        relaxed_warning = (
+            f"Project has only {strength}/{len(_PROFILE_DIMENSIONS)} geological "
+            f"dimensions populated (rule {analog_rule.get('rule_id','?')} prefers "
+            f"≥{min_strength}). Running in relaxed mode: rule's required_* lists "
+            f"are skipped; exclusions and cascade hard filters still apply. "
+            f"Missing dimensions: {', '.join(missing)}. Enrich the project to "
+            f"raise confidence."
+        )
+        # Drop the rule's required_* lists so we don't filter on absent fields.
+        required_subtypes = set()
+        required_patterns = set()
+        required_host_classes = set()
+        required_stages = set()
+        required_mining_methods = set()
+        required_metal_suites = set()
     rule_exclusions = _parse_exclusions((analog_rule or {}).get("analog_criteria") or [])
     # Structured exclusions from the rule (subtypes/modes/recovery the rule forbids)
     excluded_subtypes = set((analog_rule or {}).get("excluded_subtypes") or [])
@@ -1233,11 +1243,29 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     else:
         logger.warning("[cascade] No analog candidates found")
 
-    return {
+    # If we entered relaxed mode, surface that to the caller as well.
+    result = {
         "scored_analogs": top,
-        "low_confidence": low_confidence,
+        "low_confidence": low_confidence or relaxed_mode,
         "audit_events": audit_events,
     }
+    if relaxed_warning:
+        result["profile_warning"] = relaxed_warning
+        # Prepend a RELAXED_MODE marker so the audit trail explains why this
+        # run is low-confidence before the candidate-level events.
+        audit_events.insert(0, {
+            "candidate_name": "(run-level)",
+            "candidate_source": None,
+            "decision": "RELAXED_MODE",
+            "level": "profile_strength_below_min",
+            "rule_id": rule_id_for_audit,
+            "lessons": lessons.resolve_lesson_ids(rule_lesson_ids_for_audit),
+            "detected_profile": {k: target_profile.get(k) for k in _PROFILE_DIMENSIONS},
+            "reason": relaxed_warning,
+            "rank_pts": None,
+            "similarity_score": None,
+        })
+    return result
 
 
 def human_review_analog_node(state: AnalogState) -> AnalogState:
