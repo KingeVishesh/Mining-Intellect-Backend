@@ -301,7 +301,15 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
     },
     "great_basin_carlin": {
         "countries": ["usa"],
-        "regions": ["nevada", "carlin", "battle mountain", "eureka"],
+        "regions": [
+            # Nevada — core Carlin Trend and outliers
+            "nevada", "carlin", "battle mountain", "eureka",
+            "cortez", "getchell", "humboldt", "white pine",
+            # Idaho/Utah — Oquirrh Formation Carlin systems (Black Pine,
+            # Long Canyon, parts of Carlin Trend extension). The geology
+            # is continuous across state lines.
+            "idaho", "utah", "oquirrh", "oneida", "elko",
+        ],
     },
     "andean": {
         "countries": ["chile", "peru", "argentina", "ecuador", "bolivia", "colombia"],
@@ -513,9 +521,17 @@ def detect_subtype(
             return "bif_hosted_orogenic"
         return "orogenic_general"
 
+    # Carlin — check BEFORE the sediment-hosted Cu block because Carlin gold
+    # is routinely described as "sediment-hosted disseminated gold" in NI 43-101
+    # reports, and the generic sediment-hosted detector would otherwise win.
+    if "carlin" in blob:
+        return "carlin_general"
+
     # Sediment-hosted Cu — includes stratabound/stratiform language and the
     # Central African Copperbelt (Kamoa-Kakula, Tenke-Fungurume) style which
     # is rarely tagged with the "sediment-hosted" keyword in technical reports.
+    # We've already returned for Carlin above, so plain "sediment-hosted" here
+    # is taken to mean sediment-hosted COPPER.
     if any(k in blob for k in ("sedex", "kupferschiefer", "manto", "crd", "mvt",
                                 "sediment hosted", "sediment-hosted", "carbonate replacement",
                                 "redbed copper", "stratabound", "stratiform",
@@ -542,10 +558,6 @@ def detect_subtype(
                                 "volcanic-hosted massive sulphide",
                                 "volcanogenic massive sulphide", "volcanogenic massive sulfide")):
         return "vms_general"
-
-    # Carlin
-    if "carlin" in blob:
-        return "carlin_general"
 
     # Skarn
     if "skarn" in blob:
@@ -639,23 +651,49 @@ def detect_belt(
     region: Optional[str] = None,
     district: Optional[str] = None,
 ) -> Optional[str]:
-    """Map country + region/district to a tectonic belt slug. Returns None if no match."""
+    """
+    Map country + region/district to a tectonic belt slug.
+
+    Strategy: score every belt by the number of its region keywords that hit
+    region+district text, with a +1 for matching country. Return the belt
+    with the highest score. This handles overlapping coverage (e.g. Utah is
+    listed in both laramide_southwest as a region AND great_basin_carlin via
+    'oquirrh' — when the project mentions Oquirrh Formation explicitly,
+    great_basin wins).
+    """
     c = _norm(country)
     region_blob = " ".join(filter(None, [_norm(region), _norm(district)]))
 
-    # First, look for an explicit region match across all belts (more specific than country)
+    if not c and not region_blob:
+        return None
+
+    best_belt: Optional[str] = None
+    best_score: int = 0
     for belt, criteria in TECTONIC_BELTS.items():
+        score = 0
+        # Count region keyword matches in the region_blob
         for r in criteria.get("regions", []):
             if r and r in region_blob:
-                # Validate country if specified for this belt
-                belt_countries = criteria.get("countries", [])
-                if not belt_countries or c in belt_countries:
-                    return belt
+                score += 1
+        # +1 if country matches (or no country constraint on the belt)
+        belt_countries = criteria.get("countries", [])
+        if score > 0:
+            if not belt_countries or c in belt_countries:
+                score += 1
+            else:
+                # Region hit but country doesn't match — disqualify this belt
+                score = 0
+        # Strictly higher score wins; on ties the first-iterated belt keeps it
+        if score > best_score:
+            best_score = score
+            best_belt = belt
+
+    if best_belt is not None:
+        return best_belt
 
     # No region hit — fall back to country-only when the country uniquely
     # maps to a single belt (Finland → fennoscandian; New Caledonia → its
-    # laterite belt). Multi-belt countries (Canada has 4 belts) skip this
-    # to avoid mis-attribution.
+    # laterite belt). Multi-belt countries (Canada, USA) skip this fallback.
     if c:
         country_belts = [
             belt for belt, criteria in TECTONIC_BELTS.items()
@@ -1191,12 +1229,15 @@ def mode_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
     """
     True when mineralization modes are compatible. Mixed mode is compatible with
     either pure sulfide or pure oxide (transitional zones often appear in both).
+    Earlier code wrote `"mixed" in (target, candidate)` which is *tuple
+    membership* and never matches the compound slug `mixed_oxide_sulfide` —
+    substring check is what we actually want.
     """
     if not target or not candidate:
         return True
     if target == candidate:
         return True
-    if "mixed" in (target, candidate):
+    if "mixed" in target or "mixed" in candidate:
         return True
     return False
 

@@ -387,6 +387,46 @@ def test_hallucination_guard_drops_sourceless_exa():
     assert halluc_events[0]["candidate_name"] == "Phantom Copper Project"
 
 
+def test_carlin_priority_over_sediment_hosted_cu():
+    """Black Pine regression: 'Carlin-style sediment-hosted disseminated gold'
+    must classify as carlin_general, not sediment_hosted_general. The phrase
+    'sediment-hosted' is standard Carlin terminology in NI 43-101 reports."""
+    from nodes.geo_taxonomy import detect_subtype
+    assert detect_subtype("Carlin-style sediment-hosted disseminated gold") == "carlin_general"
+    assert detect_subtype("Carlin-type sediment-hosted gold",
+                            mineralization_style="disseminated invisible gold") == "carlin_general"
+    # Pure sediment-hosted Cu (no Carlin keyword) still routes correctly
+    assert detect_subtype("sediment-hosted stratiform copper",
+                            mineralization_style="redbed Cu") == "redbed_cu"
+
+
+def test_great_basin_belt_includes_idaho():
+    """Black Pine sits on Oquirrh Formation in southern Idaho — geologically
+    part of the Great Basin Carlin host stratigraphy. The belt must include
+    Idaho (and Oquirrh district term) or the cascade can't route Carlin
+    projects there. Utah is genuinely ambiguous (Bingham Laramide vs Great
+    Basin) so we don't assert a single answer for Utah-alone."""
+    from nodes.geo_taxonomy import detect_belt
+    assert detect_belt("USA", "Idaho", "Oquirrh Formation") == "great_basin_carlin"
+    assert detect_belt("USA", "Nevada", "Carlin Trend") == "great_basin_carlin"
+    # Utah with Oquirrh district resolves to great_basin_carlin
+    assert detect_belt("USA", "Utah", "Oquirrh Formation") == "great_basin_carlin"
+
+
+def test_mode_compatible_substring_check():
+    """Regression: `"mixed" in (target, candidate)` is tuple membership and
+    never fires for `mixed_oxide_sulfide`. The check must use substring."""
+    from nodes.geo_taxonomy import mode_compatible
+    # mixed_oxide_sulfide must be compatible with pure sulfide or pure oxide
+    assert mode_compatible("supergene_oxide", "mixed_oxide_sulfide")
+    assert mode_compatible("mixed_oxide_sulfide", "supergene_oxide")
+    assert mode_compatible("primary_sulfide", "mixed_oxide_sulfide")
+    assert mode_compatible("mixed_oxide_sulfide", "primary_sulfide")
+    # Pure-sulfide vs pure-oxide is still incompatible (sanity)
+    assert not mode_compatible("primary_sulfide", "supergene_oxide")
+    assert not mode_compatible("supergene_oxide", "primary_sulfide")
+
+
 def test_finnish_lapland_routes_to_fennoscandian():
     """Ruoppa-style Finnish Lapland gold project must detect Fennoscandian belt
     so the orogenic-vein cascade has enough profile strength to score."""
