@@ -27,6 +27,10 @@
     "pipeline_orchestrator": {
       "path": "./graphs/pipeline_orchestrator.py:graph",
       "description": "Master pipeline: chains project_research → analog_finder → report_generator via LangGraph Cloud API calls. Interrupts for human analog review between steps 2 and 3. Child graphs remain independently callable."
+    },
+    "model_runner": {
+      "path": "./graphs/model_runner.py:graph",
+      "description": "Build Model 1 (+ Model 2 if official MRE exists) for a project that already has analogs. Persists each model to model_runs and overwrites the latest resource columns on projects. No PDF, no report row."
     }
   },
   "env": ".env"

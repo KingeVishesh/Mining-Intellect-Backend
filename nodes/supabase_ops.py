@@ -381,13 +381,22 @@ def save_analog_audit_events(
         get_client().table("analog_audit_events").insert(rows[i : i + BATCH]).execute()
 
 
-def save_analogs(project_id: str, analogs: List[Dict]) -> None:
+def save_analogs(
+    project_id: str,
+    analogs: List[Dict],
+    thread_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> None:
     """
-    Persist approved analogs into `workflow_states` as a JSON blob
-    (no dedicated analogs table in the schema — store in analogs_json column).
+    Persist analogs in three places:
+      1. workflow_states (legacy — Analog Tester page reads from here)
+      2. analogs_runs (time-series history, one row per run)
+      3. projects.analogs (latest snapshot, for quick lookup + UI display)
     """
     now = datetime.now(timezone.utc).isoformat()
-    row = {
+    client = get_client()
+
+    client.table("workflow_states").insert({
         "id": str(uuid4()),
         "project_id": project_id,
         "phase": "analogs_found",
@@ -396,9 +405,34 @@ def save_analogs(project_id: str, analogs: List[Dict]) -> None:
         "analogs_json": analogs,
         "analogs_count": len(analogs),
         "created_at": now,
-    }
-    get_client().table("workflow_states").insert(row).execute()
+    }).execute()
+
+    _persist_analogs_run_and_latest(project_id, analogs, thread_id, run_id)
     logger.info(f"[DB] {len(analogs)} analogs saved for project {project_id}")
+
+
+def _persist_analogs_run_and_latest(
+    project_id: str,
+    analogs: List[Dict],
+    thread_id: Optional[str],
+    run_id: Optional[str],
+) -> None:
+    """Write to analogs_runs (history) and projects.analogs (latest)."""
+    client = get_client()
+    try:
+        client.table("analogs_runs").insert({
+            "project_id": project_id,
+            "thread_id": thread_id,
+            "run_id": run_id,
+            "analogs_json": analogs,
+            "analogs_count": len(analogs),
+        }).execute()
+    except Exception as e:
+        logger.warning(f"[DB] analogs_runs insert failed: {e}")
+    try:
+        client.table("projects").update({"analogs": analogs}).eq("id", project_id).execute()
+    except Exception as e:
+        logger.warning(f"[DB] projects.analogs update failed: {e}")
 
 
 def get_analogs(project_id: str) -> List[Dict]:
@@ -554,10 +588,16 @@ def get_analogs_for_review(project_id: str) -> List[Dict]:
     return get_analogs(project_id)
 
 
-def save_approved_analogs(project_id: str, approved_analogs: List[Dict]) -> None:
+def save_approved_analogs(
+    project_id: str,
+    approved_analogs: List[Dict],
+    thread_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> None:
     """
     Insert a new workflow_states row with the human-approved analog list.
     Because get_analogs orders by created_at DESC, this supersedes the previous list.
+    Also writes to analogs_runs (history) and projects.analogs (latest snapshot).
     """
     now = datetime.now(timezone.utc).isoformat()
     get_client().table("workflow_states").insert({
@@ -570,7 +610,68 @@ def save_approved_analogs(project_id: str, approved_analogs: List[Dict]) -> None
         "analogs_count": len(approved_analogs),
         "created_at": now,
     }).execute()
+    _persist_analogs_run_and_latest(project_id, approved_analogs, thread_id, run_id)
     logger.info(f"[DB] {len(approved_analogs)} approved analogs saved for project {project_id}")
+
+
+# ── Model runs ─────────────────────────────────────────────────────────────────
+
+def save_model_run(
+    project_id: str,
+    model_type: str,
+    fields: Dict,
+    model_output_json: Optional[Dict] = None,
+    thread_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> None:
+    """
+    Insert a row into model_runs capturing a single Model 1 or Model 2 snapshot.
+
+    `fields` should contain:
+        measured_resource_mt, indicated_resource_mt, inferred_resource_mt,
+        tonnage_mt, grade_value, conviction_score, conviction_tier
+    """
+    row = {
+        "project_id": project_id,
+        "model_type": model_type,
+        "thread_id": thread_id,
+        "run_id": run_id,
+        "model_output_json": model_output_json or {},
+        "status": "complete",
+        **{k: fields.get(k) for k in (
+            "measured_resource_mt",
+            "indicated_resource_mt",
+            "inferred_resource_mt",
+            "tonnage_mt",
+            "grade_value",
+            "conviction_score",
+            "conviction_tier",
+        )},
+    }
+    get_client().table("model_runs").insert(row).execute()
+    logger.info(
+        f"[DB] model_run saved: project={project_id} type={model_type} "
+        f"tonnage={fields.get('tonnage_mt')} conviction={fields.get('conviction_score')}"
+    )
+
+
+def update_project_latest_model(project_id: str, fields: Dict) -> None:
+    """
+    Overwrite the 6 'latest-model' columns on projects so the /projects-back
+    table reflects the most recent run. Fields keyed same as save_model_run.
+    """
+    payload = {
+        k: fields.get(k) for k in (
+            "measured_resource_mt",
+            "indicated_resource_mt",
+            "inferred_resource_mt",
+            "tonnage_mt",
+            "grade_value",
+            "conviction_score",
+        )
+    }
+    get_client().table("projects").update(payload).eq("id", project_id).execute()
+    logger.info(f"[DB] projects.{{resource columns}} updated for project {project_id}")
 
 
 def save_report_analogs(

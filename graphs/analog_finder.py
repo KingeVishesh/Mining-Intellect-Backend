@@ -1298,8 +1298,8 @@ def human_review_analog_node(state: AnalogState) -> AnalogState:
     return {"human_approved": True, "approved_analogs": approved}
 
 
-def save_analogs_node(state: AnalogState) -> AnalogState:
-    """Save approved analogs to Supabase."""
+def save_analogs_node(state: AnalogState, config: Optional[Dict] = None) -> AnalogState:
+    """Save approved analogs to Supabase. Plumbs run/thread IDs into analogs_runs."""
     if not state.get("human_approved"):
         logger.info("[save] Human rejected — not saving")
         return {"saved": False}
@@ -1308,8 +1308,12 @@ def save_analogs_node(state: AnalogState) -> AnalogState:
     for a in analogs:
         a["approved"] = True
 
+    cfg = (config or {}).get("configurable") or {}
+    thread_id = cfg.get("thread_id")
+    run_id = cfg.get("run_id")
+
     try:
-        supabase_ops.save_analogs(state["project_id"], analogs)
+        supabase_ops.save_analogs(state["project_id"], analogs, thread_id=thread_id, run_id=run_id)
         logger.info(f"[save] Saved {len(analogs)} analogs for project {state['project_id']}")
         # Persist audit trail (non-fatal if it fails — analogs are already saved)
         audit_events = state.get("audit_events") or []
