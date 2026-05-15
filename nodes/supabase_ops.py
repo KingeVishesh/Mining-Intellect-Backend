@@ -70,22 +70,30 @@ def get_approved_analogs(
     material: str,
     deposit_type: Optional[str] = None,
     limit: int = 20,
+    deposit_subtype: Optional[str] = None,
 ) -> List[Dict]:
     """Query report_analogs for previously approved analogs of this commodity.
 
-    When deposit_type is None (unknown target), the library is skipped entirely.
-    Library analogs were approved for specific projects with known deposit types —
-    returning them without a deposit_type filter would mix incompatible families
-    (e.g. nickel laterite vs magmatic sulphide) and poison the candidate pool.
+    Filter strategy (most specific first):
+      1. analog_deposit_subtype == deposit_subtype  (exact slug match — preferred)
+      2. analog_deposit_type ILIKE %<family-keyword>%  (e.g., %carlin%, %porphyry%)
+         where the keyword is the first geological term in deposit_type,
+         stripped of qualifiers like "-style", "-type", "sediment-hosted".
 
-    Returns candidates in the standard analog dict format (name, material, deposit_type,
-    tonnage_mt, grade_value, grade_unit, country, source_url, source='library').
+    Previously the function used `ILIKE %<full_deposit_type>%` which required
+    the analog's freeform deposit_type to literally contain the target's full
+    string. That failed for natural variations (Carlin-type vs Carlin-style,
+    different word orders, optional ` gold` suffix). Now we route on the
+    controlled-vocab subtype slug when both sides have one — exact and reliable.
+
+    When deposit_type is None AND deposit_subtype is None, the library is
+    skipped entirely (no rule = don't poison the pool).
     """
-    if not deposit_type:
+    if not deposit_type and not deposit_subtype:
         return []
 
     keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
-    dep = deposit_type.strip().lower()
+    dep = (deposit_type or "").strip().lower()
     # report_analogs stores the raw material string — try all mapped keys
     q = (
         get_client()
@@ -108,9 +116,29 @@ def get_approved_analogs(
         .in_("analog_material", keys)
         .eq("status", "approved")
     )
-    if deposit_type:
-        # ilike for case-insensitive partial match — Supabase REST supports this
-        q = q.ilike("analog_deposit_type", f"%{dep}%")
+    # Pick the most specific filter that will actually match the seeded
+    # library entries. Subtype slugs (carlin_general, alkalic_porphyry, …)
+    # are exact and survive freeform-text variations, so we prefer them.
+    if deposit_subtype:
+        q = q.eq("analog_deposit_subtype", deposit_subtype)
+    elif dep:
+        # Extract a short keyword from the freeform deposit_type so we
+        # don't require the analog's text to contain the target's whole
+        # string. "Carlin-style sediment-hosted disseminated gold"
+        # → "carlin" ; "alkalic porphyry copper-gold" → "alkalic" if it
+        # appears, else "porphyry"; falls back to the first non-trivial word.
+        _FAMILY_KEYWORDS = (
+            "alkalic", "calc-alkalic", "carlin", "porphyry", "epithermal",
+            "orogenic", "iocg", "skarn", "vms", "vhms", "sediment-hosted",
+            "kupferschiefer", "manto", "crd", "sedex", "mvt", "merensky",
+            "ug2", "platreef", "laterite", "magmatic", "komatiite", "bif",
+            "unconformity", "roll-front", "rollfront", "iscr",
+        )
+        keyword = next((kw for kw in _FAMILY_KEYWORDS if kw in dep), None)
+        if keyword is None:
+            # No known family keyword — use the first word ≥4 chars
+            keyword = next((w for w in dep.split() if len(w) >= 4), dep[:8])
+        q = q.ilike("analog_deposit_type", f"%{keyword}%")
 
     res = q.limit(limit).execute()
     rows = res.data or []

@@ -220,21 +220,43 @@ RESOURCE_COMPLIANCE_STANDARDS: List[str] = [
 ALL_COMPLIANCE_SLUGS: FrozenSet[str] = frozenset(RESOURCE_COMPLIANCE_STANDARDS)
 
 
-# Stage compatibility — analogs MUST share a stage class with the target
-# OR be one of these compatible substitutes. Production-stage projects can
-# inform M&I-stage targets (lots of reconciliation data); the reverse is
-# weaker but acceptable.
+# Stage compatibility — for analog-based resource modeling, analogs at the
+# SAME OR LATER stage than the target are the most useful (more reconciled
+# data, less uncertainty). A production-stage analog informing an
+# exploration target is the gold-standard pattern — that's how analog-based
+# resource estimation works. The constraint is one-directional: don't model
+# a production-stage target on inferred-only analogs (too weak).
+#
+# Each TARGET stage lists analog stages that are AT-OR-BEYOND the target.
 STAGE_COMPATIBILITY: Dict[str, FrozenSet[str]] = {
-    "exploration":         frozenset({"exploration", "resource_inferred"}),
-    "resource_inferred":   frozenset({"exploration", "resource_inferred", "resource_m_and_i"}),
-    "resource_m_and_i":    frozenset({"resource_inferred", "resource_m_and_i", "pea", "pfs"}),
-    "pea":                 frozenset({"resource_m_and_i", "pea", "pfs", "feasibility"}),
-    "pfs":                 frozenset({"pea", "pfs", "feasibility", "construction"}),
-    "feasibility":         frozenset({"pfs", "feasibility", "construction", "production"}),
-    "construction":        frozenset({"feasibility", "construction", "production"}),
-    "production":          frozenset({"production", "feasibility", "construction", "care_maintenance"}),
+    "exploration":         frozenset({
+        "exploration", "resource_inferred", "resource_m_and_i",
+        "pea", "pfs", "feasibility", "construction", "production",
+        "care_maintenance",
+    }),
+    "resource_inferred":   frozenset({
+        "resource_inferred", "resource_m_and_i",
+        "pea", "pfs", "feasibility", "construction", "production",
+        "care_maintenance",
+    }),
+    "resource_m_and_i":    frozenset({
+        "resource_m_and_i", "pea", "pfs", "feasibility",
+        "construction", "production", "care_maintenance",
+    }),
+    "pea":                 frozenset({
+        "pea", "pfs", "feasibility", "construction", "production",
+        "care_maintenance",
+    }),
+    "pfs":                 frozenset({
+        "pfs", "feasibility", "construction", "production", "care_maintenance",
+    }),
+    "feasibility":         frozenset({
+        "feasibility", "construction", "production", "care_maintenance",
+    }),
+    "construction":        frozenset({"construction", "production", "care_maintenance"}),
+    "production":          frozenset({"production", "care_maintenance"}),
     "care_maintenance":    frozenset({"production", "care_maintenance"}),
-    "closed":              frozenset({"closed", "care_maintenance"}),
+    "closed":              frozenset({"production", "care_maintenance", "closed"}),
 }
 
 

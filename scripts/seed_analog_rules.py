@@ -251,7 +251,12 @@ ANALOG_SELECTION_RULES = [
                                  "free_milling_oxide", "primary_sulfide",
                                  "mixed_oxide_sulfide"],
         "preferred_belts":     ["great_basin_carlin"],
-        "required_host_classes": ["carbonate_sediment", "clastic_sediment"],
+        # Carlin hosts: carbonate sediment is the classic case (Black Pine,
+        # Bald Mountain, Long Canyon, Pipeline). Volcanic-felsic tuff-hosted
+        # Carlin variants exist too (Round Mountain, Sleeper, Tonkin Springs).
+        # Clastic sediment for outliers. We don't pin required_host_classes
+        # to avoid blocking legitimate volcanic-Carlin analogs; the subtype
+        # filter (carlin_general) is the real gate.
         "excluded_subtypes":   [
             "greenstone_orogenic", "turbidite_orogenic", "bif_hosted_orogenic",
             "low_sulfidation_epithermal", "high_sulfidation_epithermal",
@@ -303,7 +308,7 @@ ANALOG_SELECTION_RULES = [
                                  "free_milling_oxide", "primary_sulfide",
                                  "mixed_oxide_sulfide"],
         "preferred_belts":     ["great_basin_carlin"],
-        "required_host_classes": ["carbonate_sediment", "clastic_sediment"],
+        # Same host-class rationale as super-large rule: subtype gate is enough.
         "excluded_subtypes":   [
             "greenstone_orogenic", "turbidite_orogenic",
             "low_sulfidation_epithermal", "high_sulfidation_epithermal",

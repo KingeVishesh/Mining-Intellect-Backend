@@ -764,9 +764,22 @@ def library_search_node(state: AnalogState) -> AnalogState:
     project = state["project"]
     material = project.get("material") or ""
     deposit_type = project.get("deposit_type")
+    # Prefer the structured subtype slug for matching — it's exact and
+    # survives freeform-text variations (Carlin-style vs Carlin-type,
+    # word reordering, optional suffixes). The freeform deposit_type is
+    # the fallback when subtype is null.
+    deposit_subtype = project.get("deposit_subtype") or (
+        state.get("target_profile") or {}
+    ).get("deposit_subtype")
 
-    analogs = supabase_ops.get_approved_analogs(material, deposit_type, limit=20)
-    logger.info(f"[library] Found {len(analogs)} previously approved analogs")
+    analogs = supabase_ops.get_approved_analogs(
+        material, deposit_type, limit=20,
+        deposit_subtype=deposit_subtype,
+    )
+    logger.info(
+        f"[library] Found {len(analogs)} previously approved analogs "
+        f"(filter: subtype={deposit_subtype!r} dep={deposit_type!r})"
+    )
     return {"library_analogs": analogs}
 
 

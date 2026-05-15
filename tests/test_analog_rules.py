@@ -387,6 +387,39 @@ def test_hallucination_guard_drops_sourceless_exa():
     assert halluc_events[0]["candidate_name"] == "Phantom Copper Project"
 
 
+def test_library_search_routes_by_subtype_not_deposit_type_string():
+    """Black Pine regression: get_approved_analogs used ILIKE with the full
+    multi-word deposit_type string, which never matched analogs whose freeform
+    deposit_type differed slightly (Carlin-type vs Carlin-style, etc.).
+    Library matching MUST use the controlled-vocab deposit_subtype slug."""
+    import inspect
+    from nodes.supabase_ops import get_approved_analogs
+    src = inspect.getsource(get_approved_analogs)
+    assert "deposit_subtype" in inspect.signature(get_approved_analogs).parameters
+    assert "analog_deposit_subtype" in src, (
+        "Library search must filter by analog_deposit_subtype exact match — "
+        "freeform ILIKE on full deposit_type doesn't survive text variations"
+    )
+
+
+def test_stage_compatibility_allows_late_stage_analogs_for_early_target():
+    """Black Pine regression: exploration target should accept production-stage
+    analogs (Marigold etc.) — that's the gold standard for analog-based
+    resource modeling. The OPPOSITE direction (early analog for late target)
+    is the one that's restrictive."""
+    from nodes.geo_taxonomy import stage_compatible
+    # Late-stage analog for early target: ALLOWED
+    assert stage_compatible("exploration", "production")
+    assert stage_compatible("exploration", "feasibility")
+    assert stage_compatible("resource_inferred", "production")
+    assert stage_compatible("pea", "feasibility")
+    # Same stage: ALLOWED
+    assert stage_compatible("production", "production")
+    # Early analog for late target: BLOCKED
+    assert not stage_compatible("production", "exploration")
+    assert not stage_compatible("feasibility", "resource_inferred")
+
+
 def test_carlin_priority_over_sediment_hosted_cu():
     """Black Pine regression: 'Carlin-style sediment-hosted disseminated gold'
     must classify as carlin_general, not sediment_hosted_general. The phrase
