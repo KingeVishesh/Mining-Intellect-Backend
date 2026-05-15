@@ -75,7 +75,10 @@ ANALOG_SELECTION_RULES = [
         "required_mining_methods": ["underground_vein", "underground_bulk"],
         "excluded_mining_methods": ["iscr_in_situ", "heap_leach_pad", "open_pit_bulk", "dredging"],
         "tonnage_match_max_ratio": 5.0,  # Gold L136: tonnage match ≤ 5×
-        "grade_match_max_ratio":   3.0,
+        # Orogenic vein grades legitimately span ~3 g/t to bonanza
+        # 25+ g/t (Fosterville). A 5× tolerance keeps the model honest
+        # without excluding real high-grade-vein analogs.
+        "grade_match_max_ratio":   5.0,
         "min_resource_year":   2010,
         "min_profile_strength": 5,
         "rule_priority":       200,

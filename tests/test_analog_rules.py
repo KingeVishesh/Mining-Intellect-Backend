@@ -387,6 +387,21 @@ def test_hallucination_guard_drops_sourceless_exa():
     assert halluc_events[0]["candidate_name"] == "Phantom Copper Project"
 
 
+def test_library_search_accepts_sibling_subtypes():
+    """True North regression: orogenic-vein rule lists multiple acceptable
+    subtypes (greenstone, turbidite, bif_hosted, orogenic_general).
+    The library filter must return ALL of them, not only an exact match on
+    the target's specific subtype — otherwise turbidite-hosted Fosterville
+    is wrongly dropped for a greenstone-hosted target."""
+    import inspect
+    from nodes.supabase_ops import get_approved_analogs
+    sig = inspect.signature(get_approved_analogs)
+    assert "deposit_subtypes" in sig.parameters
+    src = inspect.getsource(get_approved_analogs)
+    # Must use `.in_()` for multi-slug case so siblings pass
+    assert ".in_(" in src and "analog_deposit_subtype" in src
+
+
 def test_library_search_routes_by_subtype_not_deposit_type_string():
     """Black Pine regression: get_approved_analogs used ILIKE with the full
     multi-word deposit_type string, which never matched analogs whose freeform

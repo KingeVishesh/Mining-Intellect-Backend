@@ -71,6 +71,7 @@ def get_approved_analogs(
     deposit_type: Optional[str] = None,
     limit: int = 20,
     deposit_subtype: Optional[str] = None,
+    deposit_subtypes: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Query report_analogs for previously approved analogs of this commodity.
 
@@ -89,7 +90,13 @@ def get_approved_analogs(
     When deposit_type is None AND deposit_subtype is None, the library is
     skipped entirely (no rule = don't poison the pool).
     """
-    if not deposit_type and not deposit_subtype:
+    # Build the accepted-subtype set: take the explicit list if given, else
+    # the single slug, else empty (fall back to deposit_type ILIKE).
+    accepted_subtypes: List[str] = list(deposit_subtypes or [])
+    if deposit_subtype and deposit_subtype not in accepted_subtypes:
+        accepted_subtypes.append(deposit_subtype)
+
+    if not deposit_type and not accepted_subtypes:
         return []
 
     keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
@@ -119,8 +126,14 @@ def get_approved_analogs(
     # Pick the most specific filter that will actually match the seeded
     # library entries. Subtype slugs (carlin_general, alkalic_porphyry, …)
     # are exact and survive freeform-text variations, so we prefer them.
-    if deposit_subtype:
-        q = q.eq("analog_deposit_subtype", deposit_subtype)
+    # When multiple subtypes are accepted (e.g. orogenic-vein rule accepts
+    # greenstone + turbidite + bif_hosted), use `.in_()` so we don't miss
+    # legitimate sibling matches.
+    if accepted_subtypes:
+        if len(accepted_subtypes) == 1:
+            q = q.eq("analog_deposit_subtype", accepted_subtypes[0])
+        else:
+            q = q.in_("analog_deposit_subtype", accepted_subtypes)
     elif dep:
         # Extract a short keyword from the freeform deposit_type so we
         # don't require the analog's text to contain the target's whole

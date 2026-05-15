@@ -762,6 +762,7 @@ def library_search_node(state: AnalogState) -> AnalogState:
         return {"library_analogs": []}
 
     project = state["project"]
+    analog_rule = state.get("analog_rule")
     material = project.get("material") or ""
     deposit_type = project.get("deposit_type")
     # Prefer the structured subtype slug for matching — it's exact and
@@ -771,14 +772,24 @@ def library_search_node(state: AnalogState) -> AnalogState:
     deposit_subtype = project.get("deposit_subtype") or (
         state.get("target_profile") or {}
     ).get("deposit_subtype")
+    # When the rule lists multiple acceptable subtypes (e.g. orogenic-vein
+    # accepts greenstone + turbidite + bif-hosted), pass them all so the
+    # library returns valid siblings. Without this, Fosterville
+    # (turbidite_orogenic) gets dropped for a True North-style target
+    # whose subtype is greenstone_orogenic — even though both are explicit
+    # required_subtypes on the orogenic-vein rule.
+    accepted_subtypes = list((analog_rule or {}).get("required_subtypes") or [])
+    if deposit_subtype and deposit_subtype not in accepted_subtypes:
+        accepted_subtypes = accepted_subtypes + [deposit_subtype]
 
     analogs = supabase_ops.get_approved_analogs(
         material, deposit_type, limit=20,
         deposit_subtype=deposit_subtype,
+        deposit_subtypes=accepted_subtypes or None,
     )
     logger.info(
         f"[library] Found {len(analogs)} previously approved analogs "
-        f"(filter: subtype={deposit_subtype!r} dep={deposit_type!r})"
+        f"(filter: subtypes={accepted_subtypes!r} dep={deposit_type!r})"
     )
     return {"library_analogs": analogs}
 
