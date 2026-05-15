@@ -150,12 +150,19 @@ def validate_node(state: ResearchState) -> ResearchState:
 
 
 def save_to_supabase_node(state: ResearchState) -> ResearchState:
-    """Save extracted project fields to Supabase. No human gate."""
+    """Save extracted project fields to Supabase. No human gate.
+
+    Null / empty extracted values are dropped so a re-research run never
+    wipes good data that the LLM happens to miss on this pass. A field is
+    only written when the extractor produced a positive value.
+    """
     if state.get("error"):
         logger.info(f"[save] Upstream error — not saving: {state['error']}")
         return {"saved": False}
 
-    fields = dict(state.get("extracted_fields", {}))
+    raw_fields = state.get("extracted_fields") or {}
+    fields = {k: v for k, v in raw_fields.items()
+              if v is not None and v != "" and v != [] and v != {}}
 
     now = datetime.now(timezone.utc).isoformat()
     row = {
