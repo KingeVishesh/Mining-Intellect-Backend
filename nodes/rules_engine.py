@@ -4,11 +4,46 @@ Rules Engine — loads compiled rules and activates the relevant ones for a proj
 from __future__ import annotations
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from nodes.supabase_ops import get_compiled_rules
 
 logger = logging.getLogger(__name__)
+
+
+# Some legacy projects have deposit_type stored as a Python set-literal string
+# like "{Epithermal}" or "{'Lode/Vein'}" — that happens when a research step
+# serialized a `set` object with str(). The cascade can't route on that. This
+# helper strips set/list/dict brackets and stray quotes so downstream code
+# sees a clean text value.
+_CLEAN_DEPOSIT_TYPE_RE = re.compile(r"""^[\s\[\{\(\"']+|[\s\]\}\)\"']+$""")
+
+
+def sanitize_deposit_type(value: Optional[str]) -> Optional[str]:
+    """Strip Python set/list/dict syntax and outer quotes from a deposit_type
+    string. Returns None for empty/whitespace inputs so callers can fall
+    through cleanly to the 'unknown deposit_type' branch.
+
+    Examples
+    --------
+    >>> sanitize_deposit_type('{Epithermal}')
+    'Epithermal'
+    >>> sanitize_deposit_type("{'Lode/Vein'}")
+    'Lode/Vein'
+    >>> sanitize_deposit_type('[\"Carlin-style\"]')
+    'Carlin-style'
+    >>> sanitize_deposit_type('Carlin-style sediment-hosted gold')
+    'Carlin-style sediment-hosted gold'
+    >>> sanitize_deposit_type('   ')
+
+    """
+    if not value:
+        return None
+    cleaned = _CLEAN_DEPOSIT_TYPE_RE.sub("", str(value)).strip()
+    # Repeat once for cases like `{'X'}` where inner quotes survive the first pass
+    cleaned = _CLEAN_DEPOSIT_TYPE_RE.sub("", cleaned).strip()
+    return cleaned or None
 
 
 def load_rules(material: str, rule_type: Optional[str] = None) -> List[Dict]:
@@ -40,7 +75,7 @@ def activate_rules(project: Dict, rules: List[Dict]) -> List[Dict]:
     p_grade = float(project.get("grade_value") or 0)
     p_tonnage = float(project.get("tonnage_mt") or 0)
     p_stage = (project.get("project_stage") or "").lower().strip()
-    p_deposit = (project.get("deposit_type") or "").lower().strip()
+    p_deposit = (sanitize_deposit_type(project.get("deposit_type")) or "").lower().strip()
 
     activated = []
     for r in rules:
@@ -147,7 +182,8 @@ def get_analog_rule(
         return None
 
     mat_lower = material.strip().lower()
-    dep_lower = (deposit_type or "").strip().lower()
+    # Sanitize set-literal / list-literal serializations in deposit_type
+    dep_lower = (sanitize_deposit_type(deposit_type) or "").strip().lower()
     sub_lower = (deposit_subtype or "").strip().lower()
     pat_lower = (mineralization_pattern or "").strip().lower()
 

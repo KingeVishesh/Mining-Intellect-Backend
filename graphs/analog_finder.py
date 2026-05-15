@@ -270,6 +270,10 @@ def _build_profile(row: dict) -> dict:
     existing freeform text. Used identically for the target project and each
     candidate so cascading match compares apples to apples.
     """
+    # Sanitize deposit_type once so every detect_*() heuristic sees clean text
+    # even if a legacy row has "{Epithermal}" or similar set-literal noise.
+    clean_deposit_type = rules_engine.sanitize_deposit_type(row.get("deposit_type"))
+    row = {**row, "deposit_type": clean_deposit_type}
     return {
         "material":             (row.get("material") or "").strip().lower(),
         "deposit_type_family":  _deposit_type_family(row.get("deposit_type") or ""),
@@ -701,7 +705,9 @@ def load_project_and_rule_node(state: AnalogState) -> AnalogState:
         return {"error": f"Project {project_id} not found"}
 
     material = project.get("material") or ""
-    deposit_type = project.get("deposit_type")
+    # Some legacy projects have deposit_type stored as a Python set-literal
+    # string like "{Epithermal}" — sanitize before any downstream use.
+    deposit_type = rules_engine.sanitize_deposit_type(project.get("deposit_type"))
     # Subtype takes precedence — alkalic_porphyry routes to the dedicated alkalic
     # rule even when deposit_type is just "porphyry copper-gold".
     deposit_subtype = project.get("deposit_subtype") or geo_taxonomy.detect_subtype(
@@ -764,7 +770,7 @@ def library_search_node(state: AnalogState) -> AnalogState:
     project = state["project"]
     analog_rule = state.get("analog_rule")
     material = project.get("material") or ""
-    deposit_type = project.get("deposit_type")
+    deposit_type = rules_engine.sanitize_deposit_type(project.get("deposit_type"))
     # Prefer the structured subtype slug for matching — it's exact and
     # survives freeform-text variations (Carlin-style vs Carlin-type,
     # word reordering, optional suffixes). The freeform deposit_type is
@@ -802,7 +808,7 @@ def exa_search_node(state: AnalogState) -> AnalogState:
     project = state["project"]
     analog_rule = state.get("analog_rule")
     material = project.get("material", "")
-    deposit_type = project.get("deposit_type", "")
+    deposit_type = rules_engine.sanitize_deposit_type(project.get("deposit_type")) or ""
     project_name = project.get("name", "")
 
     text, sources = exa_search.search_analog_projects(

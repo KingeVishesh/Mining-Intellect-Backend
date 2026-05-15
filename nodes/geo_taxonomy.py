@@ -341,6 +341,17 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
         "countries": ["brazil"],
         "regions": ["carajás", "carajas", "minas gerais", "bahia", "goiás"],
     },
+    "guiana_shield": {
+        # Guiana Shield — Birimian-equivalent age (~2.1 Ga), greenstone-belt
+        # orogenic gold + IOCG. Continuous geologically with West African
+        # Birimian across pre-Gondwana fit. Covers Guyana, Suriname, French
+        # Guiana, plus northern Brazil (Amapá / Roraima).
+        "countries": ["guyana", "co-operative republic of guyana", "suriname",
+                       "french guiana", "venezuela"],
+        "regions": ["guiana shield", "guyana shield", "cuyuni", "mazaruni",
+                     "cuyuni-mazaruni", "amapá", "amapa", "roraima",
+                     "rosebel", "merian", "aurora", "toroparu", "karouni"],
+    },
     "central_african_copperbelt": {
         "countries": [
             "zambia", "drc", "dr congo", "congo",
