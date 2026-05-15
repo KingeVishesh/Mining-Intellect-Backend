@@ -174,21 +174,23 @@ def start_analogs_node(state: PipelineState) -> PipelineState:
         return {"error": str(e), "stage": "error"}
 
 
-def load_analogs_for_review_node(state: PipelineState) -> PipelineState:
-    """Read scored analogs from DB (no human review — auto-approve all)."""
+def load_analogs_node(state: PipelineState) -> PipelineState:
+    """Read scored analogs from DB after analog_finder completes."""
     if state.get("error"):
         return {}
     analogs = supabase_ops.get_analogs(state["project_id"])
     logger.info(f"[load_analogs] {len(analogs)} analogs loaded")
-    return {"analogs_for_review": analogs}
+    return {"analogs_for_review": analogs, "approved_analogs": analogs}
 
 
-def analog_review_node(state: PipelineState) -> PipelineState:
-    """Auto-approve all analogs (no human interrupt in pipeline mode)."""
+def persist_analogs_node(state: PipelineState) -> PipelineState:
+    """Persist the analog list to analogs_runs / projects.analogs."""
+    if state.get("error"):
+        return {}
     approved = state.get("approved_analogs") or state.get("analogs_for_review") or []
     rejected = state.get("rejected_analogs") or []
     supabase_ops.save_approved_analogs(state["project_id"], approved)
-    logger.info(f"[analog_review] Auto-approved {len(approved)} analogs")
+    logger.info(f"[persist_analogs] Persisted {len(approved)} analogs")
     return {"approved_analogs": approved, "rejected_analogs": rejected}
 
 
@@ -254,16 +256,16 @@ builder = StateGraph(PipelineState)
 
 builder.add_node("init_pipeline", init_pipeline_node)
 builder.add_node("start_analogs", start_analogs_node)
-builder.add_node("load_analogs_for_review", load_analogs_for_review_node)
-builder.add_node("analog_review", analog_review_node)
+builder.add_node("load_analogs", load_analogs_node)
+builder.add_node("persist_analogs", persist_analogs_node)
 builder.add_node("start_report", start_report_node)
 builder.add_node("finalize", finalize_node)
 
 builder.set_entry_point("init_pipeline")
 builder.add_edge("init_pipeline", "start_analogs")
-builder.add_edge("start_analogs", "load_analogs_for_review")
-builder.add_edge("load_analogs_for_review", "analog_review")
-builder.add_edge("analog_review", "start_report")
+builder.add_edge("start_analogs", "load_analogs")
+builder.add_edge("load_analogs", "persist_analogs")
+builder.add_edge("persist_analogs", "start_report")
 builder.add_edge("start_report", "finalize")
 builder.add_edge("finalize", END)
 

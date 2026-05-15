@@ -4,7 +4,7 @@ Graph 3: report_generator
 Flow:
   load_project_and_analogs → load_rules → activate_rules
   → build_model_1 → build_model_2 (if official MRE exists)
-  → INTERRUPT(human_review_model) → generate_report → save_report → END
+  → generate_report → save_report → END  (no human review)
 
 Input:  { project_id }
 Output: Full MiningReport JSON saved to Supabase reports table
@@ -42,10 +42,6 @@ class ReportState(TypedDict, total=False):
     model_1: Optional[Dict]
     model_2: Optional[Dict]
     official_mre_row: Optional[Dict]
-
-    # Human review (auto-approved)
-    human_approved: bool
-    human_model_edits: Dict
 
     # Report
     report_json: Optional[Dict]
@@ -149,15 +145,10 @@ def build_model_2_node(state: ReportState) -> ReportState:
     return {"model_2": model_2}
 
 
-def human_review_model_node(state: ReportState) -> ReportState:
-    """Auto-approve models — no human interrupt."""
-    return {"human_approved": True, "human_model_edits": {}}
-
-
 def generate_report_node(state: ReportState) -> ReportState:
     """Generate the full MiningReport JSON using models + LLM narrative."""
-    if not state.get("human_approved"):
-        logger.info("[generate_report] Human rejected — not generating")
+    if state.get("error"):
+        logger.info(f"[generate_report] Upstream error — skipping: {state['error']}")
         return {"report_json": None}
 
     project = state["project"]
@@ -363,7 +354,6 @@ builder.add_node("load_rules", load_rules_node)
 builder.add_node("activate_rules", activate_rules_node)
 builder.add_node("build_model_1", build_model_1_node)
 builder.add_node("build_model_2", build_model_2_node)
-builder.add_node("human_review_model", human_review_model_node)
 builder.add_node("generate_report", generate_report_node)
 builder.add_node("generate_extended_sections", generate_extended_sections_node)
 builder.add_node("generate_pdf", generate_pdf_node)
@@ -378,8 +368,7 @@ builder.add_conditional_edges(
 builder.add_edge("load_rules", "activate_rules")
 builder.add_edge("activate_rules", "build_model_1")
 builder.add_edge("build_model_1", "build_model_2")
-builder.add_edge("build_model_2", "human_review_model")
-builder.add_edge("human_review_model", "generate_report")
+builder.add_edge("build_model_2", "generate_report")
 builder.add_edge("generate_report", "generate_extended_sections")
 builder.add_edge("generate_extended_sections", "generate_pdf")
 builder.add_edge("generate_pdf", "save_report")

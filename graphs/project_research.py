@@ -3,10 +3,12 @@ Graph 1: project_research
 
 Flow:
   load_context → exa_search → extract_fields → geocode → validate
-              → INTERRUPT(human_review) → save_to_supabase → END
+              → save_to_supabase → END
 
 Input:  { project_name, material, project_id, company }
 Output: Populated project record saved to Supabase
+
+No human-in-the-loop. The graph saves extracted fields directly.
 """
 from __future__ import annotations
 import logging
@@ -36,10 +38,6 @@ class ResearchState(TypedDict, total=False):
     extracted_fields: Dict
     field_statuses: Dict
     validation_errors: List[str]
-
-    # Human review
-    human_approved: bool
-    human_edits: Dict
 
     # Output
     saved: bool
@@ -151,24 +149,13 @@ def validate_node(state: ResearchState) -> ResearchState:
     return {"validation_errors": errors}
 
 
-def human_review_node(state: ResearchState) -> ResearchState:
-    """
-    Runs after the interrupt_before pause is resumed.
-    The frontend updated state with human_approved + human_edits before triggering this run.
-    """
-    approved = state.get("human_approved", False)
-    edits = state.get("human_edits", {})
-    return {"human_approved": approved, "human_edits": edits}
-
-
 def save_to_supabase_node(state: ResearchState) -> ResearchState:
-    """Merge human edits and save project to Supabase."""
-    if not state.get("human_approved"):
-        logger.info("[save] Human rejected — not saving")
+    """Save extracted project fields to Supabase. No human gate."""
+    if state.get("error"):
+        logger.info(f"[save] Upstream error — not saving: {state['error']}")
         return {"saved": False}
 
     fields = dict(state.get("extracted_fields", {}))
-    fields.update(state.get("human_edits", {}))  # apply human corrections
 
     now = datetime.now(timezone.utc).isoformat()
     row = {
@@ -212,7 +199,6 @@ builder.add_node("exa_search", exa_search_node)
 builder.add_node("extract_fields", extract_fields_node)
 builder.add_node("geocode", geocode_node)
 builder.add_node("validate", validate_node)
-builder.add_node("human_review", human_review_node)
 builder.add_node("save_to_supabase", save_to_supabase_node)
 
 builder.set_entry_point("load_context")
@@ -220,8 +206,7 @@ builder.add_edge("load_context", "exa_search")
 builder.add_conditional_edges("exa_search", should_continue, {"extract_fields": "extract_fields", END: END})
 builder.add_edge("extract_fields", "geocode")
 builder.add_edge("geocode", "validate")
-builder.add_edge("validate", "human_review")
-builder.add_edge("human_review", "save_to_supabase")
+builder.add_edge("validate", "save_to_supabase")
 builder.add_edge("save_to_supabase", END)
 
-graph = builder.compile(interrupt_before=["human_review"])
+graph = builder.compile()

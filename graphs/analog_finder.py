@@ -1298,19 +1298,13 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     return result
 
 
-def human_review_analog_node(state: AnalogState) -> AnalogState:
-    """Auto-approve all scored analogs — no human interrupt in pipeline mode."""
-    approved = state.get("scored_analogs", [])
-    return {"human_approved": True, "approved_analogs": approved}
-
-
 def save_analogs_node(state: AnalogState, config: Optional[Dict] = None) -> AnalogState:
-    """Save approved analogs to Supabase. Plumbs run/thread IDs into analogs_runs."""
-    if not state.get("human_approved"):
-        logger.info("[save] Human rejected — not saving")
+    """Save scored analogs to Supabase. No human gate."""
+    if state.get("error"):
+        logger.info(f"[save] Upstream error — not saving: {state['error']}")
         return {"saved": False}
 
-    analogs = state.get("approved_analogs", [])
+    analogs = state.get("scored_analogs", []) or []
     for a in analogs:
         a["approved"] = True
 
@@ -1348,7 +1342,6 @@ builder.add_node("build_target_profile", build_target_profile_node)
 builder.add_node("library_search", library_search_node)
 builder.add_node("exa_search", exa_search_node)
 builder.add_node("combine_filter_score", combine_filter_score_node)
-builder.add_node("human_review", human_review_analog_node)
 builder.add_node("save_analogs", save_analogs_node)
 
 builder.set_entry_point("load_project_and_rule")
@@ -1362,8 +1355,7 @@ builder.add_edge("build_target_profile", "exa_search")
 builder.add_edge("library_search", "combine_filter_score")
 builder.add_edge("exa_search", "combine_filter_score")
 
-builder.add_edge("combine_filter_score", "human_review")
-builder.add_edge("human_review", "save_analogs")
+builder.add_edge("combine_filter_score", "save_analogs")
 builder.add_edge("save_analogs", END)
 
 graph = builder.compile()
