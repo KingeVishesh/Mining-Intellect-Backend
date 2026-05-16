@@ -178,8 +178,11 @@ def get_analog_rule(
     if not rules:
         return None
 
-    if not deposit_type and not deposit_subtype:
-        return None
+    # Note: previously we returned None when both deposit_type and
+    # deposit_subtype were null. That makes the cascade silently return
+    # 0 analogs for every project with thin metadata. Now we fall through
+    # to the generic_fallback rule at the end of this function so the
+    # user gets SOMETHING (flagged low_confidence) instead of nothing.
 
     mat_lower = material.strip().lower()
     # Sanitize set-literal / list-literal serializations in deposit_type
@@ -220,20 +223,38 @@ def get_analog_rule(
                     continue
                 return r
 
-    if not dep_lower:
-        return None
+    # Skip Pass 1/2 (both require deposit_type substring matching) but DO
+    # fall through to Pass 3 (generic_fallback) so the user gets analogs
+    # even when deposit_type is null.
 
-    # Pass 1: primary material + deposit_type match
-    for r in rules:
-        r_dep = (r.get("deposit_type") or "").strip().lower()
-        r_mat = (r.get("source_material") or "").strip().lower()
-        if r_dep and r_mat == mat_lower and (r_dep in dep_lower or dep_lower in r_dep):
-            return r
+    # Pass 1: primary material + deposit_type match (skip fallback rule)
+    if dep_lower:
+        for r in rules:
+            if (r.get("rule_id") or "").endswith("_generic_fallback"):
+                continue
+            r_dep = (r.get("deposit_type") or "").strip().lower()
+            r_mat = (r.get("source_material") or "").strip().lower()
+            if r_dep and r_mat == mat_lower and (r_dep in dep_lower or dep_lower in r_dep):
+                return r
 
     # Pass 2: any deposit_type match regardless of material (gold_silver, etc.)
+    if dep_lower:
+        for r in rules:
+            if (r.get("rule_id") or "").endswith("_generic_fallback"):
+                continue
+            r_dep = (r.get("deposit_type") or "").strip().lower()
+            if r_dep and (r_dep in dep_lower or dep_lower in r_dep):
+                return r
+
+    # Pass 3: graceful degradation — fall back to the material's generic
+    # fallback rule when no specific rule matched. This is the difference
+    # between returning 0 analogs silently and returning low-confidence
+    # candidates the user can review. Example rule_id:
+    # analog_sel_gold_generic_fallback (lowest rule_priority).
     for r in rules:
-        r_dep = (r.get("deposit_type") or "").strip().lower()
-        if r_dep and (r_dep in dep_lower or dep_lower in r_dep):
+        rid = (r.get("rule_id") or "").strip()
+        r_mat = (r.get("source_material") or "").strip().lower()
+        if rid.endswith("_generic_fallback") and r_mat == mat_lower:
             return r
 
     return None

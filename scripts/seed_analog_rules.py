@@ -957,6 +957,231 @@ ANALOG_SELECTION_RULES = [
         ],
         "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
     },
+
+    # ── GOLD — additional families that the 156-project audit revealed had
+    #            no specific rule (IRGS, placer, gold-rich VMS, gold skarn,
+    #            BIF-hosted gold) plus a permissive generic fallback. ────────
+
+    {
+        # IRGS — Pogo, Fort Knox, Donlin, Eagle, Brewery Creek. Sheeted-vein
+        # / stockwork gold around felsic intrusions, typically Tintina-
+        # Cordilleran or analogous. Distinct from porphyry (different metal
+        # ratio, alteration) and distinct from orogenic (different host).
+        "rule_id": "analog_sel_gold_irgs",
+        "source_material": "gold",
+        "deposit_type": "intrusion-related gold system",
+        "grade_min": 0.4, "grade_max": 6.0, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 5.0, "tonnage_max_mt": None,
+        "drilling_stage": "moderate",
+        "title": "Intrusion-Related Gold System (IRGS) Analog Selection",
+        "description": (
+            "IRGS — gold stockwork / sheeted-vein around reduced felsic "
+            "intrusions, typically Tintina-Cordilleran (Pogo, Fort Knox, "
+            "Donlin, Eagle, Brewery Creek). Distinct from porphyry "
+            "(different metals + alteration) and from orogenic shear-hosted."
+        ),
+        "required_subtypes":   ["irgs_general"],
+        "required_modes":      ["primary_sulfide", "refractory_sulfide",
+                                 "free_milling_oxide"],
+        "preferred_belts":     ["yukon_tintina", "lachlan",
+                                 "newfoundland_appalachian", "bc_quesnel_stikine"],
+        "excluded_subtypes":   [
+            "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+            "carlin_general", "low_sulfidation_epithermal",
+            "high_sulfidation_epithermal", "vms_general",
+        ],
+        "excluded_patterns":   ["replacement", "reef", "placer",
+                                 "massive_sulphide", "blanket"],
+        "excluded_recovery":   ["iscr", "hpal"],
+        "rule_priority":       170,
+        "tonnage_match_max_ratio": 10.0,
+        "grade_match_max_ratio":   5.0,
+        "applies_lessons":     ["LG1", "LG19", "L_ORO_02"],
+        "analog_criteria": [
+            "Sheeted-vein or stockwork gold associated with reduced felsic intrusion",
+            "Tintina-Cordilleran setting preferred (Yukon, Alaska, BC)",
+            "Distinct from porphyry: different alteration and metal suite",
+            "Match grade band 0.5–4 g/t Au and bulk-mineable scale",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+
+    {
+        "rule_id": "analog_sel_gold_placer",
+        "source_material": "gold",
+        "deposit_type": "placer alluvial gold",
+        "grade_min": 0.05, "grade_max": 5.0, "grade_unit": "g/m³ Au",
+        "tonnage_min_mt": None, "tonnage_max_mt": None,
+        "drilling_stage": "dense",
+        "title": "Placer / Alluvial Gold Analog Selection",
+        "description": (
+            "Placer / alluvial gold — Klondike, Otway, Yukon, Selwyn. "
+            "Dredging / sluicing recovery. Distinct from any lode/vein gold "
+            "in mining method, modelling and economics."
+        ),
+        "required_subtypes":   ["placer_general"],
+        "required_patterns":   ["placer"],
+        "excluded_subtypes":   [
+            "orogenic_general", "greenstone_orogenic", "turbidite_orogenic",
+            "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+            "alkalic_porphyry", "calc_alkalic_porphyry", "carlin_general",
+            "vms_general", "irgs_general",
+        ],
+        "excluded_recovery":   ["flotation", "iscr", "cil_cip", "cn_leach", "hpal"],
+        "required_recovery":   ["gravity", "heap_leach"],
+        "rule_priority":       170,
+        "applies_lessons":     ["LG1", "LG19"],
+        "analog_criteria": [
+            "Alluvial / paleoplacer gold concentrate in unconsolidated sediments",
+            "Dredging or sluicing recovery; no flotation/leaching",
+            "Match grain size and overburden depth",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+
+    {
+        "rule_id": "analog_sel_gold_vms",
+        "source_material": "gold",
+        "deposit_type": "gold-rich VMS",
+        "grade_min": 2.0, "grade_max": 15.0, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 2.0, "tonnage_max_mt": None,
+        "drilling_stage": "dense",
+        "title": "Gold-Rich VMS Analog Selection",
+        "description": (
+            "Gold-rich VMS — LaRonde, Bousquet, Doyon, Eskay Creek. "
+            "Volcanogenic massive sulphide with gold as primary metal "
+            "or co-product. Mafic-felsic bimodal volcanic host typical."
+        ),
+        "required_subtypes":   ["vms_general"],
+        "required_modes":      ["primary_sulfide"],
+        "required_patterns":   ["massive_sulphide", "stockwork"],
+        "preferred_belts":     ["abitibi", "iberian_pyrite", "fennoscandian",
+                                 "bc_quesnel_stikine"],
+        "excluded_subtypes":   [
+            "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+            "iocg_oxide", "iocg_sulfide", "iocg_hybrid",
+            "greenstone_orogenic", "turbidite_orogenic",
+            "carlin_general", "irgs_general",
+            "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+        ],
+        "excluded_recovery":   ["iscr", "heap_leach"],
+        "rule_priority":       160,
+        "applies_lessons":     ["L_VMS_01"],
+        "analog_criteria": [
+            "Volcanogenic massive sulphide host; gold as primary or major co-product",
+            "Mafic-felsic bimodal volcanic sequence preferred",
+            "Flotation + CIL standard processing",
+            "Examples: LaRonde, Bousquet, Doyon, Eskay Creek, Boliden",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+
+    {
+        "rule_id": "analog_sel_gold_skarn",
+        "source_material": "gold",
+        "deposit_type": "gold skarn",
+        "grade_min": 1.0, "grade_max": 8.0, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 1.0, "tonnage_max_mt": None,
+        "drilling_stage": "dense",
+        "title": "Gold Skarn Analog Selection",
+        "description": (
+            "Gold skarn — Hedley / Nickel Plate, Fortitude (Battle Mountain), "
+            "McCoy. Carbonate replacement at intrusive contact, "
+            "gold-dominant with Cu / W byproducts."
+        ),
+        "required_subtypes":   ["cu_au_skarn", "skarn_general"],
+        "required_modes":      ["primary_sulfide"],
+        "excluded_subtypes":   [
+            "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+            "greenstone_orogenic", "turbidite_orogenic", "irgs_general",
+            "carlin_general", "vms_general",
+            "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+        ],
+        "preferred_alteration":["skarn_calc_silicate"],
+        "excluded_recovery":   ["iscr", "heap_leach", "hpal"],
+        "rule_priority":       160,
+        "applies_lessons":     ["L_SKN_01"],
+        "analog_criteria": [
+            "Gold-dominant skarn at carbonate-intrusive contact",
+            "Endoskarn / exoskarn geometry match",
+            "Examples: Hedley/Nickel Plate, Fortitude, McCoy",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+
+    {
+        "rule_id": "analog_sel_gold_bif",
+        "source_material": "gold",
+        "deposit_type": "BIF-hosted gold",
+        "grade_min": 1.0, "grade_max": 10.0, "grade_unit": "g/t Au",
+        "tonnage_min_mt": 2.0, "tonnage_max_mt": None,
+        "drilling_stage": "moderate",
+        "title": "BIF-Hosted Gold Analog Selection",
+        "description": (
+            "BIF-hosted gold — Homestake (Lead, SD), Lupin (Nunavut), "
+            "Geita (Tanzania), Cuiabá (Brazil). Gold mineralization in "
+            "banded iron formation, often shear-zone overprint."
+        ),
+        "required_subtypes":   ["bif_hosted_gold", "bif_hosted_orogenic",
+                                 "orogenic_general"],
+        "required_modes":      ["primary_sulfide", "refractory_sulfide"],
+        "excluded_subtypes":   [
+            "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
+            "low_sulfidation_epithermal", "high_sulfidation_epithermal",
+            "carlin_general", "irgs_general", "vms_general",
+        ],
+        "preferred_belts":     ["abitibi", "yilgarn", "tanzania_archean",
+                                 "west_african_birimian", "brazilian_shield"],
+        "excluded_recovery":   ["iscr", "heap_leach", "hpal"],
+        "rule_priority":       160,
+        "applies_lessons":     ["LG1", "LG19", "L_ORO_01"],
+        "analog_criteria": [
+            "Gold-mineralised banded iron formation, often shear-zone overprint",
+            "Examples: Homestake, Lupin, Geita, Cuiabá",
+            "Flotation or CIL processing; magnetic separation often used as pre-step",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
+
+    {
+        # PERMISSIVE MATERIAL-ONLY FALLBACK. Lowest priority — only fires
+        # when no specific rule matches the project's deposit_type / subtype.
+        # Better than 0 analogs (the user can sort the noise; an empty
+        # analog list is the bigger problem).
+        "rule_id": "analog_sel_gold_generic_fallback",
+        "source_material": "gold",
+        "deposit_type": "generic gold (fallback)",
+        "grade_min": 0.1, "grade_max": 50.0, "grade_unit": "g/t Au",
+        "tonnage_min_mt": None, "tonnage_max_mt": None,
+        "drilling_stage": "moderate",
+        "title": "Generic Gold Fallback (Material-Only)",
+        "description": (
+            "Last-resort permissive rule for gold projects with insufficient "
+            "geological metadata. Material-only filtering, no subtype/pattern "
+            "requirements. Used by the cascade when no more-specific rule matches. "
+            "Always returns low_confidence=True so the user knows the run is loose."
+        ),
+        # No required_subtypes — accepts any gold analog. excluded_subtypes
+        # blocks the truly incompatible (oxide ISCR copper analogs etc.)
+        "excluded_subtypes":   [
+            "oxide_iscr_supergene_blanket",
+            "limonite_laterite", "saprolite_laterite", "laterite_general",
+            "komatiite_hosted", "conduit_hosted", "magmatic_sulphide_general",
+            "merensky_reef", "ug2_reef", "platreef",
+        ],
+        "excluded_recovery":   ["iscr", "hpal"],
+        "min_profile_strength": 1,  # extremely permissive
+        "rule_priority":       50,   # below every specific rule
+        "tonnage_match_max_ratio": 50.0,   # very loose scale tolerance
+        "grade_match_max_ratio":   25.0,
+        "applies_lessons":     ["LG1"],
+        "analog_criteria": [
+            "Material-only fallback — at least one valid analog is better than zero",
+            "Other gold rules should match first if any subtype info exists",
+            "Run flagged low_confidence so user can review",
+        ],
+        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
+    },
 ]
 
 

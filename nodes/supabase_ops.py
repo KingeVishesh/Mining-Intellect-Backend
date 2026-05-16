@@ -96,8 +96,11 @@ def get_approved_analogs(
     if deposit_subtype and deposit_subtype not in accepted_subtypes:
         accepted_subtypes.append(deposit_subtype)
 
-    if not deposit_type and not accepted_subtypes:
-        return []
+    # Note: previously returned [] when both filters were empty. That's
+    # wrong for projects routed to the generic_fallback rule (which has no
+    # required_subtypes and where deposit_type may be null). Now we fall
+    # through to a material-only query (still limited by `limit`); the
+    # cascade's excluded_subtypes / pattern / mode gates will filter.
 
     keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
     dep = (deposit_type or "").strip().lower()

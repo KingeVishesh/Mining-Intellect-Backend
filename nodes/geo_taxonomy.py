@@ -79,6 +79,14 @@ SUBTYPE_TO_FAMILY: Dict[str, str] = {
     "magmatic_sulphide_general":           "magmatic_sulphide",
     # BIF family
     "bif_general":                         "bif",
+    "bif_hosted_gold":                     "bif",
+    # Intrusion-Related Gold Systems (Pogo, Fort Knox, Donlin, Eagle,
+    # Brewery Creek). Distinct from porphyry — these are stockwork/sheeted-vein
+    # gold systems peripheral to felsic intrusions, typically low-grade
+    # bulk-mineable. Common in Tintina-Cordilleran and Tasman-Lachlan belts.
+    "irgs_general":                        "irgs",
+    # Placer / alluvial gold (Klondike, Bonanza, Otway)
+    "placer_general":                      "placer",
 }
 
 # Flat set of every valid subtype slug — derived from SUBTYPE_TO_FAMILY so the
@@ -302,20 +310,37 @@ RESOURCE_CATEGORY_RANK: Dict[str, int] = {
 TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
     "bc_quesnel_stikine": {
         "countries": ["canada"],
-        "regions": ["british columbia", "bc", "quesnel", "stikine", "golden triangle",
-                    "iskut", "babine", "toodoggone"],
+        "regions": [
+            "british columbia", "bc", "quesnel", "stikine", "golden triangle",
+            "iskut", "babine", "toodoggone", "northern british columbia",
+            "cariboo", "atlin", "sulphurets", "kemess",
+        ],
     },
     "yukon_tintina": {
         "countries": ["canada", "usa"],
-        "regions": ["yukon", "alaska", "tintina"],
+        "regions": [
+            "yukon", "alaska", "tintina", "white gold", "mayo", "klondike",
+            "dawson", "fairbanks", "pogo", "fort knox", "donlin",
+            "selwyn", "tombstone", "kluane",
+        ],
     },
     "abitibi": {
         "countries": ["canada"],
-        "regions": ["ontario", "quebec", "abitibi", "timmins", "kirkland lake", "val d'or", "rouyn"],
+        "regions": [
+            "ontario", "quebec", "abitibi", "timmins", "kirkland lake",
+            "val d'or", "rouyn", "northwestern quebec", "james bay",
+            "red lake", "rice lake", "wabigoon", "uchi", "birch-uchi",
+            "savant", "sturgeon lake", "hemlo", "matagami", "chibougamau",
+            "detour", "côté", "cote",
+        ],
     },
     "newfoundland_appalachian": {
-        "countries": ["canada"],
-        "regions": ["newfoundland", "labrador", "nova scotia", "new brunswick", "appalachian"],
+        "countries": ["canada", "usa"],
+        "regions": [
+            "newfoundland", "labrador", "nova scotia", "new brunswick",
+            "appalachian", "clarence stream", "valentine", "marathon",
+            "maine", "vermont",
+        ],
     },
     "laramide_southwest": {
         "countries": ["usa", "mexico"],
@@ -339,7 +364,23 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
     },
     "brazilian_shield": {
         "countries": ["brazil"],
-        "regions": ["carajás", "carajas", "minas gerais", "bahia", "goiás"],
+        "regions": [
+            "carajás", "carajas", "minas gerais", "bahia", "goiás",
+            "tapajós", "tapajos", "pará", "para state", "amazonas",
+            "rondônia", "mato grosso", "cuiu cuiu",
+        ],
+    },
+    "trans_hudson_orogen": {
+        # Trans-Hudson Orogen — Saskatchewan / Manitoba / Nunavut greenstone
+        # belts. Hosts orogenic gold (Goldfields, Seabee, Wheaton River) and
+        # the Athabasca uranium basin to the north. Distinct from Abitibi
+        # (Superior craton) — same continent, different orogen.
+        "countries": ["canada"],
+        "regions": [
+            "saskatchewan", "northern saskatchewan", "manitoba",
+            "athabasca", "reindeer", "glennie", "flin flon",
+            "goldfields", "seabee", "lynn lake", "thompson",
+        ],
     },
     "guiana_shield": {
         # Guiana Shield — Birimian-equivalent age (~2.1 Ga), greenstone-belt
@@ -373,11 +414,20 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
     },
     "lachlan": {
         "countries": ["australia"],
-        "regions": ["new south wales", "nsw", "lachlan", "cadia", "macquarie arc"],
+        "regions": [
+            "new south wales", "nsw", "lachlan", "cadia", "macquarie arc",
+            "victoria", "fosterville", "bendigo", "stawell",
+            "central queensland", "queensland",
+        ],
     },
     "yilgarn": {
         "countries": ["australia"],
-        "regions": ["western australia", "wa", "yilgarn", "kalgoorlie", "perth"],
+        "regions": [
+            "western australia", "wa", "yilgarn", "kalgoorlie", "perth",
+            "gascoyne", "pilbara", "murchison", "leonora", "laverton",
+            "kambalda", "boddington", "sunrise dam", "tropicana",
+            "mt egerton", "glenburgh",
+        ],
     },
     "fennoscandian": {
         "countries": ["finland", "norway", "sweden"],
@@ -544,6 +594,32 @@ def detect_subtype(
         if "intermediate" in blob:
             return "intermediate_sulfidation_epithermal"
 
+    # Intrusion-Related Gold Systems (IRGS) — Pogo, Fort Knox, Donlin,
+    # Eagle, Brewery Creek. Distinct class: stockwork/sheeted-vein gold
+    # peripheral to felsic intrusions. Check BEFORE orogenic because IRGS
+    # text sometimes says "intrusion-related" + "shear" but the IRGS class
+    # has a different alteration / metal suite.
+    if any(k in blob for k in (
+        "irgs", "intrusion-related gold", "intrusion related gold",
+        "reduced intrusion-related", "rirgs",
+    )):
+        return "irgs_general"
+
+    # Iron formation-hosted gold (Homestake, Detour Lake, Lupin, Geita).
+    # Check before generic BIF (which is for iron ore) by requiring the
+    # word "gold" in context, OR explicit "iron formation-hosted".
+    if (("iron formation" in blob and ("host" in blob or "gold" in blob or "au " in blob))
+            or "bif-hosted gold" in blob or "bif hosted gold" in blob):
+        return "bif_hosted_gold"
+
+    # Shear-zone-hosted gold — common phrasing in NI 43-101 reports that
+    # doesn't always include "orogenic" but means the same thing.
+    if any(k in blob for k in (
+        "shear-zone-hosted gold", "shear zone-hosted gold", "shear-zone hosted gold",
+        "shear-hosted gold", "shear hosted gold",
+    )):
+        return "orogenic_general"
+
     # Orogenic gold sub-types
     if "orogenic" in blob or "mesothermal" in blob or "lode gold" in blob:
         if "greenstone" in blob:
@@ -553,6 +629,11 @@ def detect_subtype(
         if "bif" in blob and "host" in blob:
             return "bif_hosted_orogenic"
         return "orogenic_general"
+
+    # Placer / alluvial gold — Klondike, Yukon, Otway. Distinct depositional
+    # class with different mining method (dredging).
+    if any(k in blob for k in ("placer", "alluvial", "paleoplacer")):
+        return "placer_general"
 
     # Carlin — check BEFORE the sediment-hosted Cu block because Carlin gold
     # is routinely described as "sediment-hosted disseminated gold" in NI 43-101
@@ -638,6 +719,17 @@ def detect_subtype(
     if "bif" in blob or "banded iron" in blob or "magnetite taconite" in blob:
         return "bif_general"
 
+    # ── Last-resort defaults — never let a project go to no-rule fallback
+    # just because the deposit_type text is generic ──
+    # "Open-pit gold deposit" / "gold-silver system" / "epithermal" / "porphyry"
+    # without LS/HS or alkalic qualifier → use the most-common assumption.
+    if "epithermal" in blob:
+        return "low_sulfidation_epithermal"
+    if "porphyry" in blob:
+        # Material context — if gold-dominant, route to porphyry gold-silver
+        # rule (which accepts calc_alkalic_porphyry); if copper, calc-alkaline
+        # is the safest generic default (alkalic needs an explicit signal).
+        return "calc_alkalic_porphyry"
     return None
 
 
@@ -1063,6 +1155,14 @@ def detect_pattern(
     dep = _norm(deposit_type)
     if "porphyry" in dep:
         return "stockwork"
+    if any(k in dep for k in ("irgs", "intrusion-related gold", "intrusion related gold")):
+        return "stockwork"  # IRGS is typically sheeted-stockwork around intrusions
+    if "shear" in dep or "shear-zone-hosted" in dep or "shear-hosted" in dep:
+        return "vein_hosted"
+    if "iron formation" in dep or "bif-hosted" in dep or "bif hosted" in dep:
+        return "disseminated_bulk"  # BIF-hosted gold is typically bulk-mineable
+    if "alluvial" in dep or "placer" in dep:
+        return "placer"
     if "orogenic" in dep or "lode" in dep:
         return "vein_hosted"
     if "carlin" in dep or "sediment hosted" in dep:
