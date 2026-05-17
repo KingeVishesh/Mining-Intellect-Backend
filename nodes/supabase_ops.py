@@ -622,6 +622,29 @@ def save_approved_analogs(
 
 # ── Model runs ─────────────────────────────────────────────────────────────────
 
+_MODEL_FIELDS = (
+    # Per-category tonnage (Mt)
+    "measured_resource_mt",
+    "indicated_resource_mt",
+    "inferred_resource_mt",
+    # Per-category grade (same units as project.grade_unit)
+    "measured_grade",
+    "indicated_grade",
+    "inferred_grade",
+    # Per-category contained metal (Moz precious / Mlb base)
+    "measured_contained",
+    "indicated_contained",
+    "inferred_contained",
+    # Totals
+    "tonnage_mt",
+    "grade_value",
+    "total_contained",
+    # Conviction
+    "conviction_score",
+    "conviction_tier",
+)
+
+
 def save_model_run(
     project_id: str,
     model_type: str,
@@ -630,13 +653,7 @@ def save_model_run(
     thread_id: Optional[str] = None,
     run_id: Optional[str] = None,
 ) -> None:
-    """
-    Insert a row into model_runs capturing a single Model 1 or Model 2 snapshot.
-
-    `fields` should contain:
-        measured_resource_mt, indicated_resource_mt, inferred_resource_mt,
-        tonnage_mt, grade_value, conviction_score, conviction_tier
-    """
+    """Insert a row into model_runs capturing one Model 1 / Model 2 snapshot."""
     row = {
         "project_id": project_id,
         "model_type": model_type,
@@ -644,15 +661,7 @@ def save_model_run(
         "run_id": run_id,
         "model_output_json": model_output_json or {},
         "status": "complete",
-        **{k: fields.get(k) for k in (
-            "measured_resource_mt",
-            "indicated_resource_mt",
-            "inferred_resource_mt",
-            "tonnage_mt",
-            "grade_value",
-            "conviction_score",
-            "conviction_tier",
-        )},
+        **{k: fields.get(k) for k in _MODEL_FIELDS},
     }
     get_client().table("model_runs").insert(row).execute()
     logger.info(
@@ -662,22 +671,13 @@ def save_model_run(
 
 
 def update_project_latest_model(project_id: str, fields: Dict) -> None:
+    """Overwrite the latest-model columns on projects so the /projects-back
+    table reflects the most recent run.
     """
-    Overwrite the 6 'latest-model' columns on projects so the /projects-back
-    table reflects the most recent run. Fields keyed same as save_model_run.
-    """
-    payload = {
-        k: fields.get(k) for k in (
-            "measured_resource_mt",
-            "indicated_resource_mt",
-            "inferred_resource_mt",
-            "tonnage_mt",
-            "grade_value",
-            "conviction_score",
-        )
-    }
+    # conviction_tier is informational on model_runs but not on projects.
+    payload = {k: fields.get(k) for k in _MODEL_FIELDS if k != "conviction_tier"}
     get_client().table("projects").update(payload).eq("id", project_id).execute()
-    logger.info(f"[DB] projects.{{resource columns}} updated for project {project_id}")
+    logger.info(f"[DB] projects.{{model fields}} updated for project {project_id}")
 
 
 def save_report_analogs(
