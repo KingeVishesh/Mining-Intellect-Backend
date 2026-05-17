@@ -128,7 +128,7 @@ _ANALOG_FILTER_KEYS = (
     "required_metal_suites", "excluded_metal_suites",
     "min_resource_year",
     "tonnage_match_max_ratio", "grade_match_max_ratio",
-    "min_profile_strength", "rule_priority",
+    "min_profile_strength", "rule_priority", "belt_strict",
     "applies_lessons",
 )
 
@@ -162,12 +162,16 @@ def get_analog_rule(
       0b. Primary-material rule whose required_subtypes ∋ subtype (no pattern).
       1. Primary-material rule with matching deposit_type.
       2. Any rule with matching deposit_type (cross-material e.g. gold_silver).
-      3. None — when deposit_type is unknown, no rule is safer than the wrong rule.
+      _. None — no fallback. If we don't have subtype info AND no rule
+         matches the freeform deposit_type, the caller MUST refuse to
+         score. A wrong analog is worse than no analog.
 
-    Deliberately no material-only fallback: all compiled analog_selection rules are
-    deposit-type-specific (e.g. nickel_laterite vs nickel_magmatic_sulphide). Returning
-    the first rule alphabetically when deposit_type is unknown would silently apply the
-    wrong rule. Callers should handle None by running a material-only Exa query.
+    Deliberately no material-only fallback: all compiled analog_selection
+    rules are deposit-type-specific (alkalic_porphyry vs laramide_porphyry,
+    orogenic_vein vs orogenic_bulk, nickel_laterite vs nickel_magmatic).
+    Picking the first rule when subtype is unknown would silently apply the
+    wrong geology. Callers handle None by flagging low_confidence and
+    requesting research enrichment.
 
     Subtype + pattern + deposit_type are combined to pick the most specific
     matching rule. Hat Copper (alkalic_porphyry) → alkalic rule; True North
@@ -178,11 +182,13 @@ def get_analog_rule(
     if not rules:
         return None
 
-    # Note: previously we returned None when both deposit_type and
-    # deposit_subtype were null. That makes the cascade silently return
-    # 0 analogs for every project with thin metadata. Now we fall through
-    # to the generic_fallback rule at the end of this function so the
-    # user gets SOMETHING (flagged low_confidence) instead of nothing.
+    # Strict contract: without deposit_type / subtype / pattern there is no
+    # safe way to route. Earlier code returned the generic_fallback rule
+    # here; that fallback produced wrong analogs for ~30% of gold projects
+    # whose research left these fields null. The right fix is upstream
+    # (enrich the project), not papering over with a permissive rule.
+    if not (deposit_type or deposit_subtype):
+        return None
 
     mat_lower = material.strip().lower()
     # Sanitize set-literal / list-literal serializations in deposit_type
@@ -223,15 +229,9 @@ def get_analog_rule(
                     continue
                 return r
 
-    # Skip Pass 1/2 (both require deposit_type substring matching) but DO
-    # fall through to Pass 3 (generic_fallback) so the user gets analogs
-    # even when deposit_type is null.
-
-    # Pass 1: primary material + deposit_type match (skip fallback rule)
+    # Pass 1: primary material + deposit_type match
     if dep_lower:
         for r in rules:
-            if (r.get("rule_id") or "").endswith("_generic_fallback"):
-                continue
             r_dep = (r.get("deposit_type") or "").strip().lower()
             r_mat = (r.get("source_material") or "").strip().lower()
             if r_dep and r_mat == mat_lower and (r_dep in dep_lower or dep_lower in r_dep):
@@ -240,23 +240,12 @@ def get_analog_rule(
     # Pass 2: any deposit_type match regardless of material (gold_silver, etc.)
     if dep_lower:
         for r in rules:
-            if (r.get("rule_id") or "").endswith("_generic_fallback"):
-                continue
             r_dep = (r.get("deposit_type") or "").strip().lower()
             if r_dep and (r_dep in dep_lower or dep_lower in r_dep):
                 return r
 
-    # Pass 3: graceful degradation — fall back to the material's generic
-    # fallback rule when no specific rule matched. This is the difference
-    # between returning 0 analogs silently and returning low-confidence
-    # candidates the user can review. Example rule_id:
-    # analog_sel_gold_generic_fallback (lowest rule_priority).
-    for r in rules:
-        rid = (r.get("rule_id") or "").strip()
-        r_mat = (r.get("source_material") or "").strip().lower()
-        if rid.endswith("_generic_fallback") and r_mat == mat_lower:
-            return r
-
+    # No fallback. Caller (combine_filter_score_node) handles None by
+    # emitting low_confidence + profile_warning and returning 0 analogs.
     return None
 
 

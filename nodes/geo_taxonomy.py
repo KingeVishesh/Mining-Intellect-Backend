@@ -463,6 +463,90 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
 ALL_BELT_SLUGS: FrozenSet[str] = frozenset(TECTONIC_BELTS.keys())
 
 
+# Belt-compatibility groups — used as a HARD geological filter (L2.5) when
+# both target and candidate have a belt slug. Cross-group analogs are
+# dropped: an Abitibi target should not draw analogs from the Cordilleran
+# Arc or Guiana Shield even when the subtype/pattern/mining-method match,
+# because the host stratigraphy, tectonic age, and structural plumbing are
+# fundamentally different.
+#
+# Belts inside the same group are treated as equivalent (e.g., Abitibi and
+# Yilgarn are both Archean greenstone orogenic provinces — geologically
+# interchangeable for orogenic-gold analog purposes). Single-belt groups
+# (Carlin, Bushveld, IPB, Lachlan) are deliberately strict — they have no
+# real equivalents.
+BELT_COMPATIBILITY_GROUPS: Dict[str, FrozenSet[str]] = {
+    # Archean / Paleoproterozoic greenstone orogenic gold provinces.
+    # Stratigraphically equivalent host rocks (tholeiitic basalt +
+    # komatiite + BIF + felsic volcanics cut by greenschist-facies shears)
+    # and same orogen-style gold genesis. Cartier-Cadillac analog matches
+    # should be drawn from this group. Yilgarn's Phanerozoic gold cousins
+    # in Lachlan are NOT here — they're turbidite-hosted at a different
+    # crustal level and orogen age.
+    #
+    # Note 2026-05-17 (Cartier audit): guiana_shield removed from this
+    # group despite being Birimian-equivalent (~2.1 Ga). Empirically the
+    # Cartier-Cadillac analog pool included Aurora/Toroparu/Rosebel which
+    # the user flagged as wrong. The library labels them underground_vein
+    # but most are large-tonnage open-pit operations — geologically
+    # different style from a Cadillac-Break vein target. Keep guiana_shield
+    # strict (its own group below) until those library entries are
+    # re-validated.
+    "archean_greenstone": frozenset({
+        "abitibi", "yilgarn", "fennoscandian", "tanzania_archean",
+        "west_african_birimian", "trans_hudson_orogen",
+    }),
+    # Guiana Shield — Birimian-equivalent age, but kept strict per the
+    # May-2026 Cartier audit (see archean_greenstone note).
+    "guiana_shield": frozenset({"guiana_shield"}),
+    # Phanerozoic magmatic-arc Cu-Au porphyry + epithermal provinces.
+    # Cadia (Lachlan Macquarie Arc) is the canonical alkalic-porphyry
+    # analog for BC Quesnel-Stikine (Mt Milligan, Galore Creek). Lachlan
+    # also hosts turbidite-orogenic gold (Bendigo / Fosterville) — those
+    # don't match Archean orogenic targets via this group because the L3
+    # subtype filter still applies (turbidite_orogenic ≠ greenstone_orogenic
+    # unless the rule lists both as siblings, which orogenic_vein does;
+    # so L2.5 lets them through and L3 hardens the gate). Net effect:
+    # Lachlan porphyries can analog BC porphyries, Lachlan turbidite gold
+    # can analog Cordilleran turbidite gold, but Lachlan turbidite ≠
+    # Abitibi greenstone — exactly the geology we want.
+    "phanerozoic_arc": frozenset({
+        "bc_quesnel_stikine", "yukon_tintina", "laramide_southwest",
+        "andean", "indonesia_philippines_arc", "lachlan",
+        "central_asian_orogenic",
+    }),
+    # Newfoundland Appalachian — distinct Caledonide / Acadian orogen
+    # accreted to Laurentia. Strict; canonical members Valentine /
+    # Marathon / Clarence Stream stand alone for analog purposes.
+    "newfoundland_appalachian": frozenset({"newfoundland_appalachian"}),
+    # Carlin Trend — Great Basin sediment-hosted gold. Strict; no real
+    # equivalents in our vocabulary (Dian-Qian-Gui in China is the only
+    # academic counterpart and is not enumerated here).
+    "great_basin_carlin": frozenset({"great_basin_carlin"}),
+    # Central African Copperbelt — strict (Lufilian Arc sediment-hosted Cu).
+    "central_african_copperbelt": frozenset({"central_african_copperbelt"}),
+    # Bushveld PGE complex — strict.
+    "bushveld": frozenset({"bushveld"}),
+    # Iberian Pyrite Belt — strict; only matches itself for VMS analogs.
+    "iberian_pyrite": frozenset({"iberian_pyrite"}),
+    # Brazilian Shield (Archean Carajás + Tapajós + minas-supergroup
+    # IOCG-Cu-Au province). Distinct from Guiana Shield (Birimian-age
+    # greenstone). Different structural style — kept separate.
+    "brazilian_shield": frozenset({"brazilian_shield"}),
+    # New Caledonia laterite — strict (Ni laterite province).
+    "new_caledonia_laterite": frozenset({"new_caledonia_laterite"}),
+}
+
+
+# Reverse index: each belt slug → the compatibility group it belongs to.
+# Built at import time; used by belt_compatible() for O(1) lookup.
+_BELT_TO_GROUP: Dict[str, str] = {
+    belt: group_name
+    for group_name, belts in BELT_COMPATIBILITY_GROUPS.items()
+    for belt in belts
+}
+
+
 # Metal suites — characteristic byproduct/co-product patterns
 METAL_SUITES: List[str] = [
     "cu_au",          # Cu-Au porphyry, IOCG
@@ -1396,6 +1480,40 @@ def mining_method_compatible(target: Optional[str], candidate: Optional[str]) ->
         return True
     incompatible = MINING_METHOD_INCOMPATIBILITY.get(target, frozenset())
     return candidate not in incompatible
+
+
+def belt_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
+    """
+    True when target and candidate tectonic belts are in the same compatibility
+    group (see BELT_COMPATIBILITY_GROUPS). Used as a HARD filter at cascade
+    level L2.5 — cross-group analogs are dropped because their host
+    stratigraphy and tectonic age are too different to support the analog
+    inference.
+
+    Asymmetric semantics:
+    - Target belt unknown → True (no basis to filter; let downstream rank).
+    - Candidate belt unknown → True (don't drop poorly-enriched analogs;
+      the rest of the cascade applies).
+    - Both known + same group → True.
+    - Both known + same exact belt → True.
+    - Both known + different groups (or one of them not in any group) → False.
+
+    Example: Cartier-Cadillac (abitibi) vs Brucejack (bc_quesnel_stikine)
+    → False. Both are vein-hosted greenstone-orogenic, but Abitibi sits in
+    `archean_greenstone` while Brucejack sits in `cordilleran_arc` — the
+    geology is too different for analog inference.
+    """
+    if not target or not candidate:
+        return True
+    if target == candidate:
+        return True
+    t_group = _BELT_TO_GROUP.get(target)
+    c_group = _BELT_TO_GROUP.get(candidate)
+    if t_group is None or c_group is None:
+        # At least one belt isn't in any compatibility group — fall back to
+        # strict equality (already handled above). Drop the candidate.
+        return False
+    return t_group == c_group
 
 
 def resource_category_at_least(

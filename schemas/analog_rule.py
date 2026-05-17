@@ -119,6 +119,12 @@ class AnalogRule(BaseModel):
     # Rule priority — higher = checked first when multiple rules match.
     # Sub-rules (alkalic_porphyry vs generic porphyry) get higher priority.
     rule_priority: int = 100
+    # Belt-strict mode (cascade L2.5). Default True: target and candidate
+    # belts must be in the same BELT_COMPATIBILITY_GROUP. Set False for rule
+    # families where cross-craton analogs are the industry standard — e.g.
+    # magmatic-sulphide Ni (Sudbury / Voisey's Bay / Kambalda / Norilsk all
+    # cited as canonical analogs for each other despite different orogens).
+    belt_strict: bool = True
     applies_lessons:   List[str] = Field(default_factory=list)
 
     # ── Documentation and tuning ───────────────────────────────────────────

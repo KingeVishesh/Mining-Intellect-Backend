@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
 
-from nodes import exa_search, field_extractor, geocoder, supabase_ops
+from nodes import exa_search, field_extractor, geo_taxonomy, geocoder, supabase_ops
+from nodes.rules_engine import sanitize_deposit_type
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,136 @@ def extract_fields_node(state: ResearchState) -> ResearchState:
                     statuses[f] = "found_on_retry"
 
     return {"extracted_fields": clean_fields, "field_statuses": statuses}
+
+
+def derive_geological_profile_node(state: ResearchState) -> ResearchState:
+    """Run deterministic taxonomy detectors on whatever Grok DID extract, then
+    backfill structured columns the LLM left empty.
+
+    This is NOT a wildcard fallback — it uses the controlled vocabulary in
+    nodes.geo_taxonomy to map freeform text (mineralization_style, host_rock,
+    district, region, country) onto exact slugs. If the detectors come up
+    empty too, the field stays null and the analog finder will correctly
+    refuse to score the project. The point is that when the source DOES
+    say e.g. "Carlin-style sediment-hosted disseminated gold" but Grok
+    forgot to copy that into deposit_type, the detector recovers it.
+
+    Side effect: when deposit_type is null but detect_subtype produces a
+    confident slug, we synthesize a human-readable deposit_type from the
+    style/subtype so downstream rule-matching (Pass 1/2) has a string to
+    work with.
+    """
+    if state.get("error"):
+        return {}
+    fields = dict(state.get("extracted_fields") or {})
+    if not fields:
+        return {}
+
+    clean_dep = sanitize_deposit_type(fields.get("deposit_type"))
+    if clean_dep and clean_dep != fields.get("deposit_type"):
+        fields["deposit_type"] = clean_dep
+
+    style = fields.get("mineralization_style")
+    alt = fields.get("alteration_signature")
+    district = fields.get("district") or fields.get("location_name")
+    country = fields.get("country")
+    region = fields.get("region")
+    host = fields.get("host_rock")
+    mining = fields.get("mining_method")
+    processing = fields.get("processing_method")
+
+    inferred: dict[str, str] = {}
+
+    # Subtype
+    if not fields.get("deposit_subtype"):
+        sub = geo_taxonomy.detect_subtype(clean_dep, style, alt, district)
+        if sub:
+            inferred["deposit_subtype"] = sub
+
+    # Pattern
+    if not fields.get("mineralization_pattern"):
+        pat = geo_taxonomy.detect_pattern(style, mining, processing, clean_dep)
+        if pat:
+            inferred["mineralization_pattern"] = pat
+
+    # Mode
+    if not fields.get("mineralization_mode"):
+        mode = geo_taxonomy.detect_mode(processing, style, district, clean_dep)
+        if mode:
+            inferred["mineralization_mode"] = mode
+
+    # Tectonic belt
+    if not fields.get("tectonic_belt"):
+        belt = geo_taxonomy.detect_belt(country, region, district)
+        if belt:
+            inferred["tectonic_belt"] = belt
+
+    # Metal suite
+    if not fields.get("metal_suite"):
+        suite = geo_taxonomy.detect_metal_suite(
+            fields.get("material"), fields.get("by_product_commodities"),
+            district, clean_dep,
+        )
+        if suite:
+            inferred["metal_suite"] = suite
+
+    # Alteration
+    if not fields.get("alteration_signature"):
+        a = geo_taxonomy.detect_alteration_signature(None, district, clean_dep)
+        if a:
+            inferred["alteration_signature"] = a
+
+    # Recovery method
+    if not fields.get("recovery_method"):
+        rec = geo_taxonomy.detect_recovery_method(processing, district, clean_dep)
+        if rec:
+            inferred["recovery_method"] = rec
+
+    # Host rock class
+    if not fields.get("host_rock_class"):
+        hc = geo_taxonomy.detect_host_class(host, clean_dep, style)
+        if hc:
+            inferred["host_rock_class"] = hc
+
+    # Stage class
+    if not fields.get("project_stage_class"):
+        sc = geo_taxonomy.detect_stage_class(
+            fields.get("project_stage"), None, district,
+        )
+        if sc:
+            inferred["project_stage_class"] = sc
+
+    # Mining method class
+    if not fields.get("mining_method_class"):
+        mc = geo_taxonomy.detect_mining_method_class(mining, processing, district)
+        if mc:
+            inferred["mining_method_class"] = mc
+
+    # Synthesize deposit_type from subtype when Grok left it blank. The
+    # rule engine's Pass 1/2 ILIKE matching needs a non-empty string; the
+    # subtype slug, humanized, is the safest derivation.
+    if not fields.get("deposit_type") and inferred.get("deposit_subtype"):
+        humanized = inferred["deposit_subtype"].replace("_", " ")
+        inferred["deposit_type"] = humanized
+        logger.info(
+            f"[derive] synthesized deposit_type='{humanized}' from "
+            f"detected subtype={inferred['deposit_subtype']!r}"
+        )
+
+    if not inferred:
+        return {}
+
+    logger.info(f"[derive] backfilled {len(inferred)} structured fields: "
+                f"{list(inferred.keys())}")
+    fields.update(inferred)
+
+    # Record which fields came from the deterministic post-pass so the
+    # audit trail can distinguish LLM-extracted from taxonomy-derived
+    # values when debugging.
+    statuses = dict(state.get("field_statuses") or {})
+    for k in inferred:
+        statuses.setdefault(k, "derived_post_extraction")
+    return {"extracted_fields": fields, "field_statuses": statuses}
 
 
 def geocode_node(state: ResearchState) -> ResearchState:
@@ -204,6 +335,7 @@ builder = StateGraph(ResearchState)
 builder.add_node("load_context", load_context)
 builder.add_node("exa_search", exa_search_node)
 builder.add_node("extract_fields", extract_fields_node)
+builder.add_node("derive_geological_profile", derive_geological_profile_node)
 builder.add_node("geocode", geocode_node)
 builder.add_node("validate", validate_node)
 builder.add_node("save_to_supabase", save_to_supabase_node)
@@ -211,7 +343,8 @@ builder.add_node("save_to_supabase", save_to_supabase_node)
 builder.set_entry_point("load_context")
 builder.add_edge("load_context", "exa_search")
 builder.add_conditional_edges("exa_search", should_continue, {"extract_fields": "extract_fields", END: END})
-builder.add_edge("extract_fields", "geocode")
+builder.add_edge("extract_fields", "derive_geological_profile")
+builder.add_edge("derive_geological_profile", "geocode")
 builder.add_edge("geocode", "validate")
 builder.add_edge("validate", "save_to_supabase")
 builder.add_edge("save_to_supabase", END)

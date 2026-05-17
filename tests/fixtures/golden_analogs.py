@@ -407,7 +407,12 @@ TRUE_NORTH_TARGET = {
     "processing_method": "CIL",
     "tonnage_mt": 5.0, "grade_value": 6.0, "grade_unit": "g/t Au",
 }
-# Correct picks: Brucejack, Red Lake-style high-grade vein
+# Brucejack — BC Cordilleran arc orogenic vein gold. Geologically vein-
+# hosted underground gold like True North, but in a DIFFERENT belt-
+# compatibility group (phanerozoic_arc, not archean_greenstone). With the
+# 2026-05 belt hard filter, Brucejack is correctly NOT a must_pick for a
+# True North-style Manitoba/Abitibi target — it would mislead modelling.
+# Kept here as a must_drop reference (drops at L2.5).
 BRUCEJACK = {
     "name": "Brucejack", "material": "gold",
     "deposit_type": "orogenic gold high-grade veins",
@@ -423,6 +428,26 @@ BRUCEJACK = {
     "host_rock": "andesite volcanic",
     "processing_method": "CIL",
     "tonnage_mt": 16.0, "grade_value": 8.4, "grade_unit": "g/t Au",
+}
+# Macassa — Kirkland Lake Ontario Abitibi, high-grade vein orogenic gold.
+# Same belt group as True North; sibling subtype. Scale (14 Mt) fits within
+# the orogenic_vein rule's 5× tonnage tolerance vs a 5 Mt True North target
+# (ratio 2.8×).
+MACASSA_FIXTURE = {
+    "name": "Macassa Mine", "material": "gold",
+    "deposit_type": "high-grade orogenic quartz vein gold",
+    "deposit_subtype": "greenstone_orogenic",
+    "mineralization_mode": "primary_sulfide",
+    "mineralization_pattern": "vein_hosted",
+    "host_rock_class": "intrusive_felsic",
+    "tectonic_belt": "abitibi",
+    "recovery_method": "cil_cip",
+    "metal_suite": "au_only",
+    "country": "Canada", "region": "Ontario", "district": "Kirkland Lake",
+    "mineralization_style": "high-grade quartz-carbonate veins in syenite",
+    "host_rock": "syenite intrusion cutting mafic volcanic",
+    "processing_method": "CIL",
+    "tonnage_mt": 14.0, "grade_value": 21.0, "grade_unit": "g/t Au",
 }
 RED_LAKE = {
     "name": "Red Lake", "material": "gold",
@@ -544,16 +569,23 @@ GOLDEN_CASES: list[dict] = [
         ],
     },
     {
-        # 1911 Gold True North — vein-orogenic. Picks Brucejack + Red Lake.
-        # Drops Springpole at rule_required_pattern (disseminated bulk not vein),
-        # White Gold at rule_required_pattern (breccia-hosted).
+        # 1911 Gold True North — vein-orogenic Manitoba Rice Lake (Archean
+        # greenstone). Picks Red Lake (Abitibi, same group) and Casa Berardi
+        # (Abitibi, same group). Drops:
+        #   - Brucejack at L2.5 (BC Cordilleran arc, different belt group)
+        #   - White Gold at L2.5 (Yukon Tintina, Cordilleran arc)
+        #   - Springpole at rule_required_pattern (disseminated bulk)
+        # The belt hard filter is the key change from the May-2026 audit:
+        # cross-belt orogenic vein gold analogs were producing wrong
+        # matches for Cartier-Cadillac (Brucejack, Aurora/Toroparu/Rosebel).
         "name": "True North — vein-orogenic",
         "rule_id": "analog_sel_gold_orogenic_vein",
         "target": TRUE_NORTH_TARGET,
-        "must_pick": [BRUCEJACK, RED_LAKE],
+        "must_pick": [RED_LAKE, MACASSA_FIXTURE],
         "must_drop": [
+            (BRUCEJACK,       {"L2.5"}),
             (SPRINGPOLE,      {"rule_pattern", "rule_required_pattern", "L4.5"}),
-            (WHITE_GOLD,      {"rule_pattern", "rule_required_pattern", "L4.5"}),
+            (WHITE_GOLD,      {"rule_pattern", "rule_required_pattern", "L4.5", "L2.5"}),
             # Marigold is gold but bulk Carlin not orogenic vein — drops at
             # subtype level.
             (MARIGOLD,        {"rule_subtype", "rule_required_subtype",

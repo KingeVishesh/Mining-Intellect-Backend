@@ -127,7 +127,36 @@ def bootstrap_rules(force: bool = False) -> dict:
         client.table("compiled_rules").upsert(batch, on_conflict="rule_id").execute()
         saved += len(batch)
 
+    # Delete orphan rules — rows that exist in compiled_rules but no longer
+    # appear in the code. Without this, removing a rule from
+    # scripts/seed_analog_rules.py would leave it active in the DB until
+    # someone DELETEd it manually. We restrict the sync to rule_types we
+    # actually manage in code (analog_selection + confidence_adjustment)
+    # so we don't accidentally wipe data_quality / model_adjustment rules
+    # that may live only in the DB.
+    code_rule_ids = {r["rule_id"] for r in all_rows}
+    deleted = 0
+    try:
+        existing = (
+            client.table("compiled_rules")
+            .select("rule_id")
+            .in_("rule_type", ["analog_selection", "confidence_adjustment"])
+            .execute()
+            .data
+            or []
+        )
+        orphans = [r["rule_id"] for r in existing
+                   if r.get("rule_id") and r["rule_id"] not in code_rule_ids]
+        if orphans:
+            client.table("compiled_rules").delete().in_("rule_id", orphans).execute()
+            deleted = len(orphans)
+            logger.info(f"[bootstrap] deleted {deleted} orphan rules: {orphans}")
+    except Exception as e:
+        logger.warning(f"[bootstrap] orphan cleanup failed (non-fatal): {e}")
+
     _write_rules_version(client, code_hash, code_count)
-    logger.info(f"[bootstrap] reseeded {saved} rules; hash={code_hash[:12]}…")
+    logger.info(f"[bootstrap] reseeded {saved} rules, deleted {deleted}; "
+                f"hash={code_hash[:12]}…")
     return {"action": "reseeded", "code_hash": code_hash,
-            "db_hash": db_hash, "rules_count": code_count, "rows_written": saved}
+            "db_hash": db_hash, "rules_count": code_count,
+            "rows_written": saved, "rows_deleted": deleted}

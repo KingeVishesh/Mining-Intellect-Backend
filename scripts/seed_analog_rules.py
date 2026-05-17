@@ -843,6 +843,13 @@ ANALOG_SELECTION_RULES = [
         "required_modes":      ["primary_sulfide"],
         "preferred_belts":     ["abitibi", "yilgarn", "fennoscandian", "newfoundland_appalachian",
                                 "central_asian_orogenic"],
+        # Magmatic Ni sulphide deposits are the canonical cross-craton
+        # analog class — Sudbury (Superior), Voisey's Bay (Nain),
+        # Kambalda (Yilgarn), Norilsk (Siberian) are all cited as analogs
+        # for each other in industry practice. The host-rock chemistry
+        # (komatiite / troctolite / mafic conduit) is what matters, not
+        # the basement age. Skip the L2.5 belt hard filter for this rule.
+        "belt_strict": False,
         "excluded_subtypes":   [
             "limonite_laterite", "saprolite_laterite", "laterite_general",
             "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
@@ -1143,45 +1150,15 @@ ANALOG_SELECTION_RULES = [
         "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
     },
 
-    {
-        # PERMISSIVE MATERIAL-ONLY FALLBACK. Lowest priority — only fires
-        # when no specific rule matches the project's deposit_type / subtype.
-        # Better than 0 analogs (the user can sort the noise; an empty
-        # analog list is the bigger problem).
-        "rule_id": "analog_sel_gold_generic_fallback",
-        "source_material": "gold",
-        "deposit_type": "generic gold (fallback)",
-        "grade_min": 0.1, "grade_max": 50.0, "grade_unit": "g/t Au",
-        "tonnage_min_mt": None, "tonnage_max_mt": None,
-        "drilling_stage": "moderate",
-        "title": "Generic Gold Fallback (Material-Only)",
-        "description": (
-            "Last-resort permissive rule for gold projects with insufficient "
-            "geological metadata. Material-only filtering, no subtype/pattern "
-            "requirements. Used by the cascade when no more-specific rule matches. "
-            "Always returns low_confidence=True so the user knows the run is loose."
-        ),
-        # No required_subtypes — accepts any gold analog. excluded_subtypes
-        # blocks the truly incompatible (oxide ISCR copper analogs etc.)
-        "excluded_subtypes":   [
-            "oxide_iscr_supergene_blanket",
-            "limonite_laterite", "saprolite_laterite", "laterite_general",
-            "komatiite_hosted", "conduit_hosted", "magmatic_sulphide_general",
-            "merensky_reef", "ug2_reef", "platreef",
-        ],
-        "excluded_recovery":   ["iscr", "hpal"],
-        "min_profile_strength": 1,  # extremely permissive
-        "rule_priority":       50,   # below every specific rule
-        "tonnage_match_max_ratio": 50.0,   # very loose scale tolerance
-        "grade_match_max_ratio":   25.0,
-        "applies_lessons":     ["LG1"],
-        "analog_criteria": [
-            "Material-only fallback — at least one valid analog is better than zero",
-            "Other gold rules should match first if any subtype info exists",
-            "Run flagged low_confidence so user can review",
-        ],
-        "tonnage_multiplier": 1.0, "grade_multiplier": 1.0, "confidence_modifier": 0,
-    },
+    # NOTE: analog_sel_gold_generic_fallback REMOVED 2026-05-17.
+    # Rationale: the material-only fallback was producing wrong analogs for
+    # ~52 gold projects whose research step left deposit_type / subtype
+    # empty (Cartier-Cadillac surfaced this). A loose match is worse than
+    # no match — the user can't tell the difference between a real analog
+    # and noise. New contract: when no specific rule matches, the cascade
+    # returns 0 analogs + low_confidence + a profile_warning explaining
+    # what's missing. The fix is to enrich the project (project_research
+    # graph), not to widen the match.
 ]
 
 

@@ -384,6 +384,26 @@ def _cascading_match(
         evaluated += 1
         reasons.append(f"L2 deposit family match ({c_fam}): {rule_lessons}")
 
+    # ── L2.5: Tectonic belt compatibility (HARD — fixes Cartier-Cadillac) ──
+    # An Abitibi target should not get analogs from the Phanerozoic arcs or
+    # Guiana Shield even when subtype + pattern + mining-method all match.
+    # belt_compatible() uses BELT_COMPATIBILITY_GROUPS: Archean greenstone
+    # belts (Abitibi/Yilgarn/Fennoscandian/Birimian/Guiana/Tanzania/Trans-
+    # Hudson) match each other; Phanerozoic arcs (BC/Yukon/Laramide/Andean/
+    # Indo-Phil/Lachlan/CAOB) match each other; everything else is strict.
+    # A null belt on either side passes through.
+    # Per-rule override: belt_strict=False on the magmatic-sulphide Ni rule
+    # so Sudbury / Voisey's Bay / Kambalda can analog each other across
+    # cratons (industry standard for that deposit class).
+    t_belt = target["tectonic_belt"]
+    c_belt = candidate["tectonic_belt"]
+    rule_belt_strict = (analog_rule or {}).get("belt_strict", True)
+    if rule_belt_strict and t_belt and c_belt:
+        if not geo_taxonomy.belt_compatible(t_belt, c_belt):
+            return False, 0, 0, 0, [
+                f"L2.5 belt incompatible ({c_belt} not in same group as {t_belt}): {rule_lessons}"
+            ], "L2.5"
+
     # ── L3: Same deposit sub-type (HARD — Lessons L86/L101/L124) ───────────
     # Sub-type is the single most important geological similarity dimension.
     # alkalic_porphyry ≠ laramide_porphyry ≠ iocg_oxide.
@@ -553,7 +573,11 @@ def _cascading_match(
                     f"{c_g} vs target {t_g} {target.get('grade_unit')}): {rule_lessons}"
                 ], "L5.6"
 
-    # ── L6: Tectonic belt (RANK +30) ───────────────────────────────────────
+    # ── L6: Tectonic belt rank (HARD at L2.5; here only rank shading) ──────
+    # By the time a candidate reaches L6 it has already passed the L2.5
+    # belt-group hard filter. Same exact belt earns full points;
+    # same-group-different-belt earns half (so Abitibi vs Yilgarn ranks
+    # below Abitibi vs Abitibi but still ahead of unknown-belt analogs).
     if target["tectonic_belt"] and candidate["tectonic_belt"]:
         evaluated += 1
         if target["tectonic_belt"] == candidate["tectonic_belt"]:
@@ -561,7 +585,12 @@ def _cascading_match(
             rank_pts += 30
             reasons.append(f"L6 belt match ({candidate['tectonic_belt']}): +30")
         else:
-            reasons.append(f"L6 belt different ({candidate['tectonic_belt']} ≠ {target['tectonic_belt']}): +0")
+            matched += 1
+            rank_pts += 15
+            reasons.append(
+                f"L6 belt same-group ({candidate['tectonic_belt']} ~ "
+                f"{target['tectonic_belt']}): +15"
+            )
 
     # ── L7: Metal suite (RANK +20) ─────────────────────────────────────────
     if target["metal_suite"] and candidate["metal_suite"]:
@@ -884,26 +913,29 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
 
     project_name = project.get("name") or ""
 
-    # No-rule fallback — if get_analog_rule returned None we don't have a
-    # commodity/subtype-specific rule loaded. Refuse to run the strict
-    # cascade; surface a clear "no rule for this deposit class" message to
-    # the user so they enrich the project or add a rule.
+    # No-rule case — get_analog_rule returned None because the project
+    # research step left deposit_type AND deposit_subtype empty (or the
+    # values don't map to any of our deposit-type-specific rules). We
+    # refuse to score: a wrong analog is worse than no analog. The user is
+    # told exactly what's missing so they can re-research the project.
     if analog_rule is None:
+        material = project.get("material") or "?"
+        dep_t = project.get("deposit_type") or "(empty)"
+        dep_s = project.get("deposit_subtype") or "(empty)"
         logger.warning(
-            f"[cascade] NO RULE for project material={project.get('material','?')} "
-            f"deposit_type={project.get('deposit_type','?')} — refusing to score, "
-            f"flagging low_confidence."
+            f"[cascade] NO RULE for project material={material} "
+            f"deposit_type={dep_t} subtype={dep_s} — refusing to score."
         )
         return {
             "scored_analogs": [],
             "low_confidence": True,
             "profile_warning": (
-                f"No analog_selection rule for "
-                f"{project.get('material','?')} / "
-                f"{project.get('deposit_type','?')}. The cascading filter would "
-                f"degrade to commodity-only matching, which is unreliable. Add "
-                f"the rule to scripts/seed_analog_rules.py, or set the project's "
-                f"deposit_type / deposit_subtype to one we already cover."
+                f"Cannot select analogs: project research is incomplete. "
+                f"Material={material}; deposit_type={dep_t}; "
+                f"deposit_subtype={dep_s}. The analog finder requires at "
+                f"least one of (deposit_type, deposit_subtype) to map the "
+                f"project to a geological rule. Re-run the project_research "
+                f"graph or set the fields manually, then re-run analog_finder."
             ),
             "audit_events": [],
         }

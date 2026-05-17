@@ -269,7 +269,129 @@ def test_no_rule_returns_low_confidence_with_warning():
     result = combine_filter_score_node(state)
     assert result["low_confidence"] is True
     assert result["scored_analogs"] == []
-    assert "No analog_selection rule" in result["profile_warning"]
+    assert "research is incomplete" in result["profile_warning"]
+
+
+def test_no_rule_when_deposit_type_and_subtype_both_missing():
+    """Strict contract: get_analog_rule returns None when the project has
+    neither deposit_type nor deposit_subtype. Previously fell through to a
+    generic_fallback rule that produced wrong analogs for ~30% of gold
+    projects (Cartier-Cadillac surfaced this in 2026-05)."""
+    from nodes.rules_engine import get_analog_rule
+    assert get_analog_rule("gold", None, None, None) is None
+    assert get_analog_rule("gold", "", "", "") is None
+
+
+def test_no_generic_fallback_rule_exists():
+    """The generic_fallback rule was removed; it must not return from any
+    routing call. If any commodity needs a fallback in the future, route
+    None instead — the cascade refuses to score and surfaces the gap."""
+    from scripts.seed_analog_rules import ANALOG_SELECTION_RULES
+    fb = [r for r in ANALOG_SELECTION_RULES
+           if r.get("rule_id", "").endswith("_generic_fallback")]
+    assert not fb, f"generic_fallback rules must be removed: {[r['rule_id'] for r in fb]}"
+
+
+def test_belt_hard_filter_drops_cross_belt_orogenic_gold():
+    """Cartier-Cadillac (Abitibi) must NOT pair with Brucejack (BC
+    Quesnel-Stikine) even though both are vein-hosted greenstone-orogenic
+    underground gold mines. They belong to different belt-compatibility
+    groups (Archean greenstone vs Cordilleran arc)."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    cartier = _build_profile({
+        "name": "Cartier-Cadillac", "material": "gold",
+        "deposit_type": "Gold-bearing structures",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "abitibi",
+        "mining_method_class": "underground_vein",
+        "country": "Canada", "region": "Quebec", "district": "Abitibi",
+    })
+    brucejack = _build_profile({
+        "name": "Brucejack", "material": "gold",
+        "deposit_type": "orogenic vein-hosted gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "bc_quesnel_stikine",
+        "mining_method_class": "underground_vein",
+        "country": "Canada", "region": "British Columbia",
+        "tonnage_mt": 16.0, "grade_value": 8.4, "grade_unit": "g/t Au",
+    })
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+    passes, _, _, _, reasons, dropped = _cascading_match(cartier, brucejack, rule)
+    assert not passes
+    assert dropped == "L2.5"
+    assert any("belt incompatible" in r for r in reasons)
+
+
+def test_belt_hard_filter_drops_guiana_shield_for_abitibi():
+    """An Abitibi target should not draw Guiana Shield analogs (Aurora /
+    Toroparu / Rosebel). Different compatibility group: Archean greenstone
+    Superior craton vs Birimian-equivalent Guiana shield."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    abitibi = _build_profile({
+        "name": "Some Abitibi Vein Au", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "abitibi",
+    })
+    guiana = _build_profile({
+        "name": "Toroparu", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "guiana_shield",
+    })
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+    passes, _, _, _, _, dropped = _cascading_match(abitibi, guiana, rule)
+    assert not passes
+    assert dropped == "L2.5"
+
+
+def test_belt_hard_filter_allows_in_group_match():
+    """Abitibi and Yilgarn are both Archean greenstone — they SHOULD pass
+    L2.5. Granny Smith / Sunrise Dam / etc. are legitimate analogs for an
+    Abitibi target when the library lacks in-belt matches."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    abitibi = _build_profile({
+        "name": "Cartier-Cadillac", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "abitibi",
+        "tonnage_mt": 45.0,
+    })
+    yilgarn = _build_profile({
+        "name": "Sunrise Dam", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "yilgarn",
+        "tonnage_mt": 50.0, "grade_value": 2.5, "grade_unit": "g/t Au",
+    })
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+    passes, _, _, _, _, dropped = _cascading_match(abitibi, yilgarn, rule)
+    assert passes, f"Yilgarn analog should pass L2.5 for Abitibi target; dropped={dropped}"
+
+
+def test_belt_hard_filter_skips_when_candidate_belt_unknown():
+    """If the candidate has no tectonic_belt detected, L2.5 should NOT drop
+    it — the rest of the cascade still applies and the lack of a belt
+    becomes a rank penalty at L6 only. We don't punish poorly enriched
+    library entries here."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    target = _build_profile({
+        "name": "Target", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "abitibi",
+    })
+    cand = _build_profile({
+        "name": "Mystery Au", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": None,
+    })
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+    passes, _, _, _, _, dropped = _cascading_match(target, cand, rule)
+    assert passes, f"Unknown-belt candidate should not be dropped at L2.5; dropped={dropped}"
 
 
 def test_rule_priority_routes_to_most_specific():
