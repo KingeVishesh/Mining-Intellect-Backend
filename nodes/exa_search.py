@@ -190,6 +190,46 @@ def search_missing_fields(
 
 # ── 2. Analog Search ──────────────────────────────────────────────────────────
 
+# Sub-trend → human-readable hint for prompt construction. Used when the
+# target project resolves to a specific sub-trend within a tectonic belt
+# (e.g., Cortez Trend within great_basin_carlin). Including the sub-trend
+# in the Exa query biases the search toward in-trend canonical analogs
+# instead of generic same-belt projects. Example: a Cortez-Trend Red Hill
+# target without this hint returned Lookout Mountain / Long Canyon /
+# Archimedes / Pan Mine — all great_basin_carlin but off-Cortez. With the
+# hint, the query asks specifically for "Cortez Trend (Lander/Eureka
+# County) projects" which surfaces Goldrush, Cortez Hills, Pipeline.
+_SUB_TREND_HINTS: dict = {
+    "cortez_trend": (
+        "specifically on the Cortez Trend (Lander/Eureka County, Nevada — "
+        "Goldrush, Cortez Hills, Pipeline, Robertson corridor)"
+    ),
+    "carlin_trend": (
+        "specifically on the Carlin Trend (Eureka/Elko County, Nevada — "
+        "Goldstrike-Betze, Meikle, Leeville, Genesis, Rodeo)"
+    ),
+    "getchell_trend": (
+        "specifically on the Getchell Trend (Humboldt County, Nevada — "
+        "Turquoise Ridge, Twin Creeks, Pinson)"
+    ),
+    "battle_mountain_eureka": (
+        "specifically along the Battle Mountain-Eureka Trend (Nevada — "
+        "Marigold, Phoenix, Lone Tree, Ruby Hill, Lookout Mountain)"
+    ),
+    "pequop_long_canyon": (
+        "specifically in the Pequop/Long Canyon district (northeast Nevada)"
+    ),
+    "walker_lane_au": (
+        "specifically in the Walker Lane gold belt (Nevada — Round Mountain, "
+        "Manhattan, Tonopah, Paradise Peak)"
+    ),
+    "oquirrh_black_pine": (
+        "specifically in the Oquirrh / Black Pine district "
+        "(southern Idaho / northern Utah Carlin extension)"
+    ),
+}
+
+
 # Belt → human-readable hint for prompt construction
 _BELT_HINTS: dict = {
     "bc_quesnel_stikine":   "in British Columbia's Quesnel/Stikine terrane (Golden Triangle, Iskut, Babine, Toodoggone)",
@@ -246,14 +286,27 @@ def search_analog_projects(
         subtype = target_profile["deposit_subtype"].replace("_", " ")
         belt = target_profile.get("tectonic_belt")
         belt_phrase = _BELT_HINTS.get(belt, "") if belt else ""
+        # Sub-trend is the geological neighborhood within the belt (e.g.
+        # Cortez Trend within great_basin_carlin). When known, it narrows
+        # the Exa query toward in-trend canonicals — fixes the Red Hill
+        # case where a generic "Carlin Trend Nevada" query missed
+        # Goldrush/Cortez Hills/Pipeline.
+        sub_trend = target_profile.get("sub_trend")
+        sub_trend_phrase = _SUB_TREND_HINTS.get(sub_trend, "") if sub_trend else ""
         mode = (target_profile.get("mineralization_mode") or "").replace("_", " ")
         recovery = (target_profile.get("recovery_method") or "").replace("_", " ")
         suite = (target_profile.get("metal_suite") or "").replace("_", " ").upper()
 
-        # Identity sentence: what we're looking for in geological terms
+        # Identity sentence: what we're looking for in geological terms.
+        # Sub-trend goes IMMEDIATELY AFTER belt so Exa reads "Carlin in
+        # Great Basin specifically on the Cortez Trend ..." — the
+        # sub-trend hint reinforces and narrows the belt hint rather
+        # than competing with it.
         identity_parts = [f"{subtype} {material} projects"]
         if belt_phrase:
             identity_parts.append(belt_phrase)
+        if sub_trend_phrase:
+            identity_parts.append(sub_trend_phrase)
         if mode:
             identity_parts.append(f"with {mode} mineralization")
         if recovery:

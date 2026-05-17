@@ -547,6 +547,129 @@ _BELT_TO_GROUP: Dict[str, str] = {
 }
 
 
+# Sub-trend taxonomy — fine-grained district groupings WITHIN a tectonic
+# belt. Same belt does not mean same geological neighborhood: Cortez
+# Trend, Carlin Trend, Battle Mountain-Eureka, Getchell, Pequop, and
+# Walker Lane all sit inside great_basin_carlin but each has its own
+# host stratigraphy, structural plumbing, and canonical deposits. The
+# Exa analog search uses sub-trend to BIAS the query toward in-trend
+# canonicals (Cortez-Trend target → Goldrush/Cortez Hills/Pipeline rather
+# than whatever Carlin name surfaces from a generic Nevada query). The
+# cascade uses it as a ranking signal (L6.5: +15 same sub-trend).
+#
+# Each entry maps a sub-trend slug to (parent_belt, location_keywords).
+# detect_sub_trend() scans district / region / location_name text for any
+# keyword match; first-listed sub-trend wins (deterministic). Keep more-
+# specific sub-trends ABOVE more general ones so e.g. "Simpson Park
+# Mountains, Eureka County" lands on cortez_trend (specific) rather than
+# battle_mountain_eureka (county-level catch-all).
+SUB_TRENDS: Dict[str, Dict[str, List[str]]] = {
+    # ── Great Basin Carlin sub-trends ─────────────────────────────────────
+    # Listed in match-priority order: cortez_trend before battle_mountain_eureka
+    # because the Cortez corridor spans Lander/Eureka counties; checking
+    # cortez first prevents "Eureka County" from claiming a Cortez project.
+    "cortez_trend": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            # Specific Cortez Trend names only — no county-level keywords
+            # because Lander County overlaps both Cortez (south) and Battle
+            # Mountain (north). Substring on county catches both → wrong.
+            "cortez", "pipeline", "goldrush", "cortez hills",
+            "crescent valley", "simpson park", "shoshone range",
+            "robertson canyon", "horse canyon", "gold acres",
+        ],
+    },
+    "carlin_trend": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            "carlin trend", "goldstrike", "betze", "post deposit", "meikle",
+            "rodeo", "leeville", "genesis", "deep star", "screamer",
+            "north end carlin", "tuscarora", "independence",
+        ],
+    },
+    "getchell_trend": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            "getchell", "turquoise ridge", "twin creeks", "pinson",
+            "potosi", "humboldt county", "osgood mountain",
+        ],
+    },
+    "battle_mountain_eureka": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            # Specific district/mine names only (no "eureka county" alone —
+            # would hijack Cortez-corridor projects that share the county).
+            "battle mountain", "eureka district", "ruby hill",
+            "lookout mountain", "marigold", "phoenix nevada", "lone tree",
+            "fortitude", "copper canyon", "hilltop nevada", "buckhorn",
+            "trenton canyon", "northumberland", "monitor valley",
+        ],
+    },
+    "pequop_long_canyon": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            "pequop", "long canyon", "kinsley", "spruce mountain",
+        ],
+    },
+    "walker_lane_au": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            "walker lane", "round mountain", "manhattan gold", "tonopah gold",
+            "rawhide gold", "paradise peak", "bullfrog", "rhyolite",
+            "toiyabe", "monitor range",
+        ],
+    },
+    "oquirrh_black_pine": {
+        "belt": "great_basin_carlin",
+        "keywords": [
+            "black pine", "oquirrh", "southern idaho", "oneida",
+            "south idaho carlin", "north utah carlin",
+        ],
+    },
+}
+
+
+def detect_sub_trend(
+    district: Optional[str],
+    region: Optional[str] = None,
+    location_name: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Return the sub-trend slug matching the first keyword hit across the
+    provided text fields, or None when nothing matches. Used by the
+    analog cascade for the L6.5 same-sub-trend ranking bonus and by Exa
+    search to bias queries toward in-trend canonicals.
+
+    Substring + lowercase match. SUB_TRENDS iteration order is the tie-
+    breaker — more specific sub-trends come first so e.g. "Eureka County"
+    on a Cortez-corridor project doesn't get hijacked by the catch-all
+    battle_mountain_eureka entry.
+
+    Examples
+    --------
+    >>> detect_sub_trend("Cortez Hills District", "Lander County, Nevada")
+    'cortez_trend'
+    >>> detect_sub_trend(None, "Nevada", "Eureka County, Simpson Park Mountains")
+    'cortez_trend'
+    >>> detect_sub_trend(None, "Nevada", "Ruby Hill, Eureka District")
+    'battle_mountain_eureka'
+    >>> detect_sub_trend(None, "Nevada", "Pequop Mountains, NE Nevada")
+    'pequop_long_canyon'
+    >>> detect_sub_trend("Ottawa, Canada")
+    """
+    blob = " ".join(s for s in (district, region, location_name) if s).lower()
+    if not blob:
+        return None
+    for slug, meta in SUB_TRENDS.items():
+        for kw in meta["keywords"]:
+            if kw in blob:
+                return slug
+    return None
+
+
+ALL_SUB_TREND_SLUGS: FrozenSet[str] = frozenset(SUB_TRENDS.keys())
+
+
 # Metal suites — characteristic byproduct/co-product patterns
 METAL_SUITES: List[str] = [
     "cu_au",          # Cu-Au porphyry, IOCG

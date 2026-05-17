@@ -274,7 +274,14 @@ ANALOG_SELECTION_RULES = [
         "required_mining_methods": ["open_pit_bulk", "heap_leach_pad", "open_pit_selective"],
         "excluded_mining_methods": ["underground_vein", "iscr_in_situ", "block_cave", "dredging"],
         "tonnage_match_max_ratio": 5.0,  # Lesson LG65/LG160: super-large halo extent
-        "grade_match_max_ratio":   4.0,
+        # Grade tolerance loosened 2026-05-17 from 4.0 → 10.0 (Red Hill audit).
+        # Carlin sub-trends span 0.3 g/t (Marigold/Bald Mountain bulk pits) to
+        # 14 g/t (Turquoise Ridge refractory UG) within the SAME belt and
+        # SAME deposit class. A 4× cap dropped geologically canonical in-trend
+        # analogs (Goldstrike 4 g/t, Cortez Hills 3 g/t) for low-grade bulk
+        # targets like Red Hill (0.51 g/t). Selection should favor trend/
+        # host/style; grade alignment is the MODELLING step's job.
+        "grade_match_max_ratio":   10.0,
         "min_resource_year":   2010,
         "min_profile_strength": 5,
         "rule_priority":       200,

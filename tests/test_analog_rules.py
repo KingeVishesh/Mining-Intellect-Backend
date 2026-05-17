@@ -371,6 +371,134 @@ def test_belt_hard_filter_allows_in_group_match():
     assert passes, f"Yilgarn analog should pass L2.5 for Abitibi target; dropped={dropped}"
 
 
+def test_sub_trend_detection_cortez_from_eureka_simpson_park():
+    """Red Hill is in Simpson Park Mountains, Eureka County, Nevada. The
+    Cortez Trend extends through this area — detect_sub_trend should
+    return 'cortez_trend', not get hijacked by the 'eureka county'
+    keyword on battle_mountain_eureka."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    assert detect_sub_trend(
+        None, "Nevada",
+        "Northern Simpson Park Mountains, Eureka County, Nevada, USA",
+    ) == "cortez_trend"
+
+
+def test_sub_trend_detection_distinguishes_trends():
+    """SUB_TRENDS keyword routing covers each major Carlin sub-trend."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    assert detect_sub_trend("Cortez Hills District",
+                              "Lander County, Nevada") == "cortez_trend"
+    assert detect_sub_trend("Carlin Trend",
+                              "Elko County, Nevada") == "carlin_trend"
+    assert detect_sub_trend("Getchell Trend",
+                              "Humboldt County, Nevada") == "getchell_trend"
+    assert detect_sub_trend("Battle Mountain District",
+                              "Lander County, Nevada") == "battle_mountain_eureka"
+    assert detect_sub_trend("Ruby Hill / Eureka District",
+                              "Eureka County, Nevada") == "battle_mountain_eureka"
+    assert detect_sub_trend("Pequop Mountains",
+                              "Elko County, Nevada") == "pequop_long_canyon"
+    assert detect_sub_trend("Round Mountain",
+                              "Nye County, Nevada") == "walker_lane_au"
+    assert detect_sub_trend("Black Pine",
+                              "Cassia County, Idaho") == "oquirrh_black_pine"
+    assert detect_sub_trend("Ottawa", "Canada") is None
+
+
+def test_l6_5_sub_trend_bonus_lifts_in_trend_above_out_of_trend():
+    """For a Cortez-Trend target, an in-trend Carlin analog must rank
+    above an out-of-trend Carlin analog of otherwise equal quality —
+    that's the Red Hill fix: Goldrush (Cortez) ranks above Lookout
+    Mountain (Battle Mountain-Eureka) for a Red Hill (Cortez) target."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    red_hill = _build_profile({
+        "name": "Red Hill", "material": "gold",
+        "deposit_type": "Sediment-hosted Carlin-style",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "host_rock_class": "carbonate_sediment",
+        "tectonic_belt": "great_basin_carlin",
+        "metal_suite": "au_only",
+        "country": "USA", "region": "Nevada",
+        "location_name": "Northern Simpson Park Mountains, Eureka County, Nevada",
+        "tonnage_mt": 253.0, "grade_value": 0.51, "grade_unit": "g/t Au",
+        "project_stage_class": "exploration",
+    })
+    cortez_in_trend = _build_profile({
+        "name": "Cortez Hills", "material": "gold",
+        "deposit_type": "Carlin-style sediment-hosted",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "host_rock_class": "carbonate_sediment",
+        "tectonic_belt": "great_basin_carlin",
+        "metal_suite": "au_only",
+        "mining_method_class": "open_pit_bulk",
+        "country": "USA", "region": "Nevada",
+        "location_name": "Cortez Hills District, Lander County, Nevada",
+        "tonnage_mt": 90.0, "grade_value": 3.0, "grade_unit": "g/t Au",
+    })
+    lookout_off_trend = _build_profile({
+        "name": "Lookout Mountain", "material": "gold",
+        "deposit_type": "Carlin-style sediment-hosted",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "host_rock_class": "carbonate_sediment",
+        "tectonic_belt": "great_basin_carlin",
+        "metal_suite": "au_only",
+        "mining_method_class": "open_pit_bulk",
+        "country": "USA", "region": "Nevada",
+        "location_name": "Eureka District, Eureka County, Nevada",
+        "tonnage_mt": 90.0, "grade_value": 0.5, "grade_unit": "g/t Au",
+    })
+    rule = _find_rule("analog_sel_gold_carlin_super_large")
+
+    c_pass, c_rank, _, _, _, c_drop = _cascading_match(red_hill, cortez_in_trend, rule)
+    l_pass, l_rank, _, _, _, l_drop = _cascading_match(red_hill, lookout_off_trend, rule)
+
+    assert c_pass, f"Cortez Hills must pass the cascade for Red Hill (dropped at {c_drop})"
+    assert l_pass, f"Lookout Mountain must pass the cascade for Red Hill (dropped at {l_drop})"
+    assert c_rank > l_rank, (
+        f"In-trend Cortez Hills (rank={c_rank}) should outrank off-trend "
+        f"Lookout Mountain (rank={l_rank}) for Cortez-Trend Red Hill target"
+    )
+
+
+def test_carlin_grade_tolerance_passes_in_trend_higher_grade():
+    """Goldstrike-style 4 g/t in-trend Carlin must pass for a low-grade
+    bulk Carlin target (0.5 g/t). Pre-fix: 4× ratio dropped it. Post-fix:
+    10× ratio admits geologically valid in-trend canonicals at any of the
+    grade tiers Carlin deposits span (0.3 – 14 g/t)."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    target = _build_profile({
+        "material": "gold", "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "tectonic_belt": "great_basin_carlin",
+        "tonnage_mt": 253.0, "grade_value": 0.51, "grade_unit": "g/t Au",
+    })
+    cand = _build_profile({
+        "name": "Goldstrike-style", "material": "gold",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "tectonic_belt": "great_basin_carlin",
+        "tonnage_mt": 180.0, "grade_value": 4.0, "grade_unit": "g/t Au",
+    })
+    rule = _find_rule("analog_sel_gold_carlin_super_large")
+    passes, _, _, _, _, dropped = _cascading_match(target, cand, rule)
+    assert passes, f"Goldstrike-style 4 g/t Carlin must pass; dropped at {dropped}"
+
+
+def test_exa_query_includes_sub_trend_hint_for_cortez_target():
+    """Verify that the Exa query builder injects the sub-trend hint when
+    a target resolves to a sub-trend. This is the root fix for Red Hill —
+    the system asks Exa for Cortez Trend canonicals instead of generic
+    Carlin projects."""
+    from nodes.exa_search import _SUB_TREND_HINTS
+    assert "Cortez Trend" in _SUB_TREND_HINTS["cortez_trend"]
+    assert "Goldrush" in _SUB_TREND_HINTS["cortez_trend"]
+    assert "Cortez Hills" in _SUB_TREND_HINTS["cortez_trend"]
+    assert "Pipeline" in _SUB_TREND_HINTS["cortez_trend"]
+
+
 def test_belt_hard_filter_skips_when_candidate_belt_unknown():
     """If the candidate has no tectonic_belt detected, L2.5 should NOT drop
     it — the rest of the cascade still applies and the lack of a belt

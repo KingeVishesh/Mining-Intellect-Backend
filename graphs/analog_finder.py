@@ -341,6 +341,15 @@ def _build_profile(row: dict) -> dict:
         "source_url":           row.get("source_url"),
         "company_name":         (row.get("company_name") or "").strip().lower(),
         "project_id":           row.get("project_id") or row.get("id"),
+        # Sub-trend (geological neighborhood within the tectonic belt).
+        # Cortez vs Carlin vs Battle Mountain-Eureka vs Getchell are all
+        # great_basin_carlin but very different host stratigraphy. Used
+        # for L6.5 rank bonus and to bias the Exa search toward in-trend
+        # canonical analogs. None when the location text doesn't match
+        # any sub-trend in SUB_TRENDS.
+        "sub_trend":            geo_taxonomy.detect_sub_trend(
+            row.get("district"), row.get("region"), row.get("location_name"),
+        ),
     }
 
 
@@ -591,6 +600,26 @@ def _cascading_match(
                 f"L6 belt same-group ({candidate['tectonic_belt']} ~ "
                 f"{target['tectonic_belt']}): +15"
             )
+
+    # ── L6.5: Sub-trend rank (RANK +25) ────────────────────────────────────
+    # Same sub-trend within the same belt is geologically much closer than
+    # same-belt-different-sub-trend (Cortez Trend vs Battle Mountain-Eureka,
+    # both great_basin_carlin). Same host stratigraphy, same age of
+    # mineralization, same structural plumbing.
+    #
+    # The bonus is deliberately set to +25 — large enough to override the
+    # L8 grade-match max (+15). The Red Hill audit revealed that off-trend
+    # Lookout Mountain (0.5 g/t, exactly matches target grade) was beating
+    # in-trend Cortez Hills (3 g/t bulk grade) because L8 grade tied the
+    # race. Sub-trend geology is the right primary signal for Carlin
+    # analog selection; grade alignment is the MODELLING step's job.
+    t_subtrend = target.get("sub_trend")
+    c_subtrend = candidate.get("sub_trend")
+    if t_subtrend and c_subtrend and t_subtrend == c_subtrend:
+        matched += 1
+        evaluated += 1
+        rank_pts += 25
+        reasons.append(f"L6.5 sub-trend match ({c_subtrend}): +25")
 
     # ── L7: Metal suite (RANK +20) ─────────────────────────────────────────
     if target["metal_suite"] and candidate["metal_suite"]:
