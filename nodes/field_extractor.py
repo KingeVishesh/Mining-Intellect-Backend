@@ -328,6 +328,110 @@ from nodes.geo_taxonomy import (
 )
 
 
+def probe_deposit_type(
+    project_name: str,
+    material: str,
+    location_hint: str,
+    company_name: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Last-resort: ask Grok directly what kind of deposit a project is, using
+    project name + company + material + location. Used by the
+    project_research graph's derive_geological_profile_node when neither
+    Grok's full extraction nor the heuristic detectors could fill in
+    deposit_type.
+
+    company_name disambiguates ambiguous project names — "Goldfields"
+    matches dozens of projects worldwide; "Fortune Bay Corp – Goldfields"
+    narrows to the Saskatchewan Goldfields (Box/Athona). Pass when
+    available.
+
+    Returns dict with deposit_type / subtype / pattern slugs validated
+    against the controlled vocabulary, or None if the model says it
+    doesn't know.
+
+    Example: project_name="Pasofino Gold - Dugbe", material="gold",
+    location_hint="Sinoe County, Liberia" → {
+        "deposit_type": "orogenic shear-hosted gold (Birimian belt)",
+        "deposit_subtype": "orogenic_general",
+        "mineralization_pattern": "vein_hosted",
+    }
+    """
+    if not project_name or not material:
+        return None
+    system_prompt = (
+        "You are a mining-finance geologist. Classify the deposit type of "
+        "a named mineral project using your general industry knowledge. "
+        "Return strict JSON only. If you do not know the project with "
+        "reasonable certainty, set all fields to null — false positives "
+        "poison downstream modelling, so prefer null over guessing."
+    )
+    user_prompt = (
+        f"Project: {project_name}\n"
+        + (f"Company: {company_name}\n" if company_name else "")
+        + f"Material: {material}\n"
+        f"Location: {location_hint}\n\n"
+        f"Return JSON with these fields (use null for unknown):\n"
+        f"  deposit_type: short freeform description "
+        f"(e.g. 'Carlin-style sediment-hosted gold', "
+        f"'orogenic vein-hosted gold (Birimian belt)', "
+        f"'alkalic porphyry copper-gold')\n"
+        f"  deposit_subtype: ONE slug from the controlled vocab — "
+        f"alkalic_porphyry, calc_alkalic_porphyry, laramide_porphyry, "
+        f"iocg_oxide, iocg_sulfide, iocg_hybrid, "
+        f"low_sulfidation_epithermal, high_sulfidation_epithermal, "
+        f"intermediate_sulfidation_epithermal, "
+        f"greenstone_orogenic, turbidite_orogenic, bif_hosted_orogenic, "
+        f"orogenic_general, irgs_general, placer_general, bif_hosted_gold, "
+        f"sedex, kupferschiefer_style, manto_cu, crd, mvt, redbed_cu, "
+        f"sediment_hosted_general, vms_general, carlin_general, "
+        f"cu_au_skarn, fe_skarn, zn_pb_skarn, w_mo_skarn, skarn_general, "
+        f"merensky_reef, ug2_reef, platreef, "
+        f"limonite_laterite, saprolite_laterite, laterite_general, "
+        f"komatiite_hosted, conduit_hosted, magmatic_sulphide_general, "
+        f"bif_general, oxide_iscr_supergene_blanket, "
+        f"high_sulfidation_lithocap_porphyry\n"
+        f"  mineralization_pattern: ONE slug — vein_hosted, "
+        f"disseminated_bulk, stockwork, breccia_hosted, replacement, "
+        f"reef, blanket, massive_sulphide, placer\n"
+        f"\n"
+        f"Strict rules:\n"
+        f"  - If the named project is not one you have specific knowledge "
+        f"of, return all nulls. False positives are worse than nulls.\n"
+        f"  - subtype and pattern must be from the lists above exactly.\n"
+    )
+    raw = _grok([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ], timeout=45)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning(f"[probe_deposit_type] non-JSON: {raw[:200]}")
+        return None
+    dep = (data.get("deposit_type") or "").strip() or None
+    sub = (data.get("deposit_subtype") or "").strip() or None
+    pat = (data.get("mineralization_pattern") or "").strip() or None
+    # Validate against vocabulary — silently drop unknowns rather than poisoning
+    if sub:
+        sub = _validate(sub, ALL_SUBTYPE_SLUGS)
+    if pat:
+        pat = _validate(pat, ALL_PATTERN_SLUGS)
+    if not (dep or sub or pat):
+        return None
+    logger.info(
+        f"[probe_deposit_type] {project_name!r} → "
+        f"deposit_type={dep!r}, subtype={sub!r}, pattern={pat!r}"
+    )
+    return {
+        "deposit_type": dep,
+        "deposit_subtype": sub,
+        "mineralization_pattern": pat,
+    }
+
+
 def _validate(value, allowed: frozenset) -> Optional[str]:
     """Return value if it's in the allowed set (case-insensitive), else None."""
     if not value or not isinstance(value, str):

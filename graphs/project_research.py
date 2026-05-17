@@ -204,15 +204,59 @@ def derive_geological_profile_node(state: ResearchState) -> ResearchState:
         if mc:
             inferred["mining_method_class"] = mc
 
-    # Synthesize deposit_type from subtype when Grok left it blank. The
-    # rule engine's Pass 1/2 ILIKE matching needs a non-empty string; the
-    # subtype slug, humanized, is the safest derivation.
-    if not fields.get("deposit_type") and inferred.get("deposit_subtype"):
-        humanized = inferred["deposit_subtype"].replace("_", " ")
+    effective_subtype = (
+        inferred.get("deposit_subtype") or fields.get("deposit_subtype")
+    )
+
+    # Grok probe: fire WHENEVER deposit_type is null and we have any
+    # location signal. Don't gate on effective_subtype — the probe gives
+    # richer deposit_type text than the slug-synthesis fallback ("orogenic
+    # vein-hosted gold (Newfoundland Appalachian belt)" beats "orogenic
+    # general"). The probe is also where projects with only mining_method
+    # / processing_method get rescued (Hammerdown, Goldfields).
+    if (not fields.get("deposit_type")
+            and (fields.get("country") or fields.get("region") or fields.get("district"))):
+        from nodes.field_extractor import probe_deposit_type
+        project_name = state.get("project_name") or ""
+        material = state.get("material") or fields.get("material") or "gold"
+        location_bits = [b for b in (fields.get("district"), fields.get("region"),
+                                       fields.get("country")) if b]
+        # company_name disambiguates ambiguous targets ("Goldfields" alone
+        # matches dozens of projects worldwide; "Fortune Bay Corp -
+        # Goldfields" pinpoints the Saskatchewan one).
+        company_name = state.get("company") or fields.get("company_name")
+        probe = probe_deposit_type(
+            project_name, material, " / ".join(location_bits),
+            company_name=company_name,
+        )
+        if probe:
+            dep_text = probe.get("deposit_type")
+            sub_slug = probe.get("deposit_subtype")
+            pat_slug = probe.get("mineralization_pattern")
+            if dep_text:
+                inferred["deposit_type"] = dep_text
+                logger.info(
+                    f"[derive] Grok probe filled deposit_type={dep_text!r}"
+                )
+            if sub_slug and not effective_subtype:
+                inferred["deposit_subtype"] = sub_slug
+                effective_subtype = sub_slug
+            if pat_slug and not (
+                inferred.get("mineralization_pattern")
+                or fields.get("mineralization_pattern")
+            ):
+                inferred["mineralization_pattern"] = pat_slug
+
+    # Fallback synthesis: if the probe failed or didn't return deposit_type
+    # but we DO have a subtype slug, synthesize a human-readable deposit_type
+    # from it so rule routing (Pass 1/2 ILIKE) has a string to match on.
+    # Runs after the probe so a real description beats a slug humanization.
+    if not fields.get("deposit_type") and "deposit_type" not in inferred and effective_subtype:
+        humanized = effective_subtype.replace("_", " ")
         inferred["deposit_type"] = humanized
         logger.info(
             f"[derive] synthesized deposit_type='{humanized}' from "
-            f"detected subtype={inferred['deposit_subtype']!r}"
+            f"subtype={effective_subtype!r}"
         )
 
     if not inferred:
@@ -253,13 +297,149 @@ def geocode_node(state: ResearchState) -> ResearchState:
     return {}
 
 
+# Country keyword index — substring matches in location_name are signals
+# of the project's actual country. Used by validate_node to catch field
+# crosstalk like Latin Metals Crosby whose region was "Jujuy Province"
+# (Argentina) but location_name was "Crosby County, Texas, USA" — two
+# different real-world places that got merged into one record.
+#
+# Keep this list ASCII-lowercase. The validator lowercases location_name
+# before matching.
+_COUNTRY_KEYWORDS: dict[str, list[str]] = {
+    "argentina": ["argentina", "salta", "jujuy", "san juan", "mendoza",
+                   "catamarca", "santa cruz argentina", "patagonia argentina"],
+    "australia": ["australia", "nsw", "new south wales", "queensland",
+                   "western australia", "south australia", "tasmania",
+                   "northern territory"],
+    "brazil":    ["brazil", "brasil", "minas gerais", "pará", "para state",
+                   "tapajós", "carajás", "bahia"],
+    "canada":    ["canada", "ontario", "quebec", "british columbia",
+                   "alberta", "saskatchewan", "manitoba", "yukon",
+                   "newfoundland", "labrador", "nova scotia", "nunavut"],
+    "chile":     ["chile", "atacama", "antofagasta", "coquimbo"],
+    "china":     ["china", "yunnan", "guizhou", "xinjiang"],
+    "colombia":  ["colombia"],
+    "côte d'ivoire": ["côte d'ivoire", "cote d'ivoire", "ivory coast",
+                       "abidjan", "yamoussoukro", "bouaflé"],
+    "ecuador":   ["ecuador", "imbabura", "el oro province"],
+    "finland":   ["finland", "lapland", "kuusamo", "kittilä"],
+    "ghana":     ["ghana", "ashanti", "kumasi", "obuasi"],
+    "guyana":    ["guyana", "cuyuni", "mazaruni", "co-operative republic of guyana"],
+    "guinea":    ["guinea conakry", "guinea bissau", "republic of guinea"],
+    "indonesia": ["indonesia", "sumatra", "kalimantan", "papua indonesia"],
+    "liberia":   ["liberia", "sinoe county", "monrovia"],
+    "mali":      ["mali", "kayes", "kéniéba", "kenieba", "loulo"],
+    "mexico":    ["mexico", "sonora", "chihuahua", "durango", "zacatecas"],
+    "new zealand": ["new zealand", "reefton", "otago"],
+    "papua new guinea": ["papua new guinea", "png", "porgera", "lihir"],
+    "peru":      ["peru", "lima", "cajamarca", "yanacocha"],
+    "philippines": ["philippines", "luzon", "mindanao"],
+    "saudi arabia": ["saudi arabia", "jeddah"],
+    "senegal":   ["senegal", "kédougou", "kedougou", "sabodala"],
+    "south africa": ["south africa", "bushveld", "witwatersrand"],
+    "suriname":  ["suriname", "brokopondo"],
+    "sweden":    ["sweden", "skellefte", "kiruna"],
+    "tanzania":  ["tanzania", "geita", "lake victoria"],
+    "turkey":    ["turkey", "anatolia"],
+    "uk":        ["united kingdom", "scotland", "england", "wales", "cornwall"],
+    "usa":       ["usa", "united states", "u.s.a", "nevada", "arizona",
+                   "alaska", "idaho", "montana", "colorado", "utah",
+                   "wyoming", "california", "new mexico", "north dakota",
+                   "south dakota", "texas"],
+    "venezuela": ["venezuela"],
+    "zambia":    ["zambia", "lufilian", "copperbelt zambia"],
+    "zimbabwe":  ["zimbabwe", "great dyke"],
+    "burkina faso": ["burkina faso", "houndé", "hounde"],
+    "drc":       ["drc", "dr congo", "democratic republic of"],
+}
+
+
+def _country_in_text(text: str) -> set[str]:
+    """Return the set of country slugs whose keywords appear in `text`.
+    Used to detect when location_name implies a country different from
+    what's stored in the `country` field."""
+    if not text:
+        return set()
+    t = text.lower()
+    hits: set[str] = set()
+    for slug, kws in _COUNTRY_KEYWORDS.items():
+        for kw in kws:
+            if kw in t:
+                hits.add(slug)
+                break
+    return hits
+
+
+def _detect_country_conflict(fields: dict) -> Optional[str]:
+    """
+    Return a human-readable conflict description when `country` and
+    `location_name` (or `region`) clearly disagree about which country
+    the project sits in. Returns None when no conflict.
+
+    Conservative — only fires when location_name names a SPECIFIC
+    country different from the stored one. Generic mentions like
+    "South America" don't trigger.
+    """
+    stored_country = (fields.get("country") or "").strip().lower()
+    if not stored_country:
+        return None
+    location_hits = _country_in_text(fields.get("location_name") or "")
+    region_hits = _country_in_text(fields.get("region") or "")
+    all_hits = location_hits | region_hits
+    if not all_hits:
+        return None
+    # Map stored_country onto its slug
+    stored_slug: Optional[str] = None
+    for slug, kws in _COUNTRY_KEYWORDS.items():
+        if stored_country in kws or stored_country == slug:
+            stored_slug = slug
+            break
+    if stored_slug is None:
+        return None
+    # Conflict only when location names a DIFFERENT country AND the stored
+    # country isn't also mentioned (e.g., "near Argentine border, Chile"
+    # legitimately mentions both).
+    if stored_slug in all_hits:
+        return None
+    if all_hits:
+        wrong = sorted(all_hits)
+        return (
+            f"country={fields.get('country')!r} but location_name "
+            f"({fields.get('location_name')!r}) / region "
+            f"({fields.get('region')!r}) name a different country: "
+            f"{wrong}. Likely Exa returned text from the wrong project; "
+            f"re-research with disambiguating context."
+        )
+    return None
+
+
 def validate_node(state: ResearchState) -> ResearchState:
-    """Check for required fields and build validation_errors list."""
+    """Check for required fields, country-consistency, and build
+    validation_errors list. On a country conflict (Crosby-style crosstalk),
+    we additionally CLEAR the conflicting fields so the bad data isn't
+    persisted — the project is left thin instead of poisoned."""
     if state.get("error"):
         return {}
 
     fields = state.get("extracted_fields", {})
     errors = []
+
+    # Cross-field country consistency check — fires before required-field
+    # check so cleared fields aren't double-reported as missing.
+    conflict = _detect_country_conflict(fields)
+    if conflict:
+        errors.append(f"Country conflict: {conflict}")
+        logger.warning(f"[validate] {conflict}")
+        # Clear the location-related fields that are suspect. Keep country
+        # (the inbound seed value, generally trustworthy) but drop the
+        # downstream fields that may have been extracted from the wrong
+        # project's text. The next run can re-extract cleanly.
+        fields = dict(fields)
+        for k in ("location_name", "district", "region", "latitude",
+                   "longitude", "mineralization_style", "host_rock",
+                   "deposit_type", "deposit_subtype"):
+            if fields.get(k):
+                fields[k] = None
 
     required = ["country", "deposit_type", "project_stage"]
     for f in required:
@@ -276,8 +456,59 @@ def validate_node(state: ResearchState) -> ResearchState:
     if stage in study_stages and fields.get("tonnage_mt") is None:
         errors.append("No resource tonnage found (required for PEA+ stage projects)")
 
+    # ── Plausibility checks ─────────────────────────────────────────────
+    # Catch obvious Grok decimal-misplacement or unit confusion before
+    # the absurd value enters the cascade and corrupts a model run.
+    # When tonnage × grade implies a deposit too large to be plausible
+    # for the stated stage, clear the suspect numeric values (keep the
+    # geological identity).
+    tonnage = fields.get("tonnage_mt")
+    grade = fields.get("grade_value")
+    grade_unit = (fields.get("grade_unit") or "").lower()
+    material = (fields.get("material") or "").lower()
+    if tonnage and grade:
+        try:
+            t, g = float(tonnage), float(grade)
+            # Gold bulk deposits rarely exceed 5 g/t; refractory UG up to 25.
+            # Anything > 50 g/t at >5 Mt tonnage is almost certainly wrong
+            # (decimal misplaced or grade reported in oz/t mistakenly).
+            if material == "gold" and "g/t" in grade_unit:
+                if g > 50 and t > 5:
+                    errors.append(
+                        f"Implausible gold grade {g} g/t @ {t} Mt — likely "
+                        f"unit confusion (oz/t vs g/t) or decimal misplaced. "
+                        f"Clearing grade for re-research."
+                    )
+                    fields = dict(fields)
+                    fields["grade_value"] = None
+                    fields["grade_unit"] = None
+                # Gold contained > 200 Moz puts the project in Witwatersrand
+                # territory; no early-stage explorer has this.
+                contained_moz = (t * g / 31.1035)  # Mt × g/t → Moz approx
+                if contained_moz > 200 and stage in ("exploration", "pea", "pfs"):
+                    errors.append(
+                        f"Implausible contained gold {contained_moz:.0f} Moz "
+                        f"for stage={stage!r}. Clearing tonnage/grade."
+                    )
+                    fields = dict(fields)
+                    fields["tonnage_mt"] = None
+                    fields["grade_value"] = None
+            # Copper percent grades > 20% are exceptional; > 50% is impossible
+            # at any meaningful tonnage (would be native copper specimens).
+            if material == "copper" and "%" in grade_unit:
+                if g > 20 and t > 0.5:
+                    errors.append(
+                        f"Implausible copper grade {g}% @ {t} Mt — "
+                        f"likely unit confusion. Clearing grade."
+                    )
+                    fields = dict(fields)
+                    fields["grade_value"] = None
+                    fields["grade_unit"] = None
+        except (TypeError, ValueError):
+            pass  # numeric parse failed elsewhere; not a plausibility issue
+
     logger.info(f"[validate] {len(errors)} validation issues")
-    return {"validation_errors": errors}
+    return {"extracted_fields": fields, "validation_errors": errors}
 
 
 def save_to_supabase_node(state: ResearchState) -> ResearchState:
