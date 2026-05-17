@@ -269,6 +269,105 @@ _SUB_TREND_HINTS: dict = {
         "specifically in the Red Lake gold camp (Ontario Abitibi — "
         "Red Lake mine complex, Campbell, Madsen, Cochenour — high-grade vein shoots)"
     ),
+    "rice_lake_greenstone": (
+        "specifically in the Rice Lake / Wabigoon-Uchi greenstone (Manitoba — "
+        "San Antonio Mine, Bissett, True North Complex; high-grade vein shoots "
+        "in gabbro and mafic volcanic host)"
+    ),
+    "batchawana_wawa": (
+        "specifically in the Batchawana / Wawa / Michipicoten greenstone belt "
+        "(Ontario — Island Gold, Eagle River, Renabie, Magpie — Archean orogenic vein)"
+    ),
+    "ashanti_belt": (
+        "specifically on the Ashanti / Bibiani / Tarkwa belt (Ghana — Obuasi, "
+        "Ahafo, Prestea-Bogoso, Tarkwa, Iduapriem, Akyem — large orogenic shear-"
+        "hosted vein systems with shear-zone-controlled mineralization)"
+    ),
+    "sefwi_bibiani": (
+        "specifically on the Sefwi-Bibiani belt (western Ghana — Chirano, Wassa, "
+        "Akropong — orogenic vein-shear systems in Birimian volcanic-sedimentary "
+        "sequences)"
+    ),
+    "birimian_kedougou_kenieba": (
+        "specifically on the Kédougou-Kéniéba inlier (Senegal/Mali — Loulo-"
+        "Gounkoto, Fékola, Yatela, Sabodala-Massawa, Syama — Birimian orogenic gold)"
+    ),
+    "banfora_houndé": (
+        "specifically on the Banfora-Houndé / Boromo belt (Burkina Faso / Côte "
+        "d'Ivoire — Sanbrado, Yaramoko, Wahgnion, Essakane, Bissa, Mana, Bonikro, "
+        "Agbaou — vein-shear orogenic Birimian gold)"
+    ),
+}
+
+
+# Priority canonical analog names per sub-trend. The judge audit (2026-05-17)
+# revealed that descriptive hints alone aren't directive enough — Exa was
+# reading "Cortez Trend (Goldrush, Cortez Hills, Pipeline)" as informational
+# and returning other Carlin projects. These names are spliced into the
+# prompt as an explicit "PRIORITY ANALOGS" section so Exa treats them as
+# the actual target list, not flavor text.
+_SUB_TREND_PRIORITY_ANALOGS: dict = {
+    "cortez_trend": [
+        "Goldrush", "Cortez Hills", "Pipeline", "Cortez Mine",
+        "Crescent Valley", "Robertson",
+    ],
+    "carlin_trend": [
+        "Goldstrike", "Betze-Post", "Meikle", "Rodeo", "Leeville",
+        "Genesis", "Deep Star",
+    ],
+    "getchell_trend": [
+        "Turquoise Ridge", "Twin Creeks", "Pinson",
+    ],
+    "battle_mountain_eureka": [
+        "Marigold", "Phoenix Project", "Lone Tree", "Ruby Hill",
+        "Lookout Mountain", "Fortitude",
+    ],
+    "pequop_long_canyon": ["Long Canyon", "Kinsley"],
+    "walker_lane_au": [
+        "Round Mountain", "Manhattan", "Tonopah", "Paradise Peak", "Bullfrog",
+    ],
+    "oquirrh_black_pine": [
+        "Black Pine", "Oquirrh Mountains gold", "Long Canyon Idaho",
+    ],
+    "cadillac_break_valdor": [
+        "Sigma-Lamaque", "Goldex", "Beaufor", "Lamaque", "Canadian Malartic",
+        "Sigma Mine", "Chimo Mine", "Bourlamaque",
+    ],
+    "bousquet_camp": [
+        "LaRonde", "Westwood", "Doyon", "Bousquet",
+    ],
+    "casa_berardi_camp": ["Casa Berardi"],
+    "kirkland_lake_camp": [
+        "Macassa", "Kerr-Addison", "Young-Davidson", "Wright-Hargreaves",
+    ],
+    "rouyn_noranda_camp": ["Horne 5", "Quemont"],
+    "timmins_camp": [
+        "Hollinger", "Dome Mine", "McIntyre", "Hoyle Pond", "Pamour",
+    ],
+    "detour_trend": ["Detour Lake", "Côté Gold"],
+    "hemlo_camp": ["Williams Mine", "David Bell", "Golden Giant"],
+    "joutel_camp": ["Eagle-Telbel", "Selbaie", "Matagami"],
+    "red_lake_camp": [
+        "Red Lake Mine Complex", "Campbell Mine", "Madsen", "Cochenour",
+    ],
+    "rice_lake_greenstone": [
+        "San Antonio Mine", "Bissett", "Rice Lake gold deposits",
+    ],
+    "batchawana_wawa": [
+        "Island Gold Mine", "Eagle River", "Renabie", "Magpie",
+        "Goudreau-Lochalsh",
+    ],
+    "ashanti_belt": [
+        "Obuasi", "Ahafo", "Bibiani", "Prestea-Bogoso", "Tarkwa", "Akyem",
+    ],
+    "sefwi_bibiani": ["Chirano", "Wassa", "Akropong"],
+    "birimian_kedougou_kenieba": [
+        "Loulo-Gounkoto", "Fékola", "Sabodala-Massawa", "Syama", "Yatela",
+    ],
+    "banfora_houndé": [
+        "Sanbrado", "Yaramoko", "Wahgnion", "Essakane", "Bissa", "Mana",
+        "Bonikro", "Agbaou",
+    ],
 }
 
 
@@ -374,9 +473,31 @@ def search_analog_projects(
         grade_hint = (f" Grade range {grade_min}–{grade_max} {rule_grade_unit}."
                       if grade_min and grade_max else "")
 
+        # Priority-anchor names for the target's sub-trend. Without this the
+        # descriptive hint reads as flavor text and Exa returns whatever's
+        # most popular for the broader belt query. Listing names as a
+        # PRIORITY directive elevates them in Exa's retrieval ranking.
+        priority_names: list[str] = []
+        if sub_trend:
+            priority_names = list(
+                _SUB_TREND_PRIORITY_ANALOGS.get(sub_trend, []) or []
+            )
+            # Don't ask Exa to return the target project as its own analog
+            if project_name:
+                pn = project_name.lower().strip()
+                priority_names = [
+                    n for n in priority_names if pn not in n.lower()
+                ]
+        priority_clause = (
+            f" PRIORITY ANALOGS — these specific deposits MUST be included "
+            f"in your results if they fit the geological profile above: "
+            f"{', '.join(priority_names)}."
+            if priority_names else ""
+        )
+
         query = (
             f"Find 5-8 {identity} with confirmed NI 43-101 or JORC resource estimates."
-            f"{grade_hint}{exclusion_clause}"
+            f"{grade_hint}{priority_clause}{exclusion_clause}"
             f" {exclude_str}"
             f" For each project provide: project name, company, country and region, "
             f"deposit type and sub-type, host rock type, mineralization style and mode "

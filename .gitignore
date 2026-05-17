@@ -27,6 +27,9 @@ env/
 # LangGraph
 .langgraph_cache/
 
+# Analog quality judge per-run output (commit the script, not the runs)
+reports/judge/
+
 # OS
 .DS_Store
 Thumbs.db

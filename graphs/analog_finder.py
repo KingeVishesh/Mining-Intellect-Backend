@@ -27,6 +27,7 @@ from typing import Dict, List, Optional, TypedDict, Tuple
 from langgraph.graph import StateGraph, END
 
 from nodes import exa_search, field_extractor, rules_engine, supabase_ops, geo_taxonomy, lessons
+from nodes import gap_detector
 
 logger = logging.getLogger(__name__)
 
@@ -601,25 +602,26 @@ def _cascading_match(
                 f"{target['tectonic_belt']}): +15"
             )
 
-    # ── L6.5: Sub-trend rank (RANK +25) ────────────────────────────────────
+    # ── L6.5: Sub-trend rank (RANK +40) ────────────────────────────────────
     # Same sub-trend within the same belt is geologically much closer than
     # same-belt-different-sub-trend (Cortez Trend vs Battle Mountain-Eureka,
     # both great_basin_carlin). Same host stratigraphy, same age of
     # mineralization, same structural plumbing.
     #
-    # The bonus is deliberately set to +25 — large enough to override the
-    # L8 grade-match max (+15). The Red Hill audit revealed that off-trend
-    # Lookout Mountain (0.5 g/t, exactly matches target grade) was beating
-    # in-trend Cortez Hills (3 g/t bulk grade) because L8 grade tied the
-    # race. Sub-trend geology is the right primary signal for Carlin
-    # analog selection; grade alignment is the MODELLING step's job.
+    # Bonus was +15 → +25 → +40 across successive judge audits.
+    # At +25 the LLM judge still saw in-camp matches losing the top-4
+    # race to off-camp library entries with strong L8/L9/L10 scores
+    # (e.g. Westwood/Casa Berardi for Cartier-Cadillac). +40 reliably
+    # dominates: same-sub-trend is the single strongest signal short of
+    # the L1-L5 hard filters, because in-camp geology = same host
+    # stratigraphy + same orogenic event + same structural plumbing.
     t_subtrend = target.get("sub_trend")
     c_subtrend = candidate.get("sub_trend")
     if t_subtrend and c_subtrend and t_subtrend == c_subtrend:
         matched += 1
         evaluated += 1
-        rank_pts += 25
-        reasons.append(f"L6.5 sub-trend match ({c_subtrend}): +25")
+        rank_pts += 40
+        reasons.append(f"L6.5 sub-trend match ({c_subtrend}): +40")
 
     # ── L7: Metal suite (RANK +20) ─────────────────────────────────────────
     if target["metal_suite"] and candidate["metal_suite"]:
@@ -955,6 +957,19 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             f"[cascade] NO RULE for project material={material} "
             f"deposit_type={dep_t} subtype={dep_s} — refusing to score."
         )
+        # Flag the data gap so the weekly digest captures it.
+        try:
+            gap_detector.save_gaps(gap_detector.detect_gaps(
+                project=project,
+                target_profile=target_profile,
+                analog_rule=None,
+                library_analogs=[],
+                scored_analogs=[],
+                low_confidence=True,
+                relaxed_mode=False,
+            ))
+        except Exception as gd_err:
+            logger.warning(f"[gap_detector] no-rule path non-fatal: {gd_err}")
         return {
             "scored_analogs": [],
             "low_confidence": True,
@@ -1356,6 +1371,29 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             "rank_pts": None,
             "similarity_score": None,
         })
+
+    # ── Gap detection — write structured diagnostics to analog_quality_gaps ─
+    # Runs after the cascade finishes so we can inspect the actual library/
+    # scored output. Non-fatal: any failure here is swallowed and logged.
+    try:
+        gaps = gap_detector.detect_gaps(
+            project=project,
+            target_profile=target_profile,
+            analog_rule=analog_rule,
+            library_analogs=library,
+            scored_analogs=result.get("scored_analogs", []),
+            low_confidence=result.get("low_confidence", False),
+            relaxed_mode=relaxed_mode,
+        )
+        if gaps:
+            gap_detector.save_gaps(gaps)
+            logger.info(
+                f"[gap_detector] flagged {len(gaps)} quality gap(s): "
+                f"{[g['gap_type'] for g in gaps]}"
+            )
+    except Exception as gd_err:
+        logger.warning(f"[gap_detector] non-fatal failure: {gd_err}")
+
     return result
 
 

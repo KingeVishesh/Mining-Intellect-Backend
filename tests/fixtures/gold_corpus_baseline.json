@@ -1,0 +1,3338 @@
+{
+  "summary": {
+    "total": 167,
+    "routed_to_rule": 113,
+    "low_confidence": 121,
+    "has_tectonic_belt": 142,
+    "has_sub_trend": 17,
+    "average_top_count": 1.07,
+    "full_top_4": 27
+  },
+  "rows": [
+    {
+      "project_id": "dcd6bdb2-9508-4240-9f6e-ea569365a00e",
+      "project_name": "18.\tSonoro Gold Corp. \u2013 Cerro Caliche Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "laramide_southwest",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9cf082ca-044f-442f-9efa-be14e23a8a7c",
+      "project_name": "1911 Gold Corp - True North Complex",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 93.3
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 86.7
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 93.3
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 86.7
+        }
+      ]
+    },
+    {
+      "project_id": "d72702f4-dbf4-4b71-af87-bca0eaec3606",
+      "project_name": "8.\tChallenger Gold Ltd - El Guayabo Gold Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "breccia_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9ba0cfc3-d2cb-433e-ad59-0d6637200db0",
+      "project_name": "Aben Gold Corp \u2013 Justin Gold Project",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "d804036f-80bf-4e27-ad9e-9f79646e6557",
+      "project_name": "Abore",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 90.9
+        }
+      ]
+    },
+    {
+      "project_id": "0aab2775-c30d-4905-a846-90fac75a388e",
+      "project_name": "Adavale Resources \u2013 London-Victoria",
+      "rule_id": null,
+      "tectonic_belt": "lachlan",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "eba04f5e-538d-47fc-9edc-cd40ca6ce1f8",
+      "project_name": "Advanced Gold Exploration Inc. \u2013 Doyle Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": null,
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 87.5
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 87.5
+        }
+      ]
+    },
+    {
+      "project_id": "57f0c270-b250-4e3d-ae32-c5065deabc63",
+      "project_name": "American Pacific Mining Corp - Gooseberry Gold/Silver Mine",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 77.8
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 66.7
+        },
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 66.7
+        }
+      ]
+    },
+    {
+      "project_id": "0fef06f1-2f97-457c-a10b-5f8a50085994",
+      "project_name": "American Pacific Mining Corp - Red Hill Gold Project",
+      "rule_id": "analog_sel_gold_carlin_super_large",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "cortez_trend",
+      "deposit_subtype": "carlin_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Bald Mountain",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "White Pine County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Long Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Elko County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Archimedes (Ruby Hill)",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Great Basin / Carlin Trend",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Marigold Mine",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Battle Mountain Trend",
+          "similarity_score": 90.0
+        }
+      ]
+    },
+    {
+      "project_id": "b3b90e9f-8a3e-4835-858e-a336da449fe8",
+      "project_name": "American Pacific Mining Corp - Tuscarora Gold/Silver District",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "carlin_trend",
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 75.0
+        }
+      ]
+    },
+    {
+      "project_id": "70b6aa53-aef7-42fc-aa12-8aa2d7ba9faa",
+      "project_name": "American Pacific Mining Corp - Ziggurat Gold Project",
+      "rule_id": "analog_sel_gold_carlin_super_large",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "battle_mountain_eureka",
+      "deposit_subtype": "carlin_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Marigold Mine",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Battle Mountain Trend",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Bald Mountain",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "White Pine County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Long Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Elko County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Archimedes (Ruby Hill)",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Great Basin / Carlin Trend",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "57aea334-f12a-45d7-9ad4-452ee0e913c4",
+      "project_name": "Apollo",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 66.7
+        }
+      ]
+    },
+    {
+      "project_id": "a02171a0-d596-4793-afdc-554b9c82e3df",
+      "project_name": "Arizona Metals Corp - Sugar Loaf Peak Project",
+      "rule_id": "analog_sel_gold_heap_leach",
+      "tectonic_belt": "laramide_southwest",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9d2e9376-d8b9-46f7-983d-342f30fce9b6",
+      "project_name": "Astral Resources NL \u2013 Mandilla Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "yilgarn",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f6b6f794-9936-4f98-a747-7a87fcd3f60f",
+      "project_name": "AuMEGA Metals - Cape Ray Shear Zone",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "newfoundland_appalachian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "8610bf95-5568-4102-a680-a2a4f7b246f6",
+      "project_name": "Auranova Resources - South Uchi Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": "red_lake_camp",
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 91.7
+        },
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "cc729132-7f58-4395-88c6-65abf02e175d",
+      "project_name": "Aztec Minerals \u2013 Cervantes Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "laramide_southwest",
+      "sub_trend": null,
+      "deposit_subtype": "laramide_porphyry",
+      "mineralization_pattern": "breccia_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "104c145a-f7f0-45b1-ac48-4f5b0e878826",
+      "project_name": "Be Metals Corp - Kazan Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "San Jos\u00e9 Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 70.0
+        },
+        {
+          "name": "Minera Don Nicol\u00e1s Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 70.0
+        }
+      ]
+    },
+    {
+      "project_id": "5aa17077-891c-4515-b4fa-db48b9a0240f",
+      "project_name": "Be Metals Corp - Savant Gold Project",
+      "rule_id": "analog_sel_gold_bif",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "bif_hosted_gold",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 9,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "197dd4b5-3737-4618-922f-16c65556992c",
+      "project_name": "Benz Mining Corp - Eastmain Gold Project",
+      "rule_id": "analog_sel_gold_vms",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "vms_general",
+      "mineralization_pattern": "massive_sulphide",
+      "library_count": 3,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Doyon-Bousquet",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 76.9
+        },
+        {
+          "name": "LaRonde",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Doyon Camp Quebec",
+          "similarity_score": 76.9
+        }
+      ]
+    },
+    {
+      "project_id": "61f1afa2-2d9d-4b6e-abb7-5d8e8ab9c848",
+      "project_name": "Benz Mining Corp - Glenburgh Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "yilgarn",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "2b532b2a-f172-41e7-8ba6-f51d1a8639c0",
+      "project_name": "Benz Mining Corp - Mt Egerton Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "yilgarn",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "bf4e7032-1a74-4824-8449-0657984adade",
+      "project_name": "Bibemi Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "1fa83558-1bf2-4829-81cd-e1e8a3f914be",
+      "project_name": "Borealis Mining Company Ltd. \u2013 Sandman Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_hs",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "getchell_trend",
+      "deposit_subtype": "high_sulfidation_epithermal",
+      "mineralization_pattern": null,
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "c98936d3-5471-4212-b53a-be03eefc6cda",
+      "project_name": "Buckreef Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "tanzania_archean",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 90.9
+        }
+      ]
+    },
+    {
+      "project_id": "8e25619b-f74f-49ea-83da-6dffb7bbfb82",
+      "project_name": "C3 Metals Inc. - Super Block Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 87.5
+        },
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 75.0
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 75.0
+        },
+        {
+          "name": "Minera Don Nicol\u00e1s Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 62.5
+        }
+      ]
+    },
+    {
+      "project_id": "a693cad0-2996-4fba-84df-753bceb8701a",
+      "project_name": "C3 Metals Inc. - The Bellas Gate Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 71.4
+        }
+      ]
+    },
+    {
+      "project_id": "8ccb695b-d3bb-4f65-9b09-75bb75b0c101",
+      "project_name": "Cabral Gold - Cuiu Cuiu",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "29e753c0-85be-4be2-8cfe-45db3e74f823",
+      "project_name": "Cartier Resources - Cadillac Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": "cadillac_break_valdor",
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "2b7db129-e3e0-4813-889f-75a4a968d949",
+      "project_name": "Cassiar Gold - Cassiar Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "09b9f2e6-e4bb-4ede-ae6a-f5c0527ad0d2",
+      "project_name": "Dakota Gold Corp. \u2013 Maitland Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Macassa Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Kirkland Lake Ontario",
+          "similarity_score": 81.8
+        }
+      ]
+    },
+    {
+      "project_id": "f694afc3-52ef-483d-b2eb-44ed0a0c6b65",
+      "project_name": "Desert Gold Ventures Inc - SMSZ Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f25385a5-d2c6-490b-9ebe-3345bba77462",
+      "project_name": "Doubleview Gold Corp. \u2013 Hat Gold-Copper Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 60.0
+        }
+      ]
+    },
+    {
+      "project_id": "e575997f-8538-43e3-9081-39296d7a7905",
+      "project_name": "Douta Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_bulk",
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Yaoure Gold Mine",
+          "source": "library",
+          "tectonic_belt": "west_african_birimian",
+          "district": "Ivory Coast Birimian",
+          "similarity_score": 92.3
+        },
+        {
+          "name": "Hemlo",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Hemlo greenstone belt Ontario",
+          "similarity_score": 92.9
+        }
+      ]
+    },
+    {
+      "project_id": "38310869-7155-4962-8ce3-4fd54d8ec454",
+      "project_name": "ECR Minerals - Blue Mountain Gold Project",
+      "rule_id": "analog_sel_gold_placer",
+      "tectonic_belt": "lachlan",
+      "sub_trend": null,
+      "deposit_subtype": "placer_general",
+      "mineralization_pattern": "placer",
+      "library_count": 2,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "3b007664-fb79-4cf5-8c40-a366eef8e93d",
+      "project_name": "ESGold Corp. \u2013 Montauban Gold Project",
+      "rule_id": "analog_sel_gold_vms",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "vms_general",
+      "mineralization_pattern": "massive_sulphide",
+      "library_count": 3,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "ab43ce5d-ed80-4513-9ddd-be7451bebf19",
+      "project_name": "Elmer Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 90.9
+        }
+      ]
+    },
+    {
+      "project_id": "e57f4397-24ee-40d5-b574-c9dd61c44d94",
+      "project_name": "Emperor Metals - Duquesne West",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": "rouyn_noranda_camp",
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 91.7
+        },
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 91.7
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 91.7
+        }
+      ]
+    },
+    {
+      "project_id": "9a08c419-a715-49da-bd61-5754a8055d87",
+      "project_name": "Endurance Gold Corp. \u2013 Reliance Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 90.0
+        }
+      ]
+    },
+    {
+      "project_id": "d5877e0b-ff97-4fb0-ad6f-f13fbc3a6c16",
+      "project_name": "Fenn-Gib Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "e39255be-21ec-475c-b07a-69953777cbac",
+      "project_name": "First Nordic Metals - Barsele Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "fennoscandian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 76.9
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 76.9
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 69.2
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 69.2
+        }
+      ]
+    },
+    {
+      "project_id": "1c6e7194-835a-49e2-b0f9-7dd50516c08c",
+      "project_name": "First Nordic Metals - Oij\u00e4rvi Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "fennoscandian",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 72.7
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 72.7
+        }
+      ]
+    },
+    {
+      "project_id": "8f1f66d2-19d8-4c22-aad5-135a8dca64a6",
+      "project_name": "First Nordic Metals - Paub\u00e4cken Project",
+      "rule_id": "analog_sel_gold_orogenic_bulk",
+      "tectonic_belt": "fennoscandian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Hemlo",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Hemlo greenstone belt Ontario",
+          "similarity_score": 84.6
+        },
+        {
+          "name": "Detour Lake",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Detour Lake Abitibi Ontario",
+          "similarity_score": 76.9
+        },
+        {
+          "name": "Yaoure Gold Mine",
+          "source": "library",
+          "tectonic_belt": "west_african_birimian",
+          "district": "Ivory Coast Birimian",
+          "similarity_score": 83.3
+        }
+      ]
+    },
+    {
+      "project_id": "8dcc494f-7dcb-467e-9f27-c41c0b8d93de",
+      "project_name": "Formation Metals - N2 Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "350dff36-42fd-4201-be4d-f7e7805f7e20",
+      "project_name": "Fortune Bay Corp. (TSXV: FOR) \u2013 Goldfields Project",
+      "rule_id": null,
+      "tectonic_belt": "trans_hudson_orogen",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f157c5f7-635a-4b35-b927-8d6424d05e2e",
+      "project_name": "Founders Metals - Antino Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "guiana_shield",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Rosebel Gold Mines",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Brokopondo Suriname",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Aurora Gold Mine",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Cuyuni Basin Guyana",
+          "similarity_score": 75.0
+        },
+        {
+          "name": "Toroparu",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Upper Puruni Guyana",
+          "similarity_score": 75.0
+        }
+      ]
+    },
+    {
+      "project_id": "6ab1ecd7-3288-4c17-97dc-1486758c8097",
+      "project_name": "Fredonia Mining Inc. \u2013 EDM",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Minera Don Nicol\u00e1s Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 80.0
+        },
+        {
+          "name": "San Jos\u00e9 Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 80.0
+        }
+      ]
+    },
+    {
+      "project_id": "bc3c6ad7-b434-499c-a85a-1fcad2ff205f",
+      "project_name": "Freegold Ventures - Golden Summit",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "bed14110-85e6-4be4-b69e-a1d5caeab8cd",
+      "project_name": "Frotet Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "bcdad2c2-0e27-42ec-8031-2971d2b093b7",
+      "project_name": "G2 Goldfields Inc - Oko Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "guiana_shield",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "4a5377e1-86e4-4084-8f84-63cd40f0e587",
+      "project_name": "Galway Metals Inc. \u2013 Clarence Stream Project",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "newfoundland_appalachian",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "stockwork",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "1dd8bd07-3fec-4f6a-9f1c-c28474004465",
+      "project_name": "Galway Metals- Estrades Project",
+      "rule_id": "analog_sel_gold_vms",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "vms_general",
+      "mineralization_pattern": "massive_sulphide",
+      "library_count": 3,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "LaRonde",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Doyon Camp Quebec",
+          "similarity_score": 90.0
+        },
+        {
+          "name": "Doyon-Bousquet",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 90.0
+        }
+      ]
+    },
+    {
+      "project_id": "45af4a81-23d4-42c9-a63a-006f0ec68706",
+      "project_name": "Gold Hunter Resources Inc. \u2013 Great Northern Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "newfoundland_appalachian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "bb6b354a-1a6a-4a73-a7ac-c00c7439968e",
+      "project_name": "GoldMining Inc - Cachoeira Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "201f1091-7496-456b-becc-b0d3f0093c46",
+      "project_name": "GoldMining Inc - Crucero Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "cca67cb0-7b53-44c9-863e-601b5d4b5e92",
+      "project_name": "GoldMining Inc - La Mina Gold-Copper Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 75.0
+        }
+      ]
+    },
+    {
+      "project_id": "a830d025-0a04-4ea8-8d7d-df4493ad2a02",
+      "project_name": "GoldMining Inc - Sao Jorge Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_bulk",
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "1f65585b-f50e-419c-98e6-d415550d5bbe",
+      "project_name": "GoldMining Inc - Titiribi Gold Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 60.0
+        }
+      ]
+    },
+    {
+      "project_id": "ba4790a4-3a01-4855-bbf8-30d8fac9a19f",
+      "project_name": "GoldMining Inc - Yarumalito Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "intermediate_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "a227fadc-d655-41bf-8a7f-b4f0f69d6ae6",
+      "project_name": "GoldMining Inc - Yellowknife Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_bulk",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "stockwork",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "624f842c-3821-4222-b6c6-8fd181dd494d",
+      "project_name": "GoldMining Inc. - Boa Vista Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "3f5d1a62-56b1-4619-a705-9abd643ad9e7",
+      "project_name": "GoldMining Inc. - Montes Aureos and Trinta Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "80adbb28-3e14-4ac0-aa36-ee7029c8817a",
+      "project_name": "GoldMining Inc. - Surubim Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "stockwork",
+      "library_count": 2,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "41851682-420d-4844-962f-2ca610c17da0",
+      "project_name": "GoldMining Inc. - Whistler Gold Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 62.5
+        }
+      ]
+    },
+    {
+      "project_id": "11273f3a-3924-44a6-a749-563df8b6bae6",
+      "project_name": "Goldfields",
+      "rule_id": null,
+      "tectonic_belt": "trans_hudson_orogen",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "eac901af-e8ba-4577-80b2-9413dbb04299",
+      "project_name": "Goldsky Resources - Barsele Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "fennoscandian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Macassa Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Kirkland Lake Ontario",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 75.0
+        }
+      ]
+    },
+    {
+      "project_id": "46f0ae36-2f03-4a73-aaa2-47b8fbbcd033",
+      "project_name": "Goliath Resources - Goldigger - Surebet",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "97d79c4f-23f9-4385-958d-ffeefe19423b",
+      "project_name": "Halo Zone",
+      "rule_id": null,
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "83d32125-7437-4f2b-b4fa-7137bf9ad725",
+      "project_name": "Hammerdown Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "newfoundland_appalachian",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "61dc2296-56a6-4243-8cb9-d9d39620269f",
+      "project_name": "Haranga Resources - Ibel South Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 75.0
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 75.0
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 66.7
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 66.7
+        }
+      ]
+    },
+    {
+      "project_id": "f85c525a-7a4d-4329-b019-1f73f8c578f4",
+      "project_name": "Horseshoe Metals - Glenloth Gold Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "3108b947-9cb6-4ae0-a1a2-4bb9c689c11a",
+      "project_name": "Horseshoe Metals - Glenloth Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f9dfb43f-6a9e-422d-ae0f-eecf0189f4b8",
+      "project_name": "ICG Silver & Gold Corp. \u2013 Tuscarora District",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "carlin_trend",
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 80.0
+        }
+      ]
+    },
+    {
+      "project_id": "7f879b6d-64cd-44bf-86db-073417318b24",
+      "project_name": "Inventus Mining Corp - Pardo Gold Project",
+      "rule_id": "analog_sel_gold_placer",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "placer_general",
+      "mineralization_pattern": "placer",
+      "library_count": 2,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "ec6144ab-ec6e-4ecf-b15c-6ff7522f804a",
+      "project_name": "Kenorland Minerals \u2013 Regnault Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 91.7
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 75.0
+        },
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 75.0
+        }
+      ]
+    },
+    {
+      "project_id": "b9b7a7bf-32b5-4055-a1fb-c021edc41b70",
+      "project_name": "Kingfisher Metals - Thibert Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "b676d4ae-f707-4940-b217-e2c01c3ddb3b",
+      "project_name": "Kobo Resources Inc. \u2013 Kossou Gold Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "438e3f94-0684-4bff-aebb-fc6bf6278faa",
+      "project_name": "Kookynie",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9ed4f27a-eea6-4950-9b52-0a628f84c76b",
+      "project_name": "Krakatoa Resources - Zopkhito Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "52591721-93ff-49a3-b7f1-e0f1a49e6e6b",
+      "project_name": "Lake Victoria Gold - Imwelo Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "tanzania_archean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f0863001-644c-4cf6-8463-aef8d6b6c19f",
+      "project_name": "Lamaune Iron Inc - Lamaune Gold/Iron Project",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9892fe76-d594-4263-a0d4-a7489f4228bd",
+      "project_name": "Landore Resources - Bam Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "839852f4-7c57-488f-953b-040708302491",
+      "project_name": "Larvotto Resources Ltd. \u2013 Hillgrove Antimony-Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "lachlan",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 71.4
+        }
+      ]
+    },
+    {
+      "project_id": "af0fe81e-ba5b-472c-b85f-3e78aff925aa",
+      "project_name": "Latin Metals - Cerro Bayo & La Flora Gold-Silver Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Minera Don Nicol\u00e1s Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 90.0
+        },
+        {
+          "name": "San Jos\u00e9 Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 90.0
+        }
+      ]
+    },
+    {
+      "project_id": "3fc9e6ae-99bd-4eb0-97d4-22cb2a26cd5d",
+      "project_name": "Latin Metals Inc - Ana Maria Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "2676ae48-fe1c-4394-849c-ac3b6ae00634",
+      "project_name": "Latin Metals Inc - Crosby Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "0e735fe6-81f7-4ef8-83d5-d113557a5e9d",
+      "project_name": "Latin Metals Inc - Organullo Gold-Copper Project",
+      "rule_id": null,
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "cd386368-0f09-4f57-9618-460b2fa602a5",
+      "project_name": "Latin Metals Inc - Trigal Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "871e7666-527d-479f-bec7-53bcf6354824",
+      "project_name": "Legacy Gold Mines - Baner Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "17b21f67-d6fb-46d2-bd77-1486621ad65f",
+      "project_name": "Lemhi Gold Deposit",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 4,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "4534b1d1-a569-457c-ba55-e4be4991ebb6",
+      "project_name": "Liberty Gold - Black Pine",
+      "rule_id": "analog_sel_gold_carlin_super_large",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "oquirrh_black_pine",
+      "deposit_subtype": "carlin_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Bald Mountain",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "White Pine County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Long Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Elko County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Round Mountain",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Range Nevada",
+          "similarity_score": 86.7
+        },
+        {
+          "name": "Marigold Mine",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Battle Mountain Trend",
+          "similarity_score": 93.3
+        }
+      ]
+    },
+    {
+      "project_id": "1ea024f0-8734-4570-a407-ae6f7639c455",
+      "project_name": "Liberty Gold - Gold Strike",
+      "rule_id": "analog_sel_gold_carlin_super_large",
+      "tectonic_belt": "laramide_southwest",
+      "sub_trend": null,
+      "deposit_subtype": "carlin_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "c1391519-e2fa-4c17-ba88-bb072b5972d2",
+      "project_name": "Max Resource Corp - Mora Gold-Silver Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9c5cd15d-0f4a-4c83-a58e-43202659b9c6",
+      "project_name": "Minrex Resources - Sofalia Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "lachlan",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "8b9e9d82-43d6-4736-b8fb-e130582d71fc",
+      "project_name": "Mogotes Metals Corp. \u2013 Copper Cliff Gold-Copper Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 62.5
+        }
+      ]
+    },
+    {
+      "project_id": "3a1b81af-452f-4ca2-8905-b9b87b348324",
+      "project_name": "Montauban",
+      "rule_id": "analog_sel_gold_vms",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "vms_general",
+      "mineralization_pattern": "massive_sulphide",
+      "library_count": 3,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "LaRonde",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Doyon Camp Quebec",
+          "similarity_score": 88.9
+        },
+        {
+          "name": "Doyon-Bousquet",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 88.9
+        }
+      ]
+    },
+    {
+      "project_id": "a870df65-b7d5-442a-96b4-45d8c0b32a36",
+      "project_name": "NevGold Corp - Limo Butte",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": "sediment_hosted_general",
+      "mineralization_pattern": null,
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "1a7652d1-3280-428f-8c13-966d9eef1b48",
+      "project_name": "Nevada King Gold - Atlanta Mine Project",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "battle_mountain_eureka",
+      "deposit_subtype": null,
+      "mineralization_pattern": "breccia_hosted",
+      "library_count": 4,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "117787b7-1260-44bc-8c04-b5322c9ff6d1",
+      "project_name": "New Break Resources Ltd. \u2013 Moray Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": "timmins_camp",
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "27545797-2456-4d86-b0fc-d0f73e438a2f",
+      "project_name": "New Found Gold - Queensway Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "newfoundland_appalachian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "92066a1d-9ea2-48ad-b53d-df1de49cdcfc",
+      "project_name": "New Murchinson gold LTD - Garden Gully Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "yilgarn",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "cb61f6dc-d5f5-4729-8fa4-cb6f1680d919",
+      "project_name": "Newcore Gold Ltd - Enchi Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 7,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "15a664e2-8ded-473f-a091-a84095d473c1",
+      "project_name": "Norsmont Mining - Choquelimpie Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_hs",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "high_sulfidation_epithermal",
+      "mineralization_pattern": "breccia_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "2ee60e87-3ef3-4ac6-a024-458c5d54ff04",
+      "project_name": "Novo Resources - Tibooburra Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "lachlan",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "09397fc0-c943-4916-929c-66ea312a10be",
+      "project_name": "Novo Resources \u2013 Belltopper Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "lachlan",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 90.9
+        }
+      ]
+    },
+    {
+      "project_id": "bf2cb6a5-4e5d-4f13-9ddd-37981976c240",
+      "project_name": "ONGold Resources - TPK Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "6eab0080-5fa8-488b-95d8-9d840436f6be",
+      "project_name": "Oakajee Corp - Paynes Find Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "yilgarn",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 72.7
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 72.7
+        },
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 72.7
+        }
+      ]
+    },
+    {
+      "project_id": "3dc9d166-0468-46e1-b438-297f94d2d11b",
+      "project_name": "Oko",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "guiana_shield",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Aurora Gold Mine",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Cuyuni Basin Guyana",
+          "similarity_score": 93.3
+        },
+        {
+          "name": "Toroparu",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Upper Puruni Guyana",
+          "similarity_score": 93.3
+        },
+        {
+          "name": "Karouni Gold",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Cuyuni Basin Guyana",
+          "similarity_score": 93.3
+        },
+        {
+          "name": "Rosebel Gold Mines",
+          "source": "library",
+          "tectonic_belt": "guiana_shield",
+          "district": "Brokopondo Suriname",
+          "similarity_score": 93.3
+        }
+      ]
+    },
+    {
+      "project_id": "8a03beab-1066-4f89-96dd-bfcb882aff15",
+      "project_name": "Oko West Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "guiana_shield",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "295056ab-6c49-478b-8d7f-9972d3803a6a",
+      "project_name": "Omai gold mines - omai gold project",
+      "rule_id": null,
+      "tectonic_belt": "guiana_shield",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 3,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "16553b08-1518-405d-b45f-4441a65282b0",
+      "project_name": "Onyx Gold - Munro/Croesus Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 81.8
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 90.9
+        }
+      ]
+    },
+    {
+      "project_id": "ef9f6536-a4b3-4fb6-b20b-edc7f9275fee",
+      "project_name": "Opinaca",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 4,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9aa4e52f-04d0-4405-afc3-0f1b5b8c3973",
+      "project_name": "P2 Gold Inc. \u2013 Gabbs Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 2,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f0381a7c-1348-4b18-90ce-87537c49cb34",
+      "project_name": "P2 Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "7b144c57-d0d5-426b-a248-6e17d302047b",
+      "project_name": "Pan Global Resources Inc - Carmenes Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "iberian_pyrite",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "breccia_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "5282e66c-fcea-4f87-a61b-d8d2a5b18247",
+      "project_name": "Pasofino Gold Ltd - Dugbe Gold Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "107b9f65-6c07-4687-bbfe-c2ff2ed71546",
+      "project_name": "Predicative Discovery - Bankan Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 78.6
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 85.7
+        },
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 85.7
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 78.6
+        }
+      ]
+    },
+    {
+      "project_id": "e01d79ca-cf70-432f-a3ab-b782452a226e",
+      "project_name": "Provenance Gold Corp. \u2013 Eldorado Gold Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 55.6
+        }
+      ]
+    },
+    {
+      "project_id": "01c71c0c-d9a7-469d-a482-e9dc39972482",
+      "project_name": "QGold Resources - Mine Center Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "4148ed4e-c8d1-4e92-b3a3-e228cd3a72ad",
+      "project_name": "Reliance",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "fcda9125-d61c-4a8c-b0a2-252694e3212b",
+      "project_name": "Resolution Minerals - Horse Heaven Project, Golden Gate",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "fad8a455-15d3-4f47-9982-a8110db2b395",
+      "project_name": "Rhosgobel Gold Deposit",
+      "rule_id": null,
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 4,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "82ca5518-9c5d-4bcb-89ac-9b342a3fcefd",
+      "project_name": "Ridgeline Minerals Corp - Swift Project",
+      "rule_id": "analog_sel_gold_carlin_super_large",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "cortez_trend",
+      "deposit_subtype": "carlin_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Bald Mountain",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "White Pine County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Long Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Elko County Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Archimedes (Ruby Hill)",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Great Basin / Carlin Trend",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Marigold Mine",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Battle Mountain Trend",
+          "similarity_score": 90.0
+        }
+      ]
+    },
+    {
+      "project_id": "d12dfca2-01c1-4167-a12a-e88a4ab08a4b",
+      "project_name": "Roscan Gold Corp - Kandiol\u00e9 Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "11147873-f4f2-4872-a07b-479d40f90be2",
+      "project_name": "Rua Gold Inc. \u2013 Auld Creek Gold-Antimony Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "188eeb85-3ef3-46c0-918e-62180754e69d",
+      "project_name": "Ruoppa Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "fennoscandian",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 84.6
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 92.3
+        },
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 92.3
+        },
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 84.6
+        }
+      ]
+    },
+    {
+      "project_id": "ba391619-329f-41ee-a2f1-8089681c5cea",
+      "project_name": "STLLR Gold - Colomac Gold Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "f4c578e8-10b0-4487-9826-5f169182810e",
+      "project_name": "STLLR Gold - The Hollinger Tailings Project",
+      "rule_id": null,
+      "tectonic_belt": "abitibi",
+      "sub_trend": "timmins_camp",
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "88ff0f6b-3a9d-4de3-b568-ce0331bfc084",
+      "project_name": "STLLR Gold \u2013 Tower Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": "timmins_camp",
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": null,
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Canadian Malartic - Odyssey UG",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Malartic Quebec",
+          "similarity_score": 88.9
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 88.9
+        },
+        {
+          "name": "Lamaque Complex",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Val d'Or Camp Quebec",
+          "similarity_score": 77.8
+        }
+      ]
+    },
+    {
+      "project_id": "ee5c28bd-9e9f-4235-929e-c4b0f1163a6a",
+      "project_name": "Sable Resources Corp - Cerro Negro Gold-Copper Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 70.0
+        }
+      ]
+    },
+    {
+      "project_id": "34dd952a-e743-461b-a7d9-859eef64c31f",
+      "project_name": "Sable Resources Corp - Zorro Gold-Copper Project",
+      "rule_id": null,
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "4733e743-2ca0-400f-b2bf-a4852c721d24",
+      "project_name": "San Lorenzo Gold Corp - Salvadora Gold Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "5ee305cf-86a9-4d04-96bb-a34a65d4044f",
+      "project_name": "San Lorenzo Gold Corp - Salvadora Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 66.7
+        }
+      ]
+    },
+    {
+      "project_id": "a5d94c36-dcab-413e-af19-2e60d1aefcdf",
+      "project_name": "Santa Fe",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "2ef666b0-a85b-4565-b62c-669d043e1464",
+      "project_name": "Scorpio Gold Corp - Manhattan District",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "walker_lane_au",
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 90.9
+        },
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 90.0
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 80.0
+        }
+      ]
+    },
+    {
+      "project_id": "bbb1b0d4-9c8c-4fdb-83b5-38ecfb43844d",
+      "project_name": "Scottie Gold Mine Project",
+      "rule_id": null,
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 4,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "9f3fdc63-64db-4b3f-b859-ebe614523216",
+      "project_name": "Sitka Gold Corp - Burro Creek Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "laramide_southwest",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Minera Don Nicol\u00e1s Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 70.0
+        },
+        {
+          "name": "San Jos\u00e9 Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 70.0
+        }
+      ]
+    },
+    {
+      "project_id": "68e71caf-50d3-494a-95b7-c93785e76783",
+      "project_name": "Sitka Gold Corp. \u2013 RC Gold Project",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "5c2f061c-cfd6-432d-919d-1b9ad3f938df",
+      "project_name": "Snowline Gold Corp - Einarson Project",
+      "rule_id": "analog_sel_gold_orogenic_bulk",
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "4d3f52a5-ec9f-49c1-88b7-5ed531c26ab5",
+      "project_name": "Snowline Gold Corp - Rogue Gold Project",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "eb6e9bee-2422-472b-9ff6-0a6e593f4529",
+      "project_name": "Springpole Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_bulk",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "C\u00f4t\u00e9 Gold (Tower Gold) Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Abitibi Greenstone Belt Ontario",
+          "similarity_score": 93.3
+        },
+        {
+          "name": "Yaoure Gold Mine",
+          "source": "library",
+          "tectonic_belt": "west_african_birimian",
+          "district": "Ivory Coast Birimian",
+          "similarity_score": 69.2
+        }
+      ]
+    },
+    {
+      "project_id": "c6743c23-fd01-4f3b-83a3-25e0176d5ee6",
+      "project_name": "Strickland Metals - Rogozna Gold and Base Metal Project",
+      "rule_id": "analog_sel_gold_skarn",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "skarn_general",
+      "mineralization_pattern": "stockwork",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "e001460a-c2d1-4e5e-9382-505ea89af7c4",
+      "project_name": "StrikePoint Gold Inc. \u2013 Hercules Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": "walker_lane_au",
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "43bb7b0d-c41e-4ff4-befe-f18f572c7162",
+      "project_name": "Sun Summit Minerals Corp. \u2013 JD Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 66.7
+        }
+      ]
+    },
+    {
+      "project_id": "6aa01f16-2d5a-460b-917f-d00fa175185b",
+      "project_name": "Swanson Gold Deposit",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Westwood Mine",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Bousquet Camp Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Casa Berardi",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Casa Berardi Quebec",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Red Lake Gold Mines",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 100.0
+        }
+      ]
+    },
+    {
+      "project_id": "33295988-7ab6-40d2-a3f2-9be299ebeaa6",
+      "project_name": "S\u00e3o Jorge Project",
+      "rule_id": null,
+      "tectonic_belt": "brazilian_shield",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 4,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "137ca31f-22eb-4650-b01d-aafa42395e24",
+      "project_name": "Talisker Resources Ltd. \u2013 Bralorne Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "fac4e12f-cdb4-4e59-b09c-572f7e5bfdf7",
+      "project_name": "Tamarack",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "0ea86385-3b90-4cea-9a5a-82e5d1267550",
+      "project_name": "Tectonic Metals - Flat Gold Project",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "yukon_tintina",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "disseminated_bulk",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "660a71fd-b329-4818-a9a2-af9d783bc855",
+      "project_name": "Thesis Gold - Lawyers/Ranch Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Minera Don Nicol\u00e1s Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 70.0
+        },
+        {
+          "name": "San Jos\u00e9 Project",
+          "source": "library",
+          "tectonic_belt": null,
+          "district": "Deseado Massif",
+          "similarity_score": 70.0
+        }
+      ]
+    },
+    {
+      "project_id": "709dc188-a080-4447-97b6-8db7249ff6aa",
+      "project_name": "Thor Explorations \u2013 Douta Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "west_african_birimian",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "3c1eab04-3d9b-47e9-a6aa-28cb38ba7bb9",
+      "project_name": "Tiger Gold Corp - Dos Quebradas Gold Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "breccia_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "e087da25-02dc-49fe-938d-9ca3b8eb9615",
+      "project_name": "Tonopah Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 86.7
+        }
+      ]
+    },
+    {
+      "project_id": "134771ea-b940-4e31-92b9-f92094600633",
+      "project_name": "Trident Resources - Contact Lake Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "trans_hudson_orogen",
+      "sub_trend": null,
+      "deposit_subtype": "orogenic_general",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "1f2a35e9-7e06-4804-862f-540e5e40e873",
+      "project_name": "True North Gold Project",
+      "rule_id": null,
+      "tectonic_belt": "trans_hudson_orogen",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "033c82a6-35f1-44e5-8bde-5bfa5b448fd9",
+      "project_name": "Tudor Gold - Treaty Creek",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": "bc_quesnel_stikine",
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 70.0
+        }
+      ]
+    },
+    {
+      "project_id": "33d85821-4054-4fd2-be98-356dd75cf931",
+      "project_name": "Tunder Gold Corp - Tower Mountain Gold Project",
+      "rule_id": "analog_sel_gold_irgs",
+      "tectonic_belt": "abitibi",
+      "sub_trend": null,
+      "deposit_subtype": "irgs_general",
+      "mineralization_pattern": "stockwork",
+      "library_count": 5,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "13ab093d-9577-4592-8458-6de82249bbea",
+      "project_name": "WIA Gold Ltd - Bouafl\u00e9 Gold Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "8ac603d9-1679-4b98-a09a-0244df0975c4",
+      "project_name": "West Point Gold - Baxter Spring",
+      "rule_id": null,
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "2382045c-ed63-4672-9011-9edf56477e03",
+      "project_name": "West Point Gold - Gold Chain Arizona",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "laramide_southwest",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "stockwork",
+      "library_count": 6,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "813663a1-ea32-489e-8e72-c5c09c02a527",
+      "project_name": "West Point Gold - Jefferson Canyon",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 100.0
+        },
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 88.9
+        }
+      ]
+    },
+    {
+      "project_id": "e3a9094f-3288-48f9-b2c8-8d5e98eb1301",
+      "project_name": "West Point Gold - Tip Top",
+      "rule_id": "analog_sel_gold_epithermal_ls",
+      "tectonic_belt": "great_basin_carlin",
+      "sub_trend": null,
+      "deposit_subtype": "low_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 6,
+      "low_confidence": false,
+      "top_4": [
+        {
+          "name": "Hycroft",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Sulphur District Nevada",
+          "similarity_score": 91.7
+        },
+        {
+          "name": "Round Mountain LS Vein",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Toiyabe Nevada",
+          "similarity_score": 83.3
+        },
+        {
+          "name": "Florida Canyon",
+          "source": "library",
+          "tectonic_belt": "great_basin_carlin",
+          "district": "Humboldt County Nevada",
+          "similarity_score": 83.3
+        }
+      ]
+    },
+    {
+      "project_id": "1aef8313-9421-4891-91c9-c0a3f7c9e88f",
+      "project_name": "West Red Lake Gold - Rowan Gold Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "abitibi",
+      "sub_trend": "red_lake_camp",
+      "deposit_subtype": "greenstone_orogenic",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Madsen Gold Project",
+          "source": "library",
+          "tectonic_belt": "abitibi",
+          "district": "Red Lake greenstone belt Ontario",
+          "similarity_score": 92.9
+        }
+      ]
+    },
+    {
+      "project_id": "58f600ad-5bcc-43c6-87fc-f07a8110d2fa",
+      "project_name": "Whistler Gold-Copper Project",
+      "rule_id": "analog_sel_gold_porphyry",
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": "calc_alkalic_porphyry",
+      "mineralization_pattern": "stockwork",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Rio Grande Gold-Copper Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 62.5
+        }
+      ]
+    },
+    {
+      "project_id": "60ceaad0-fa16-4ca2-9b4d-af6423bc911c",
+      "project_name": "Xali Gold Corp - El Oro Hard Rock Gold Project",
+      "rule_id": null,
+      "tectonic_belt": null,
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": null,
+      "library_count": 0,
+      "low_confidence": true,
+      "top_4": []
+    },
+    {
+      "project_id": "acb45c30-28e0-4752-809d-d2b89d5745ff",
+      "project_name": "Xali Gold Corp - Pico Machay Gold Project",
+      "rule_id": "analog_sel_gold_epithermal_hs",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": "high_sulfidation_epithermal",
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 1,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Taguas Project",
+          "source": "library",
+          "tectonic_belt": "andean",
+          "district": "Andean belt",
+          "similarity_score": 81.8
+        }
+      ]
+    },
+    {
+      "project_id": "2775b971-af19-4633-a0b3-99f89dbaca51",
+      "project_name": "Zancudo Project",
+      "rule_id": "analog_sel_gold_orogenic_vein",
+      "tectonic_belt": "andean",
+      "sub_trend": null,
+      "deposit_subtype": null,
+      "mineralization_pattern": "vein_hosted",
+      "library_count": 17,
+      "low_confidence": true,
+      "top_4": [
+        {
+          "name": "Brucejack",
+          "source": "library",
+          "tectonic_belt": "bc_quesnel_stikine",
+          "district": "Sulphurets District BC",
+          "similarity_score": 88.9
+        }
+      ]
+    }
+  ]
+}

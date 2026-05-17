@@ -712,6 +712,72 @@ SUB_TRENDS: Dict[str, Dict[str, List[str]]] = {
             "pure gold mining", "rubicon phoenix",
         ],
     },
+    # Rice Lake greenstone (Manitoba Wabigoon-Uchi domain) — Archean
+    # greenstone-orogenic, geologically Superior craton like Red Lake but
+    # ~150 km west of the canonical Red Lake camp. True North / San
+    # Antonio / Bissett gold belong here. Listed before red_lake_camp
+    # would tie at "lake" — but red_lake_camp uses "red lake" as the
+    # discriminating keyword, so order doesn't matter for that pairing.
+    "rice_lake_greenstone": {
+        "belt": "abitibi",
+        "keywords": [
+            "rice lake", "san antonio mine", "san antonio gabbro",
+            "bissett", "true north complex", "wabigoon",
+            "uchi subprovince", "uchi domain",
+        ],
+    },
+    # Batchawana / Wawa greenstone (Ontario, NW of Sault Ste Marie).
+    # Hosts Island Gold, Eagle River, Renabie — Archean orogenic gold
+    # in the Michipicoten greenstone belt.
+    "batchawana_wawa": {
+        "belt": "abitibi",
+        "keywords": [
+            "batchawana", "wawa", "michipicoten", "mishibishu",
+            "island gold", "eagle river mine", "renabie",
+            "magpie", "missanabie", "goudreau lochalsh",
+        ],
+    },
+    # ── West African Birimian sub-belts ──────────────────────────────────
+    # Birimian (~2.1 Ga) Paleoproterozoic greenstone belts span Ghana
+    # (Ashanti, Sefwi, Bibiani), Côte d'Ivoire (Comoé, Banfora), Burkina
+    # Faso (Houndé, Boromo), Mali (Loulo, Falémé), Senegal (Kédougou-
+    # Kéniéba), Guinea (Siguiri, Léro). Each sub-belt has its own host
+    # rocks and structural style; an Obuasi-style target (Ashanti) is
+    # not the same as a Loulo-style target (Kédougou).
+    "ashanti_belt": {
+        "belt": "west_african_birimian",
+        "keywords": [
+            "ashanti", "obuasi", "ahafo", "bibiani", "prestea",
+            "bogoso", "tarkwa", "iduapriem", "asankrangwa",
+            "ghana gold belt", "kumasi gold", "akyem",
+        ],
+    },
+    "sefwi_bibiani": {
+        "belt": "west_african_birimian",
+        "keywords": [
+            "sefwi", "wassa", "akropong", "chirano", "bibiani",
+        ],
+    },
+    "birimian_kedougou_kenieba": {
+        "belt": "west_african_birimian",
+        "keywords": [
+            "kedougou", "kéniéba", "kenieba", "loulo-gounkoto", "loulo",
+            "gounkoto", "fékola", "fekola", "falémé", "faleme",
+            "yatela", "syama",
+            # Senegal Birimian gold
+            "sabodala", "massawa", "makabingui",
+        ],
+    },
+    "banfora_houndé": {
+        "belt": "west_african_birimian",
+        "keywords": [
+            "banfora", "houndé", "hounde", "boromo", "sissingué",
+            "sissingue", "yaramoko", "wahgnion", "bagassi",
+            "sanbrado", "essakane", "bissa",
+            # Côte d'Ivoire central Birimian
+            "lobo", "agbaou", "bonikro", "mana",
+        ],
+    },
 }
 
 
