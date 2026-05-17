@@ -405,6 +405,162 @@ def test_sub_trend_detection_distinguishes_trends():
     assert detect_sub_trend("Ottawa", "Canada") is None
 
 
+def test_sub_trend_detection_normalizes_curly_apostrophe():
+    """Cartier-Cadillac's location_name in the DB is "Val-d’Or, ..."
+    with a curly apostrophe (U+2019), not the straight ASCII one. Without
+    Unicode normalization the keyword 'val-d\\'or' silently missed —
+    target.sub_trend was None and the L6.5 ranking bonus never fired.
+    The audit revealed this; the fix normalizes curly quotes to ASCII
+    before substring matching."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    # Curly apostrophe (U+2019)
+    assert detect_sub_trend(
+        None, None, "Val-d’Or, Abitibi, Quebec, Canada",
+    ) == "cadillac_break_valdor"
+    # Straight ASCII apostrophe — must still work
+    assert detect_sub_trend(
+        None, None, "Val-d'Or, Abitibi, Quebec, Canada",
+    ) == "cadillac_break_valdor"
+
+
+def test_sub_trend_detection_distinguishes_abitibi_camps():
+    """Abitibi sub-camps route distinctly so Cartier-Cadillac (Val-d'Or
+    on the Cadillac Break) doesn't pair with Bousquet VMS-overprint
+    veins or Casa Berardi BIF-stockwork as if they were the same camp."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    assert detect_sub_trend(
+        "Abitibi", "Quebec",
+        "Val-d'Or, Abitibi, Quebec, Canada",
+    ) == "cadillac_break_valdor"
+    assert detect_sub_trend(
+        "Val d'Or Camp Quebec", None, None,
+    ) == "cadillac_break_valdor"
+    assert detect_sub_trend(
+        "Bousquet Camp Quebec", None, None,
+    ) == "bousquet_camp"
+    assert detect_sub_trend(
+        "Bousquet Doyon Camp Quebec", None, None,
+    ) == "bousquet_camp"
+    assert detect_sub_trend(
+        "Casa Berardi Quebec", None, None,
+    ) == "casa_berardi_camp"
+    assert detect_sub_trend(
+        "Kirkland Lake Ontario", None, None,
+    ) == "kirkland_lake_camp"
+    assert detect_sub_trend(
+        "Red Lake greenstone belt Ontario", None, None,
+    ) == "red_lake_camp"
+    assert detect_sub_trend(
+        "Detour Lake Abitibi Ontario", None, None,
+    ) == "detour_trend"
+    assert detect_sub_trend(
+        "Hemlo greenstone belt Ontario", None, None,
+    ) == "hemlo_camp"
+    assert detect_sub_trend(
+        "Timmins Porcupine Ontario", None, None,
+    ) == "timmins_camp"
+    assert detect_sub_trend(
+        "Malartic Quebec", None, None,
+    ) == "cadillac_break_valdor"
+
+
+def test_cartier_cadillac_in_camp_analog_outranks_other_abitibi_camps():
+    """Cartier-Cadillac (Cadillac Break, Val-d'Or) target. A Lamaque-
+    style in-camp candidate must outrank a Bousquet-camp Westwood-style
+    candidate of identical cascade quality. This is the Cadillac audit
+    fix: VMS-overprint Bousquet veins are different geology from
+    Cadillac-Break shear-hosted veins despite being in the same belt."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    cartier = _build_profile({
+        "name": "Cartier-Cadillac", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "host_rock_class": "volcanic_mafic",
+        "tectonic_belt": "abitibi",
+        "metal_suite": "au_only",
+        "mining_method_class": "underground_vein",
+        "country": "Canada", "region": "Quebec",
+        "district": "Abitibi",
+        "location_name": "Val-d'Or, Abitibi, Quebec, Canada",
+        "tonnage_mt": 45.0,
+    })
+    lamaque_in_camp = _build_profile({
+        "name": "Lamaque Complex", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "host_rock_class": "volcanic_mafic",
+        "tectonic_belt": "abitibi",
+        "metal_suite": "au_only",
+        "mining_method_class": "underground_vein",
+        "country": "Canada", "region": "Quebec",
+        "district": "Val d'Or Camp Quebec",
+        "tonnage_mt": 30.0, "grade_value": 6.0, "grade_unit": "g/t Au",
+    })
+    westwood_off_camp = _build_profile({
+        "name": "Westwood Mine", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "host_rock_class": "volcanic_mafic",
+        "tectonic_belt": "abitibi",
+        "metal_suite": "au_only",
+        "mining_method_class": "underground_vein",
+        "country": "Canada", "region": "Quebec",
+        "district": "Bousquet Camp Quebec",
+        "tonnage_mt": 22.0, "grade_value": 5.4, "grade_unit": "g/t Au",
+    })
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+
+    l_pass, l_rank, _, _, _, l_drop = _cascading_match(cartier, lamaque_in_camp, rule)
+    w_pass, w_rank, _, _, _, w_drop = _cascading_match(cartier, westwood_off_camp, rule)
+
+    assert l_pass, f"Lamaque must pass for Cartier (dropped at {l_drop})"
+    assert w_pass, f"Westwood must pass for Cartier (dropped at {w_drop})"
+    assert l_rank > w_rank, (
+        f"In-camp Lamaque (rank={l_rank}) must outrank off-camp Westwood "
+        f"(rank={w_rank}) for a Cadillac-Break target — sub-camp +25 should "
+        f"clearly elevate same-camp analogs."
+    )
+
+
+def test_orogenic_vein_tonnage_tolerance_allows_camp_scale_variation():
+    """Cartier-Cadillac (45 Mt) vs Red Lake (8 Mt) — both in-belt Archean
+    greenstone orogenic vein gold, but in different sub-camps and very
+    different scale. 5.6× tonnage ratio used to drop Red Lake at L5.5.
+    Loosened to 10× post-audit so industry-canonical Abitibi-scale
+    variations all pass."""
+    from graphs.analog_finder import _build_profile, _cascading_match
+    target = _build_profile({
+        "material": "gold", "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "abitibi",
+        "mining_method_class": "underground_vein",
+        "tonnage_mt": 45.0,
+    })
+    red_lake = _build_profile({
+        "name": "Red Lake", "material": "gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "tectonic_belt": "abitibi",
+        "mining_method_class": "underground_vein",
+        "tonnage_mt": 8.0, "grade_value": 13.0, "grade_unit": "g/t Au",
+    })
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+    passes, _, _, _, _, dropped = _cascading_match(target, red_lake, rule)
+    assert passes, f"Red Lake (8 Mt) must pass for 45 Mt target; dropped at {dropped}"
+
+
+def test_exa_query_includes_cadillac_break_hint():
+    """Verify that the Cadillac Break hint names Sigma-Lamaque, Beaufor,
+    Chimo, Goldex — Exa's anchor points for in-camp canonicals."""
+    from nodes.exa_search import _SUB_TREND_HINTS
+    hint = _SUB_TREND_HINTS["cadillac_break_valdor"]
+    assert "Cadillac" in hint
+    assert "Val-d'Or" in hint
+    assert "Sigma-Lamaque" in hint
+    assert "Beaufor" in hint
+    assert "Chimo" in hint
+
+
 def test_l6_5_sub_trend_bonus_lifts_in_trend_above_out_of_trend():
     """For a Cortez-Trend target, an in-trend Carlin analog must rank
     above an out-of-trend Carlin analog of otherwise equal quality —

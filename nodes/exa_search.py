@@ -227,6 +227,48 @@ _SUB_TREND_HINTS: dict = {
         "specifically in the Oquirrh / Black Pine district "
         "(southern Idaho / northern Utah Carlin extension)"
     ),
+    # Abitibi sub-camps
+    "cadillac_break_valdor": (
+        "specifically along the Cadillac-Larder Lake Fault Zone / Val-d'Or "
+        "camp in the Abitibi (Quebec — Sigma-Lamaque, Lamaque, Beaufor, "
+        "Chimo, Goldex, Bourlamaque, Canadian Malartic underground, Kiena)"
+    ),
+    "bousquet_camp": (
+        "specifically in the Bousquet-Doyon camp (Quebec Abitibi — "
+        "LaRonde, Westwood, Doyon, Bousquet — Au-rich VMS-overprint vein systems)"
+    ),
+    "casa_berardi_camp": (
+        "specifically along the Casa Berardi Deformation Zone "
+        "(Quebec Abitibi — Casa Berardi, BIF-stockwork orogenic gold)"
+    ),
+    "kirkland_lake_camp": (
+        "specifically in the Kirkland Lake gold camp (Ontario Abitibi — "
+        "Macassa, Kerr-Addison, Young-Davidson, syenite-hosted high-grade veins)"
+    ),
+    "rouyn_noranda_camp": (
+        "specifically in the Rouyn-Noranda camp (Quebec Abitibi — "
+        "Horne 5, Quemont, Au-rich VMS systems)"
+    ),
+    "timmins_camp": (
+        "specifically in the Timmins / Porcupine camp (Ontario Abitibi — "
+        "Hollinger, Dome, McIntyre, Hoyle Pond, Pamour)"
+    ),
+    "detour_trend": (
+        "specifically along the Detour / Swayze sub-province (Ontario "
+        "Abitibi — Detour Lake, Côté Gold, large bulk OP orogenic gold)"
+    ),
+    "hemlo_camp": (
+        "specifically in the Hemlo camp (Ontario Abitibi — "
+        "Williams, David Bell, Golden Giant)"
+    ),
+    "joutel_camp": (
+        "specifically in the Joutel-Matagami sub-belt (Quebec Abitibi — "
+        "Eagle-Telbel, BIF-hosted vein gold)"
+    ),
+    "red_lake_camp": (
+        "specifically in the Red Lake gold camp (Ontario Abitibi — "
+        "Red Lake mine complex, Campbell, Madsen, Cochenour — high-grade vein shoots)"
+    ),
 }
 
 

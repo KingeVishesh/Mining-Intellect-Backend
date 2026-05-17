@@ -74,11 +74,20 @@ ANALOG_SELECTION_RULES = [
         "excluded_recovery":   ["iscr", "sx_ew", "hpal"],
         "required_mining_methods": ["underground_vein", "underground_bulk"],
         "excluded_mining_methods": ["iscr_in_situ", "heap_leach_pad", "open_pit_bulk", "dredging"],
-        "tonnage_match_max_ratio": 5.0,  # Gold L136: tonnage match ≤ 5×
-        # Orogenic vein grades legitimately span ~3 g/t to bonanza
-        # 25+ g/t (Fosterville). A 5× tolerance keeps the model honest
-        # without excluding real high-grade-vein analogs.
-        "grade_match_max_ratio":   5.0,
+        # Tonnage tolerance loosened 2026-05-17 from 5.0 → 10.0
+        # (Cartier-Cadillac audit). Orogenic vein gold camps span 1 Mt
+        # (Red Lake / Madsen) to 100+ Mt (Canadian Malartic Odyssey,
+        # Hemlo). A 5× cap dropped legitimate same-belt analogs at
+        # opposite ends of the scale spectrum. Subtype + pattern +
+        # mining-method gates already enforce the deposit class; scale
+        # alignment is the modelling step's concern.
+        "tonnage_match_max_ratio": 10.0,
+        # Orogenic vein grades legitimately span 2 g/t (bulk-vein
+        # Canadian Malartic UG) to bonanza 25+ g/t (Fosterville, Macassa)
+        # within the SAME belt. Loosened 5.0 → 10.0 alongside tonnage so
+        # high-grade-camp analogs (Macassa, Fosterville, Brucejack) can
+        # represent mid-grade-camp targets.
+        "grade_match_max_ratio":   10.0,
         "min_resource_year":   2010,
         "min_profile_strength": 5,
         "rule_priority":       200,

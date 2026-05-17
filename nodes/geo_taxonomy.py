@@ -626,6 +626,92 @@ SUB_TRENDS: Dict[str, Dict[str, List[str]]] = {
             "south idaho carlin", "north utah carlin",
         ],
     },
+    # ── Abitibi sub-camps ────────────────────────────────────────────────
+    # Listed specific-before-general so e.g. "Val-d'Or, Abitibi, Quebec"
+    # lands on cadillac_break_valdor instead of a future loose "abitibi"
+    # catch-all. Each camp covers ONE structural / depositional setting
+    # within the Abitibi greenstone belt: Cadillac-Larder Lake Fault Zone
+    # (Cartier-Cadillac sits here) is distinct from Bousquet (VMS-Au
+    # overprint), Casa Berardi (BIF-stockwork), Detour (bulk OP),
+    # Kirkland Lake (high-grade syenite-hosted vein), etc.
+    "cadillac_break_valdor": {
+        "belt": "abitibi",
+        "keywords": [
+            "cadillac break", "cadillac-larder lake", "cadillac fault",
+            "larder lake", "cadillac deformation zone",
+            "val d'or", "val-d'or", "val dor", "valdor", "val d or",
+            "bourlamaque", "malartic", "canadian malartic",
+            "sigma lamaque", "sigma-lamaque", "lamaque", "sigma mine",
+            "beaufor", "chimo mine", "chimo gold", "goldex", "louvicourt",
+            "manitou-barvue", "kiena", "akasaba", "wesdome eagle",
+        ],
+    },
+    "bousquet_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "bousquet", "doyon", "westwood", "laronde", "la ronde",
+            "bousquet doyon", "preissac", "agnico-eagle bousquet",
+        ],
+    },
+    "casa_berardi_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "casa berardi", "casa-berardi", "casa berardi deformation",
+            "casa berardi fault zone",
+        ],
+    },
+    "kirkland_lake_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "kirkland lake", "macassa", "kerr-addison", "kerr addison",
+            "lake shore", "wright-hargreaves", "teck-hughes",
+            "upper canada", "young-davidson", "matachewan",
+        ],
+    },
+    "rouyn_noranda_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "rouyn-noranda", "rouyn noranda", "noranda", "horne mine",
+            "horne 5", "quemont", "millenbach",
+        ],
+    },
+    "timmins_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "timmins", "hollinger", "mcintyre porcupine", "dome mine",
+            "hoyle pond", "pamour", "porcupine camp", "schumacher",
+            "dixie lake", "tahoe gold", "lake shore gold",
+        ],
+    },
+    "detour_trend": {
+        "belt": "abitibi",
+        "keywords": [
+            "detour lake", "detour trend", "côté gold", "cote gold",
+            "swayze greenstone", "swayze sub-province",
+            "ivanhoe lake", "fenelon",
+        ],
+    },
+    "hemlo_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "hemlo", "hemlo greenstone", "marathon hemlo",
+            "williams mine", "david bell mine",
+        ],
+    },
+    "joutel_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "joutel", "selbaie", "matagami", "eagle telbel", "telbel",
+        ],
+    },
+    "red_lake_camp": {
+        "belt": "abitibi",
+        "keywords": [
+            "red lake", "red lake greenstone", "madsen", "campbell red lake",
+            "cochenour", "starratt-olsen", "dickenson", "high grade zone",
+            "pure gold mining", "rubicon phoenix",
+        ],
+    },
 }
 
 
@@ -656,10 +742,23 @@ def detect_sub_trend(
     >>> detect_sub_trend(None, "Nevada", "Pequop Mountains, NE Nevada")
     'pequop_long_canyon'
     >>> detect_sub_trend("Ottawa, Canada")
+    >>> detect_sub_trend(None, None, "Val-d’Or, Abitibi, Quebec, Canada")
+    'cadillac_break_valdor'
     """
-    blob = " ".join(s for s in (district, region, location_name) if s).lower()
-    if not blob:
+    raw = " ".join(s for s in (district, region, location_name) if s)
+    if not raw:
         return None
+    # Normalize curly / typographic quotes to straight ASCII before matching.
+    # Real-world location data has both forms — "Val-d’Or" from one source and
+    # "Val-d'Or" from another. Without normalization, a single curly quote
+    # in the source makes the "val-d'or" keyword silently miss.
+    blob = (
+        raw.lower()
+        .replace("’", "'")     # right single quotation mark
+        .replace("‘", "'")     # left single quotation mark
+        .replace("“", '"')     # left double quotation mark
+        .replace("”", '"')     # right double quotation mark
+    )
     for slug, meta in SUB_TRENDS.items():
         for kw in meta["keywords"]:
             if kw in blob:
