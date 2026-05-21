@@ -317,6 +317,12 @@ _SUB_TREND_HINTS: dict = {
         "d'Ivoire — Sanbrado, Yaramoko, Wahgnion, Essakane, Bissa, Mana, Bonikro, "
         "Agbaou — vein-shear orogenic Birimian gold)"
     ),
+    "tanzania_lake_victoria": (
+        "specifically in the Lake Victoria Goldfields (Tanzania — Geita, "
+        "Bulyanhulu, North Mara, Nyanzaga, Tulawaka, Buzwagi — Archean "
+        "greenstone-hosted orogenic shear-vein gold in mafic metavolcanics "
+        "/ dolerites of the Sukumaland and Musoma-Mara greenstone belts)"
+    ),
 }
 
 
@@ -400,6 +406,12 @@ _SUB_TREND_PRIORITY_ANALOGS: dict = {
     "banfora_houndé": [
         "Sanbrado", "Yaramoko", "Wahgnion", "Essakane", "Bissa", "Mana",
         "Bonikro", "Agbaou",
+    ],
+    "tanzania_lake_victoria": [
+        # User-doc preferred set for Buckreef-style targets
+        "Bulyanhulu", "Geita", "North Mara", "Nyanzaga", "Tulawaka",
+        # Also relevant though style-divergent
+        "Buzwagi", "Golden Pride",
     ],
 }
 

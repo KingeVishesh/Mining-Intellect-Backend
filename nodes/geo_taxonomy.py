@@ -829,6 +829,23 @@ SUB_TRENDS: Dict[str, Dict[str, List[str]]] = {
             "lobo", "agbaou", "bonikro", "mana",
         ],
     },
+    # ── Tanzania Lake Victoria Goldfields ────────────────────────────────
+    # Archean greenstone orogenic gold province around Lake Victoria.
+    # Buckreef sits here; Geita / Bulyanhulu / North Mara / Nyanzaga /
+    # Tulawaka are the canonical analog cohort. Geologically related to
+    # other Archean greenstone provinces (Abitibi, Yilgarn) via L2.5
+    # belt-compatibility, but in-country canonicals rank higher via
+    # the L6.5 sub-trend bonus (+40) for Tanzanian targets.
+    "tanzania_lake_victoria": {
+        "belt": "tanzania_archean",
+        "keywords": [
+            "lake victoria goldfields", "lake victoria", "musoma-mara",
+            "tanzania archean", "tanzania greenstone",
+            "geita", "bulyanhulu", "north mara", "nyanzaga", "buzwagi",
+            "tulawaka", "golden pride", "kahama", "mwanza", "shinyanga",
+            "kabanga gold", "buckreef", "sukumaland",
+        ],
+    },
 }
 
 

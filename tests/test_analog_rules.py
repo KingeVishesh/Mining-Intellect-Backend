@@ -405,6 +405,27 @@ def test_sub_trend_detection_distinguishes_trends():
     assert detect_sub_trend("Ottawa", "Canada") is None
 
 
+def test_sub_trend_detection_tanzania_lake_victoria():
+    """Buckreef + Geita + Bulyanhulu + North Mara are all in the Tanzania
+    Lake Victoria Goldfields. Without this sub-trend, Tanzanian orogenic
+    targets pulled Abitibi-greenstone analogs (same belt-compatibility
+    group, but cross-craton) via L6.5 + 0 — no in-country boost.
+    With this sub-trend, Tanzanian analogs get the +40 L6.5 bonus."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    assert detect_sub_trend(
+        None, None, None, "Buckreef Gold Project",
+    ) == "tanzania_lake_victoria"
+    assert detect_sub_trend(
+        "Geita Greenstone Belt", "Geita Region", "Tanzania",
+    ) == "tanzania_lake_victoria"
+    assert detect_sub_trend(
+        None, "Mara Region", "North Mara mining district, Tanzania",
+    ) == "tanzania_lake_victoria"
+    assert detect_sub_trend(
+        "Lake Victoria Goldfields", None, None,
+    ) == "tanzania_lake_victoria"
+
+
 def test_sub_trend_detection_asankrangwa_distinct_from_ashanti():
     """Abore is in Asankrangwa belt (granite-hosted, Ghana) and was
     being routed to ashanti_belt (sediment-hosted) because the previous
