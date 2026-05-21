@@ -348,8 +348,12 @@ def _build_profile(row: dict) -> dict:
         # for L6.5 rank bonus and to bias the Exa search toward in-trend
         # canonical analogs. None when the location text doesn't match
         # any sub-trend in SUB_TRENDS.
+        # Project name added as a detector input — Abore-style cases
+        # where district/region are too coarse but the project name
+        # itself is the sub-trend signal ("Abore" → asankrangwa_belt).
         "sub_trend":            geo_taxonomy.detect_sub_trend(
             row.get("district"), row.get("region"), row.get("location_name"),
+            row.get("name"),
         ),
     }
 

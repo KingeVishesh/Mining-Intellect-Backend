@@ -284,10 +284,24 @@ _SUB_TREND_HINTS: dict = {
         "specifically in the Batchawana / Wawa / Michipicoten greenstone belt "
         "(Ontario — Island Gold, Eagle River, Renabie, Magpie — Archean orogenic vein)"
     ),
+    "asankrangwa_belt": (
+        "specifically on the Asankrangwa gold belt (Ghana — Abore, Obotan, "
+        "Asanko / Nkran, Esaase, Akrokerri — GRANITE-HOSTED orogenic vein / "
+        "stockwork gold in Birimian metasediment-granite contact, distinct "
+        "from sediment-hosted Ashanti). Also relevant: granite-hosted "
+        "Birimian analogs from adjacent belts — Chirano (Sefwi), Edikan "
+        "(Kumasi Basin), Essakane (Burkina Faso) — share the granite-hosted "
+        "vein-stockwork style even though in different sub-belts."
+    ),
     "ashanti_belt": (
-        "specifically on the Ashanti / Bibiani / Tarkwa belt (Ghana — Obuasi, "
-        "Ahafo, Prestea-Bogoso, Tarkwa, Iduapriem, Akyem — large orogenic shear-"
-        "hosted vein systems with shear-zone-controlled mineralization)"
+        "specifically on the Ashanti gold belt (Ghana — Obuasi, Ahafo, "
+        "Prestea-Bogoso, Tarkwa, Iduapriem — SEDIMENT-HOSTED shear-zone "
+        "orogenic gold in Birimian turbidites/graphitic shears; distinct "
+        "from granite-hosted Asankrangwa style)"
+    ),
+    "kumasi_basin": (
+        "specifically in the Kumasi Basin / Asikuma area (Ghana — Edikan, "
+        "Ayanfuri — granite-plug-hosted Birimian orogenic vein gold)"
     ),
     "sefwi_bibiani": (
         "specifically on the Sefwi-Bibiani belt (western Ghana — Chirano, Wassa, "
@@ -367,10 +381,19 @@ _SUB_TREND_PRIORITY_ANALOGS: dict = {
         "Island Gold Mine", "Eagle River", "Renabie", "Magpie",
         "Goudreau-Lochalsh",
     ],
-    "ashanti_belt": [
-        "Obuasi", "Ahafo", "Bibiani", "Prestea-Bogoso", "Tarkwa", "Akyem",
+    "asankrangwa_belt": [
+        # In-belt canonicals
+        "Obotan", "Asanko Nkran", "Esaase", "Akrokerri", "Abore",
+        # Same-style cross-belt granite-hosted Birimian — the user-doc
+        # explicitly cites these as primary analogs for an Abore-style
+        # target despite being in different sub-belts.
+        "Chirano", "Edikan", "Essakane", "Ayanfuri", "Bonikro",
     ],
-    "sefwi_bibiani": ["Chirano", "Wassa", "Akropong"],
+    "ashanti_belt": [
+        "Obuasi", "Ahafo", "Prestea-Bogoso", "Tarkwa", "Iduapriem", "Akyem",
+    ],
+    "kumasi_basin": ["Edikan", "Ayanfuri", "Ahafo"],
+    "sefwi_bibiani": ["Chirano", "Wassa", "Akropong", "Bibiani"],
     "birimian_kedougou_kenieba": [
         "Loulo-Gounkoto", "Fékola", "Sabodala-Massawa", "Syama", "Yatela",
     ],

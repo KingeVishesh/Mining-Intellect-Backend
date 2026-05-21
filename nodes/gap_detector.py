@@ -181,6 +181,7 @@ def _ranking_out_of_trend(
     top = scored[0]
     top_st = detect_sub_trend(
         top.get("district"), top.get("region"), top.get("location_name"),
+        top.get("name"),
     )
     if top_st == target_st:
         return []

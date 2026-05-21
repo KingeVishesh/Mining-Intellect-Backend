@@ -765,18 +765,48 @@ SUB_TRENDS: Dict[str, Dict[str, List[str]]] = {
     # Kéniéba), Guinea (Siguiri, Léro). Each sub-belt has its own host
     # rocks and structural style; an Obuasi-style target (Ashanti) is
     # not the same as a Loulo-style target (Kédougou).
+    # Asankrangwa belt — separate from Ashanti; granite-hosted vein-
+    # stockwork orogenic gold (Abore, Obotan, Asanko/Nkran, Esaase,
+    # Akrokerri). Listed BEFORE ashanti_belt so the more-specific names
+    # win first-keyword-hit. Priority anchors deliberately include same-
+    # style cross-belt canonicals (Chirano in Sefwi, Edikan in Kumasi
+    # Basin, Essakane in Burkina) — for granite-hosted Birimian targets
+    # the host style outranks exact belt match in the user's intent.
+    "asankrangwa_belt": {
+        "belt": "west_african_birimian",
+        "keywords": [
+            "asankrangwa", "abore", "obotan", "asanko", "nkran",
+            "esaase", "akrokerri", "adansi", "akrokerri-adansi",
+            "kubi", "anyinam",
+        ],
+    },
+    # Ashanti belt — classic sediment-hosted shear-zone orogenic gold
+    # (Obuasi, Prestea, Tarkwa). Keywords tightened 2026-05-21 (Abore
+    # audit): bare "ashanti" was capturing the political Ashanti Region
+    # which spans multiple geological belts (Asankrangwa, Kumasi). Now
+    # requires "ashanti belt" / "ashanti gold belt" phrasing or specific
+    # mine names.
     "ashanti_belt": {
         "belt": "west_african_birimian",
         "keywords": [
-            "ashanti", "obuasi", "ahafo", "bibiani", "prestea",
-            "bogoso", "tarkwa", "iduapriem", "asankrangwa",
-            "ghana gold belt", "kumasi gold", "akyem",
+            "ashanti belt", "ashanti gold belt", "ashanti sub-belt",
+            "obuasi", "ahafo", "prestea", "bogoso", "tarkwa",
+            "iduapriem", "akyem mine", "akyem gold",
+        ],
+    },
+    # Kumasi Basin — Ahafo and Edikan area; granite-plug-hosted Birimian
+    # gold between Ashanti and Sefwi belts.
+    "kumasi_basin": {
+        "belt": "west_african_birimian",
+        "keywords": [
+            "kumasi basin", "edikan", "ayanfuri", "perseus kumasi",
         ],
     },
     "sefwi_bibiani": {
         "belt": "west_african_birimian",
         "keywords": [
             "sefwi", "wassa", "akropong", "chirano", "bibiani",
+            "akwaaba", "chirano shear",
         ],
     },
     "birimian_kedougou_kenieba": {
@@ -806,6 +836,7 @@ def detect_sub_trend(
     district: Optional[str],
     region: Optional[str] = None,
     location_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Optional[str]:
     """
     Return the sub-trend slug matching the first keyword hit across the
@@ -817,6 +848,11 @@ def detect_sub_trend(
     breaker — more specific sub-trends come first so e.g. "Eureka County"
     on a Cortez-corridor project doesn't get hijacked by the catch-all
     battle_mountain_eureka entry.
+
+    project_name added 2026-05-21 (Abore audit) — for projects whose
+    district/location is too coarse (e.g. only "Ashanti Region" populated)
+    the project name itself is often the sub-trend signal: "Abore" maps
+    to asankrangwa_belt, "Cheechoo" to james_bay_eeyou_istchee, etc.
 
     Examples
     --------
@@ -831,8 +867,10 @@ def detect_sub_trend(
     >>> detect_sub_trend("Ottawa, Canada")
     >>> detect_sub_trend(None, None, "Val-d’Or, Abitibi, Quebec, Canada")
     'cadillac_break_valdor'
+    >>> detect_sub_trend(None, "Ashanti Region", None, "Abore")
+    'asankrangwa_belt'
     """
-    raw = " ".join(s for s in (district, region, location_name) if s)
+    raw = " ".join(s for s in (district, region, location_name, project_name) if s)
     if not raw:
         return None
     # Normalize curly / typographic quotes to straight ASCII before matching.

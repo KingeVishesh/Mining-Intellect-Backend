@@ -405,6 +405,39 @@ def test_sub_trend_detection_distinguishes_trends():
     assert detect_sub_trend("Ottawa", "Canada") is None
 
 
+def test_sub_trend_detection_asankrangwa_distinct_from_ashanti():
+    """Abore is in Asankrangwa belt (granite-hosted, Ghana) and was
+    being routed to ashanti_belt (sediment-hosted) because the previous
+    keywords lumped 'asankrangwa' under ashanti_belt. Split fixes this
+    so the granite-hosted style cohort (Chirano, Edikan, Essakane) gets
+    surfaced via the Asankrangwa Exa hint."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    assert detect_sub_trend(
+        "Asankrangwa gold belt", "Ashanti Region",
+        "Asankrangwa belt, Ghana",
+    ) == "asankrangwa_belt"
+    assert detect_sub_trend(
+        None, "Ashanti Region", "Abore project, Ghana",
+    ) == "asankrangwa_belt"
+    assert detect_sub_trend(
+        None, "Ghana", "Obotan / Nkran district",
+    ) == "asankrangwa_belt"
+    # Ashanti belt proper — politicial "Ashanti Region" alone should NOT
+    # claim it; needs "ashanti belt" phrasing or a specific mine.
+    assert detect_sub_trend(
+        None, "Ashanti Region", "Obuasi gold mine area",
+    ) == "ashanti_belt"
+    assert detect_sub_trend(
+        None, None, "Ashanti gold belt classic shear",
+    ) == "ashanti_belt"
+    # Bare political "Ashanti Region" with no other context → None
+    # (preferable to wrong-belt routing). Adjusted from the previous
+    # bare-keyword false positive.
+    assert detect_sub_trend(
+        None, "Ashanti Region", None,
+    ) is None
+
+
 def test_sub_trend_detection_james_bay_eeyou_istchee():
     """Opinaca, Cheechoo, Éléonore — all James Bay / Eeyou Istchee
     sub-province. Without this sub-trend a Targa Opinaca-style target
