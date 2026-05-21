@@ -1003,11 +1003,26 @@ ANALOG_SELECTION_RULES = [
             "Donlin, Eagle, Brewery Creek). Distinct from porphyry "
             "(different metals + alteration) and from orogenic shear-hosted."
         ),
-        "required_subtypes":   ["irgs_general"],
+        # required_subtypes admits orogenic_general as a SIBLING of
+        # irgs_general 2026-05-21 (Targa Opinaca audit). Rationale:
+        # IRGS targets in tonalite-/metasediment-hosted regions like
+        # James Bay (Cheechoo) sit next to orogenic vein-shear systems
+        # (Éléonore, Wabamisk) that share host stratigraphy, age, and
+        # structural plumbing. The L2.5 belt hard-filter still prevents
+        # cross-province style-mixing (Tintina IRGS won't draw Abitibi
+        # orogenic — different belt-compatibility groups). For the
+        # SAME-belt case sibling matches are exactly the cohort the
+        # user wants.
+        "required_subtypes":   ["irgs_general", "orogenic_general",
+                                 "greenstone_orogenic"],
         "required_modes":      ["primary_sulfide", "refractory_sulfide",
                                  "free_milling_oxide"],
+        # Added `abitibi` 2026-05-21 — James Bay / Eeyou Istchee hosts
+        # tonalite-hosted IRGS (Cheechoo, Sirios) geologically similar
+        # to Tintina/Lachlan but inside the Abitibi belt slug.
         "preferred_belts":     ["yukon_tintina", "lachlan",
-                                 "newfoundland_appalachian", "bc_quesnel_stikine"],
+                                 "newfoundland_appalachian",
+                                 "bc_quesnel_stikine", "abitibi"],
         "excluded_subtypes":   [
             "alkalic_porphyry", "calc_alkalic_porphyry", "laramide_porphyry",
             "carlin_general", "low_sulfidation_epithermal",

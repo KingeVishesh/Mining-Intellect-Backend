@@ -269,6 +269,12 @@ _SUB_TREND_HINTS: dict = {
         "specifically in the Red Lake gold camp (Ontario Abitibi — "
         "Red Lake mine complex, Campbell, Madsen, Cochenour — high-grade vein shoots)"
     ),
+    "james_bay_eeyou_istchee": (
+        "specifically in the James Bay / Eeyou Istchee sub-province "
+        "(northern Quebec — Cheechoo, Éléonore, Wabamisk, Eastmain, "
+        "Opinaca-La Grande subprovinces — tonalite-hosted IRGS / "
+        "metasediment-hosted orogenic vein-shear gold)"
+    ),
     "rice_lake_greenstone": (
         "specifically in the Rice Lake / Wabigoon-Uchi greenstone (Manitoba — "
         "San Antonio Mine, Bissett, True North Complex; high-grade vein shoots "
@@ -349,6 +355,10 @@ _SUB_TREND_PRIORITY_ANALOGS: dict = {
     "joutel_camp": ["Eagle-Telbel", "Selbaie", "Matagami"],
     "red_lake_camp": [
         "Red Lake Mine Complex", "Campbell Mine", "Madsen", "Cochenour",
+    ],
+    "james_bay_eeyou_istchee": [
+        "Cheechoo", "Éléonore", "Wabamisk", "Eastmain Mine",
+        "Windfall Lake", "Sakami", "La Grande Sud",
     ],
     "rice_lake_greenstone": [
         "San Antonio Mine", "Bissett", "Rice Lake gold deposits",

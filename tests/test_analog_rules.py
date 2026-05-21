@@ -405,6 +405,36 @@ def test_sub_trend_detection_distinguishes_trends():
     assert detect_sub_trend("Ottawa", "Canada") is None
 
 
+def test_sub_trend_detection_james_bay_eeyou_istchee():
+    """Opinaca, Cheechoo, Éléonore — all James Bay / Eeyou Istchee
+    sub-province. Without this sub-trend a Targa Opinaca-style target
+    was pulling Tintina RIRGS analogs (Eagle, Valley, Golden Summit)
+    despite being in northern Quebec."""
+    from nodes.geo_taxonomy import detect_sub_trend
+    assert detect_sub_trend(
+        None, "Quebec",
+        "Opinaca subprovince, James Bay, Quebec, Canada",
+    ) == "james_bay_eeyou_istchee"
+    assert detect_sub_trend(
+        "La Grande Subprovince", "Quebec",
+        "James Bay region, Quebec",
+    ) == "james_bay_eeyou_istchee"
+    assert detect_sub_trend(
+        "Eastmain", "Quebec", None,
+    ) == "james_bay_eeyou_istchee"
+
+
+def test_irgs_subtype_detected_from_bare_intrusion_related():
+    """Targa Opinaca's deposit_type was the string 'Intrusion Related'
+    (no hyphen, no 'gold' suffix). The previous detect_subtype only
+    matched 'intrusion-related gold' with the gold word, so Opinaca
+    fell through to no-subtype and the cascade routed to fallback."""
+    from nodes.geo_taxonomy import detect_subtype
+    assert detect_subtype("Intrusion Related", None, None, None) == "irgs_general"
+    assert detect_subtype("intrusion related", None, None, None) == "irgs_general"
+    assert detect_subtype("Intrusion-Related", None, None, None) == "irgs_general"
+
+
 def test_sub_trend_detection_normalizes_curly_apostrophe():
     """Cartier-Cadillac's location_name in the DB is "Val-d’Or, ..."
     with a curly apostrophe (U+2019), not the straight ASCII one. Without

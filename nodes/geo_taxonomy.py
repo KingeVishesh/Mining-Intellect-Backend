@@ -712,6 +712,27 @@ SUB_TRENDS: Dict[str, Dict[str, List[str]]] = {
             "pure gold mining", "rubicon phoenix",
         ],
     },
+    # James Bay / Eeyou Istchee — Superior Province sub-provinces NORTH of
+    # the main Abitibi greenstone (La Grande, Opinaca, Nemiscau, Eastmain).
+    # Hosts BOTH styles per the Targa Opinaca audit: tonalite-hosted IRGS
+    # (Cheechoo, Sirios) AND metasediment-hosted orogenic vein-shear gold
+    # (Éléonore, Wabamisk). Single unified sub-trend so an Opinaca-style
+    # target gets Cheechoo via the IRGS rule path AND Éléonore via the
+    # orogenic-vein rule path (different rules, same in-camp +40 bonus).
+    # Listed BEFORE cadillac_break_valdor in dict order is safe because
+    # cadillac_break uses Val-d'Or-specific names; James Bay uses
+    # James Bay / Eeyou Istchee / La Grande / Opinaca / Eastmain — no
+    # keyword overlap.
+    "james_bay_eeyou_istchee": {
+        "belt": "abitibi",
+        "keywords": [
+            "james bay", "eeyou istchee", "la grande subprovince",
+            "la grande", "opinaca subprovince", "opinaca", "nemiscau",
+            "eastmain", "wabamisk", "cheechoo", "éléonore", "eleonore",
+            "windfall lake", "urban-barry", "frotet-evans",
+            "northern quebec gold", "chibougamau north",
+        ],
+    },
     # Rice Lake greenstone (Manitoba Wabigoon-Uchi domain) — Archean
     # greenstone-orogenic, geologically Superior craton like Red Lake but
     # ~150 km west of the canonical Red Lake camp. True North / San
@@ -967,13 +988,20 @@ def detect_subtype(
             return "intermediate_sulfidation_epithermal"
 
     # Intrusion-Related Gold Systems (IRGS) — Pogo, Fort Knox, Donlin,
-    # Eagle, Brewery Creek. Distinct class: stockwork/sheeted-vein gold
-    # peripheral to felsic intrusions. Check BEFORE orogenic because IRGS
-    # text sometimes says "intrusion-related" + "shear" but the IRGS class
-    # has a different alteration / metal suite.
+    # Eagle, Brewery Creek, Cheechoo. Distinct class: stockwork/sheeted-
+    # vein gold peripheral to felsic intrusions. Check BEFORE orogenic
+    # because IRGS text sometimes says "intrusion-related" + "shear" but
+    # the IRGS class has a different alteration / metal suite.
+    # Catches bare "intrusion related" / "intrusion-related" (no "gold"
+    # suffix) when the material is implicitly gold — Targa Opinaca's
+    # deposit_type was just "Intrusion Related" and the previous match
+    # missed it.
     if any(k in blob for k in (
-        "irgs", "intrusion-related gold", "intrusion related gold",
-        "reduced intrusion-related", "rirgs",
+        "irgs", "rirgs",
+        "intrusion-related gold", "intrusion related gold",
+        "reduced intrusion-related", "reduced intrusion related",
+        "intrusion-related",  # bare hyphenated form
+        "intrusion related",  # bare unhyphenated form
     )):
         return "irgs_general"
 
