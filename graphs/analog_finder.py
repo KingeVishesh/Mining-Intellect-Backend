@@ -1295,6 +1295,10 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             "_rank_pts": rank_pts,
             "_dimensions_matched": matched,
             "_dimensions_evaluated": evaluated,
+            # Internal-only; used by the sub-trend semi-hard filter below.
+            # The raw candidate dict `c` doesn't carry sub_trend — that's
+            # derived in _build_profile.
+            "_sub_trend": cand_profile.get("sub_trend"),
             "approved": False,
         })
         _emit("PASS", "cascade", c, cand_profile,
@@ -1309,6 +1313,32 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     # Per product requirement: max 4 analogs. Better to have 4 strong matches
     # than dilute with weaker candidates.
     ranked = sorted(survivors, key=lambda x: -x["_rank_pts"])
+
+    # ── Step D.1: Semi-hard sub-trend filter (Buckreef audit, 2026-05-22) ──
+    # When the target has a sub-trend and ≥3 in-sub-trend candidates pass
+    # the cascade, restrict the top-4 to in-sub-trend candidates ONLY.
+    # Cross-sub-trend candidates are diverted to NEAR_MISS audit events
+    # (SUB_TREND_FILTERED level) rather than backfilling top-4. This stops
+    # the case where a Tanzanian Buckreef target gets Canadian Malartic UG
+    # as the 4th pick just because Exa returned only 3 in-trend candidates.
+    #
+    # Falls back to the previous behavior when in-trend coverage is thin
+    # (<3 in-trend), so obscure-geology projects still get a top-4 cohort.
+    target_subtrend = target_profile.get("sub_trend") if target_profile else None
+    sub_trend_filtered: List[Dict] = []
+    if target_subtrend:
+        in_trend = [r for r in ranked if r.get("_sub_trend") == target_subtrend]
+        cross_trend = [r for r in ranked if r.get("_sub_trend") != target_subtrend]
+        if len(in_trend) >= 3:
+            logger.info(
+                f"[cascade] sub-trend semi-hard filter: "
+                f"{len(in_trend)} in-trend ({target_subtrend}) candidates "
+                f"— restricting top-4 to in-trend; "
+                f"{len(cross_trend)} cross-trend dropped to NEAR_MISS"
+            )
+            sub_trend_filtered = cross_trend
+            ranked = in_trend
+
     low_confidence = len(ranked) < 2
     if low_confidence:
         logger.warning(
@@ -1318,6 +1348,29 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         top = ranked[:2]
     else:
         top = ranked[:4]
+
+    # Audit events for cross-sub-trend candidates that the semi-hard
+    # filter pushed out of contention. Useful so the user can see WHY a
+    # geologically-valid candidate (e.g. Westwood for a Tanzanian target)
+    # didn't make top-4.
+    for stf in sub_trend_filtered[:5]:  # cap at 5 to avoid log bloat
+        audit_events.append({
+            "candidate_name": stf.get("name") or "Unknown",
+            "candidate_source": stf.get("source"),
+            "decision": "NEAR_MISS",
+            "level": "SUB_TREND_FILTERED",
+            "rule_id": rule_id_for_audit,
+            "lessons": lessons.resolve_lesson_ids(rule_lesson_ids_for_audit),
+            "detected_profile": {k: stf.get(k) for k in _PROFILE_DIMENSIONS},
+            "reason": (
+                f"passed cascade (rank_pts={stf.get('_rank_pts')}) but dropped "
+                f"from top-4 by sub-trend semi-hard filter: target sub-trend "
+                f"is {target_subtrend!r}, candidate sub-trend is "
+                f"{stf.get('sub_trend')!r}"
+            ),
+            "rank_pts": stf.get("_rank_pts"),
+            "similarity_score": stf.get("similarity_score"),
+        })
 
     # Near-miss observability — survivors that passed every hard filter but
     # were squeezed out by the top-4 cap get a NEAR_MISS audit event. Makes
@@ -1343,6 +1396,7 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         s.pop("_rank_pts", None)
         s.pop("_dimensions_matched", None)
         s.pop("_dimensions_evaluated", None)
+        s.pop("_sub_trend", None)
 
     if top:
         best = top[0]

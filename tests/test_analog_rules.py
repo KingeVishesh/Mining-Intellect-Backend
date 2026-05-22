@@ -478,6 +478,203 @@ def test_sub_trend_detection_james_bay_eeyou_istchee():
     ) == "james_bay_eeyou_istchee"
 
 
+def test_sub_trend_semihard_filter_keeps_top4_in_trend():
+    """Buckreef audit (2026-05-22): when a target has a sub-trend AND
+    >=3 in-sub-trend candidates pass the cascade, top-4 must contain
+    ONLY in-sub-trend candidates — cross-belt-group same-archean
+    candidates (Canadian Malartic UG, Westwood) must be diverted to
+    NEAR_MISS, not backfill top-4."""
+    from graphs.analog_finder import combine_filter_score_node
+    target_profile = {
+        "material": "gold",
+        "deposit_type_family": "orogenic",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "mineralization_mode": "primary_sulfide",
+        "tectonic_belt": "tanzania_archean",
+        "sub_trend": "tanzania_lake_victoria",
+        "metal_suite": "au_only",
+        "mining_method_class": "underground_vein",
+        "host_rock_class": None,
+        "project_stage_class": None,
+        "alteration_signature": None,
+        "recovery_method": None,
+        "resource_category_class": None,
+        "resource_compliance_standard": None,
+        "resource_vintage_year": None,
+        "grade_value": 2.8, "grade_unit": "g/t Au", "tonnage_mt": 25.0,
+        "country": "tanzania", "district": "Lake Victoria Goldfields",
+        "host_rock": "", "mineralization_style": "",
+        "source_url": None, "company_name": "", "project_id": "test-buckreef",
+    }
+    # 4 Tanzanian candidates (in-trend) + 2 cross-belt-group Abitibi
+    library = [
+        # In-trend Tanzanian candidates — all should be in top 4
+        {"name": "Bulyanhulu", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "tanzania_archean",
+         "mining_method_class": "underground_vein",
+         "district": "Sukumaland Greenstone Belt, Tanzania",
+         "tonnage_mt": 30, "grade_value": 8.0, "grade_unit": "g/t Au",
+         "source": "library"},
+        {"name": "Geita", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "tanzania_archean",
+         "mining_method_class": "underground_vein",
+         "district": "Geita greenstone belt, Tanzania",
+         "tonnage_mt": 100, "grade_value": 3.5, "grade_unit": "g/t Au",
+         "source": "library"},
+        {"name": "North Mara", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "tanzania_archean",
+         "mining_method_class": "underground_vein",
+         "district": "Musoma-Mara Greenstone Belt, Tanzania",
+         "tonnage_mt": 40, "grade_value": 3.0, "grade_unit": "g/t Au",
+         "source": "library"},
+        {"name": "Nyanzaga", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "tanzania_archean",
+         "mining_method_class": "underground_vein",
+         "district": "Sukumaland Greenstone Belt, Tanzania",
+         "tonnage_mt": 60, "grade_value": 3.0, "grade_unit": "g/t Au",
+         "source": "library"},
+        # Cross-belt-group Abitibi candidates — must be filtered out of top-4
+        {"name": "Westwood Mine", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "abitibi",
+         "mining_method_class": "underground_vein",
+         "district": "Bousquet Camp Quebec",
+         "tonnage_mt": 22, "grade_value": 5.4, "grade_unit": "g/t Au",
+         "source": "library"},
+        {"name": "Canadian Malartic - Odyssey UG", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "abitibi",
+         "mining_method_class": "underground_vein",
+         "district": "Malartic Quebec",
+         "tonnage_mt": 110, "grade_value": 2.5, "grade_unit": "g/t Au",
+         "source": "library"},
+    ]
+    state = {
+        "project": {"id": "test-buckreef", "name": "Test Buckreef",
+                     "material": "gold"},
+        "analog_rule": _find_rule("analog_sel_gold_orogenic_vein"),
+        "target_profile": target_profile,
+        "library_analogs": library,
+        "exa_analogs": [],
+    }
+    result = combine_filter_score_node(state)
+    top_names = [a.get("name") for a in result["scored_analogs"]]
+    cross_belt_names = {"Westwood Mine", "Canadian Malartic - Odyssey UG"}
+    leak = cross_belt_names.intersection(top_names)
+    assert not leak, (
+        f"Cross-belt-group Abitibi candidates leaked into top-4: {leak}. "
+        f"Top: {top_names}"
+    )
+    # The 4 Tanzanian candidates should all be in top 4
+    tanzanian = {"Bulyanhulu", "Geita", "North Mara", "Nyanzaga"}
+    assert tanzanian.issubset(set(top_names)), (
+        f"Tanzanian in-trend candidates missing from top-4. "
+        f"Top: {top_names}"
+    )
+    # And there should be NEAR_MISS / SUB_TREND_FILTERED events for the dropped ones
+    audit = result.get("audit_events") or []
+    filtered_events = [e for e in audit if e.get("level") == "SUB_TREND_FILTERED"]
+    filtered_names = {e.get("candidate_name") for e in filtered_events}
+    assert cross_belt_names.issubset(filtered_names), (
+        f"Cross-belt candidates should appear in SUB_TREND_FILTERED audit "
+        f"events. Filtered: {filtered_names}"
+    )
+
+
+def test_sub_trend_semihard_filter_falls_back_when_thin():
+    """When fewer than 3 in-sub-trend candidates pass the cascade, the
+    semi-hard filter should NOT engage — fall back to allowing cross-
+    belt-group same-archean candidates to backfill top-4. This protects
+    obscure-geology projects from returning empty cohorts."""
+    from graphs.analog_finder import combine_filter_score_node
+    target_profile = {
+        "material": "gold",
+        "deposit_type_family": "orogenic",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "mineralization_mode": "primary_sulfide",
+        "tectonic_belt": "tanzania_archean",
+        "sub_trend": "tanzania_lake_victoria",
+        "metal_suite": "au_only",
+        "mining_method_class": "underground_vein",
+        "host_rock_class": None,
+        "project_stage_class": None,
+        "alteration_signature": None,
+        "recovery_method": None,
+        "resource_category_class": None,
+        "resource_compliance_standard": None,
+        "resource_vintage_year": None,
+        "grade_value": 2.8, "grade_unit": "g/t Au", "tonnage_mt": 25.0,
+        "country": "tanzania", "district": "Lake Victoria Goldfields",
+        "host_rock": "", "mineralization_style": "",
+        "source_url": None, "company_name": "", "project_id": "test-thin",
+    }
+    library = [
+        # Only 2 in-trend — below the threshold of 3
+        {"name": "Bulyanhulu", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "tanzania_archean",
+         "mining_method_class": "underground_vein",
+         "district": "Sukumaland Greenstone Belt, Tanzania",
+         "tonnage_mt": 30, "grade_value": 8.0, "grade_unit": "g/t Au",
+         "source": "library"},
+        {"name": "North Mara", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "tanzania_archean",
+         "mining_method_class": "underground_vein",
+         "district": "Musoma-Mara Greenstone Belt, Tanzania",
+         "tonnage_mt": 40, "grade_value": 3.0, "grade_unit": "g/t Au",
+         "source": "library"},
+        # Cross-belt-group Abitibi candidates — should backfill since
+        # in-trend coverage is thin
+        {"name": "Westwood Mine", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "abitibi",
+         "mining_method_class": "underground_vein",
+         "district": "Bousquet Camp Quebec",
+         "tonnage_mt": 22, "grade_value": 5.4, "grade_unit": "g/t Au",
+         "source": "library"},
+        {"name": "Canadian Malartic - Odyssey UG", "material": "gold",
+         "deposit_subtype": "greenstone_orogenic",
+         "mineralization_pattern": "vein_hosted",
+         "tectonic_belt": "abitibi",
+         "mining_method_class": "underground_vein",
+         "district": "Malartic Quebec",
+         "tonnage_mt": 110, "grade_value": 2.5, "grade_unit": "g/t Au",
+         "source": "library"},
+    ]
+    state = {
+        "project": {"id": "test-thin", "name": "Test Thin",
+                     "material": "gold"},
+        "analog_rule": _find_rule("analog_sel_gold_orogenic_vein"),
+        "target_profile": target_profile,
+        "library_analogs": library,
+        "exa_analogs": [],
+    }
+    result = combine_filter_score_node(state)
+    top_names = [a.get("name") for a in result["scored_analogs"]]
+    # With only 2 in-trend, semi-hard filter should NOT engage.
+    # Top-4 may include cross-belt-group backfills.
+    assert len(top_names) >= 3, (
+        f"Thin-trend case should still produce ≥3 picks via backfill. "
+        f"Got {len(top_names)}: {top_names}"
+    )
+
+
 def test_irgs_subtype_detected_from_bare_intrusion_related():
     """Targa Opinaca's deposit_type was the string 'Intrusion Related'
     (no hyphen, no 'gold' suffix). The previous detect_subtype only
