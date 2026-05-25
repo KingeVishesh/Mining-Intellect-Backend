@@ -1853,6 +1853,24 @@ def mining_method_compatible(target: Optional[str], candidate: Optional[str]) ->
     return candidate not in incompatible
 
 
+def compatible_belts(belt: Optional[str]) -> List[str]:
+    """List of tectonic belts in the same compatibility group as `belt`.
+
+    Returns the belt itself plus its siblings. Empty list when the belt is
+    unknown or doesn't belong to any group — caller should treat that as
+    "no SQL pre-filter possible" and fall back to the unfiltered fetch.
+
+    Use this to pre-filter library queries at SQL level so the row budget
+    isn't spent on candidates the cascade will reject at L2.5 anyway.
+    """
+    if not belt:
+        return []
+    group = _BELT_TO_GROUP.get(belt)
+    if group is None:
+        return [belt]  # Single-belt group equivalent
+    return sorted(BELT_COMPATIBILITY_GROUPS[group])
+
+
 def belt_compatible(target: Optional[str], candidate: Optional[str]) -> bool:
     """
     True when target and candidate tectonic belts are in the same compatibility

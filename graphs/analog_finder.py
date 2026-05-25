@@ -852,15 +852,17 @@ def library_search_node(state: AnalogState) -> AnalogState:
     if deposit_subtype and deposit_subtype not in accepted_subtypes:
         accepted_subtypes = accepted_subtypes + [deposit_subtype]
 
-    # Fetch ALL matching library rows — the in-Python dedupe afterwards
-    # collapses to distinct names. With a small (~1k row) library and aggressive
-    # subtype/material filters, this is cheap and avoids silent truncation
-    # where in-belt candidates (e.g. tanzania_archean rows for a Tanzanian
-    # target) fall outside an arbitrary 200-row PostgREST window.
+    # Pass the target belt so the library query can spend its 200-row
+    # budget on belt-compatible candidates only. Without this, the cascade's
+    # L2.5 belt-group filter would later REVOKE most of what we fetched,
+    # while in-belt candidates (e.g. Bulyanhulu for a Tanzanian target) get
+    # silently truncated at the SQL layer.
+    target_belt = (state.get("target_profile") or {}).get("tectonic_belt")
     analogs = supabase_ops.get_approved_analogs(
-        material, deposit_type, limit=2000,
+        material, deposit_type, limit=200,
         deposit_subtype=deposit_subtype,
         deposit_subtypes=accepted_subtypes or None,
+        target_tectonic_belt=target_belt,
     )
     logger.info(
         f"[library] Found {len(analogs)} previously approved analogs "

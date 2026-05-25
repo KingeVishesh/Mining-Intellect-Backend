@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from supabase import create_client, Client
 from config import settings
+from nodes import geo_taxonomy
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +67,35 @@ def search_projects_by_criteria(
     return res.data or []
 
 
+_LIBRARY_SELECT = (
+    "analog_name,analog_material,analog_deposit_type,analog_country,"
+    "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
+    "similarity_score,analog_project_stage,"
+    "analog_host_rock,analog_mineralization_style,analog_district,"
+    "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
+    "analog_metal_suite,analog_alteration_signature,analog_recovery_method,"
+    "analog_mineralization_pattern,analog_host_rock_class,"
+    "analog_project_stage_class,analog_mining_method_class,"
+    "analog_resource_category_class,analog_resource_compliance_standard,"
+    "analog_resource_vintage_year"
+)
+
+_FAMILY_KEYWORDS = (
+    "alkalic", "calc-alkalic", "carlin", "porphyry", "epithermal",
+    "orogenic", "iocg", "skarn", "vms", "vhms", "sediment-hosted",
+    "kupferschiefer", "manto", "crd", "sedex", "mvt", "merensky",
+    "ug2", "platreef", "laterite", "magmatic", "komatiite", "bif",
+    "unconformity", "roll-front", "rollfront", "iscr",
+)
+
+
 def get_approved_analogs(
     material: str,
     deposit_type: Optional[str] = None,
-    limit: int = 20,
+    limit: int = 200,
     deposit_subtype: Optional[str] = None,
     deposit_subtypes: Optional[List[str]] = None,
+    target_tectonic_belt: Optional[str] = None,
 ) -> List[Dict]:
     """Query the `analogs` table for previously seen analogs of this commodity.
 
@@ -85,11 +109,22 @@ def get_approved_analogs(
          where the keyword is the first geological term in deposit_type,
          stripped of qualifiers like "-style", "-type", "sediment-hosted".
 
+    When `target_tectonic_belt` is supplied, the row budget is spent
+    intelligently using a two-pass query:
+      Pass 1 — target-belt rows + null-belt rows (always relevant, never
+               truncated).  Null-belt candidates pass L2.5 through, so
+               keeping them honors the cascade's contract.
+      Pass 2 — sibling belts in the same compatibility group fill the
+               remaining slots.  Out-of-group belts (Lachlan, Guiana,
+               Newfoundland-Appalachian, Brazilian Shield, etc. for an
+               archean_greenstone target) are never fetched — the cascade
+               would drop them at L2.5 anyway.
+    Net effect: the limit=200 budget is spent only on candidates the
+    cascade can actually use.
+
     When deposit_type is None AND deposit_subtype is None, the library is
     skipped entirely (no rule = don't poison the pool).
     """
-    # Build the accepted-subtype set: take the explicit list if given, else
-    # the single slug, else empty (fall back to deposit_type ILIKE).
     accepted_subtypes: List[str] = list(deposit_subtypes or [])
     if deposit_subtype and deposit_subtype not in accepted_subtypes:
         accepted_subtypes.append(deposit_subtype)
@@ -97,68 +132,60 @@ def get_approved_analogs(
     keys = _MATERIAL_TO_RULES_KEYS.get(material.strip().lower(), [material.strip().lower()])
     dep = (deposit_type or "").strip().lower()
 
-    # Strict contract: no subtypes and no deposit_type → no library match.
-    # The previous version fell through to a material-only query (intended
-    # to support the generic_fallback rule), but that returned random gold
-    # deposits to projects whose research left these fields null, producing
-    # wrong analogs. With the fallback removed, callers should never reach
-    # here without at least one filter — but defend in depth.
     if not accepted_subtypes and not dep:
         return []
-    # analogs stores the raw material string — try all mapped keys
-    q = (
-        get_client()
-        .table("analogs")
-        .select(
-            "analog_name,analog_material,analog_deposit_type,analog_country,"
-            "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
-            "similarity_score,analog_project_stage,"
-            "analog_host_rock,analog_mineralization_style,analog_district,"
-            # Geological profile (cascading match)
-            "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
-            "analog_metal_suite,analog_alteration_signature,analog_recovery_method,"
-            # Pattern + host class
-            "analog_mineralization_pattern,analog_host_rock_class,"
-            # Stage / mining / category / vintage / compliance
-            "analog_project_stage_class,analog_mining_method_class,"
-            "analog_resource_category_class,analog_resource_compliance_standard,"
-            "analog_resource_vintage_year"
-        )
-        .in_("analog_material", keys)
-        .eq("status", "approved")
-    )
-    # Pick the most specific filter that will actually match the seeded
-    # library entries. Subtype slugs (carlin_general, alkalic_porphyry, …)
-    # are exact and survive freeform-text variations, so we prefer them.
-    # When multiple subtypes are accepted (e.g. orogenic-vein rule accepts
-    # greenstone + turbidite + bif_hosted), use `.in_()` so we don't miss
-    # legitimate sibling matches.
-    if accepted_subtypes:
-        if len(accepted_subtypes) == 1:
-            q = q.eq("analog_deposit_subtype", accepted_subtypes[0])
-        else:
-            q = q.in_("analog_deposit_subtype", accepted_subtypes)
-    elif dep:
-        # Extract a short keyword from the freeform deposit_type so we
-        # don't require the analog's text to contain the target's whole
-        # string. "Carlin-style sediment-hosted disseminated gold"
-        # → "carlin" ; "alkalic porphyry copper-gold" → "alkalic" if it
-        # appears, else "porphyry"; falls back to the first non-trivial word.
-        _FAMILY_KEYWORDS = (
-            "alkalic", "calc-alkalic", "carlin", "porphyry", "epithermal",
-            "orogenic", "iocg", "skarn", "vms", "vhms", "sediment-hosted",
-            "kupferschiefer", "manto", "crd", "sedex", "mvt", "merensky",
-            "ug2", "platreef", "laterite", "magmatic", "komatiite", "bif",
-            "unconformity", "roll-front", "rollfront", "iscr",
-        )
-        keyword = next((kw for kw in _FAMILY_KEYWORDS if kw in dep), None)
-        if keyword is None:
-            # No known family keyword — use the first word ≥4 chars
-            keyword = next((w for w in dep.split() if len(w) >= 4), dep[:8])
-        q = q.ilike("analog_deposit_type", f"%{keyword}%")
 
-    res = q.limit(limit).execute()
-    rows = res.data or []
+    def _base_query():
+        """Fresh query with material + status + subtype/keyword filters applied."""
+        q = (
+            get_client()
+            .table("analogs")
+            .select(_LIBRARY_SELECT)
+            .in_("analog_material", keys)
+            .eq("status", "approved")
+        )
+        if accepted_subtypes:
+            if len(accepted_subtypes) == 1:
+                q = q.eq("analog_deposit_subtype", accepted_subtypes[0])
+            else:
+                q = q.in_("analog_deposit_subtype", accepted_subtypes)
+        elif dep:
+            keyword = next((kw for kw in _FAMILY_KEYWORDS if kw in dep), None)
+            if keyword is None:
+                keyword = next((w for w in dep.split() if len(w) >= 4), dep[:8])
+            q = q.ilike("analog_deposit_type", f"%{keyword}%")
+        return q
+
+    rows: List[Dict] = []
+    compatible = geo_taxonomy.compatible_belts(target_tectonic_belt) if target_tectonic_belt else []
+
+    if compatible:
+        # Pass 1: target belt + null-belt rows. The PostgREST `or_` filter
+        # accepts a CSV of predicates joined by OR.
+        pass1 = (
+            _base_query()
+            .or_(f"analog_tectonic_belt.eq.{target_tectonic_belt},analog_tectonic_belt.is.null")
+            .limit(limit)
+            .execute()
+        )
+        rows = list(pass1.data or [])
+
+        # Pass 2: sibling belts in the same compatibility group, filling
+        # whatever budget Pass 1 didn't consume.
+        remaining = limit - len(rows)
+        siblings = [b for b in compatible if b != target_tectonic_belt]
+        if remaining > 0 and siblings:
+            pass2 = (
+                _base_query()
+                .in_("analog_tectonic_belt", siblings)
+                .limit(remaining)
+                .execute()
+            )
+            rows.extend(pass2.data or [])
+    else:
+        # No belt info on the target (or belt not in any compatibility group)
+        # → fall back to the original single-query approach.
+        rows = (_base_query().limit(limit).execute()).data or []
 
     candidates = []
     seen_names: set = set()
