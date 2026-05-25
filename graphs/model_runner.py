@@ -99,13 +99,30 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
     inf_kt  = float(model.get("inferred_tonnage_kt") or 0)
     inf_g   = model.get("inferred_grade_pct")
     inf_c   = model.get("inferred_contained_mlb")
-    tot_kt  = float(model.get("total_tonnage_kt") or 0)
-    tot_g   = model.get("total_grade_pct")
-    tot_c   = model.get("total_contained_mlb")
 
     mi_mt       = _round(mi_kt / 1000.0) if mi_kt else None
     inferred_mt = _round(inf_kt / 1000.0) if inf_kt else None
-    total_mt    = _round(tot_kt / 1000.0) if tot_kt else None
+
+    # Totals are recomputed from the per-category values so the table is
+    # internally consistent: total tonnage = M&I + Inferred, total contained
+    # = M&I + Inferred, and avg grade is tonnage-weighted so it equals
+    # total_contained / total_tonnage in the right units.
+    total_kt = mi_kt + inf_kt
+    total_mt = _round(total_kt / 1000.0) if total_kt else None
+
+    mi_cont_f  = float(mi_cont) if mi_cont is not None else 0.0
+    inf_cont_f = float(inf_c)   if inf_c   is not None else 0.0
+    total_contained = (
+        _round(mi_cont_f + inf_cont_f, 3)
+        if (mi_cont is not None or inf_c is not None) else None
+    )
+
+    mi_g_f  = float(mi_g) if mi_g is not None else 0.0
+    inf_g_f = float(inf_g) if inf_g is not None else 0.0
+    avg_grade = (
+        _round((mi_g_f * mi_kt + inf_g_f * inf_kt) / total_kt)
+        if total_kt > 0 and (mi_g is not None or inf_g is not None) else None
+    )
 
     conviction_num = float(model.get("conviction_pct") or 0)
     if is_post_mre:
@@ -122,10 +139,10 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
         "inferred_resource_mt":  inferred_mt,
         "inferred_grade":        _round(inf_g),
         "inferred_contained":    _round(inf_c, 3),
-        # Totals
+        # Totals — derived as sums / weighted average for arithmetic consistency
         "tonnage_mt":            total_mt,
-        "grade_value":           _round(tot_g),
-        "total_contained":       _round(tot_c, 3),
+        "grade_value":           avg_grade,
+        "total_contained":       total_contained,
         # Conviction
         "conviction_score":      tier_code,
         "conviction_tier":       f"{tier_code}: {tier_label}",
