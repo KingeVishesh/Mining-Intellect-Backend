@@ -623,17 +623,13 @@ def save_approved_analogs(
 # ── Model runs ─────────────────────────────────────────────────────────────────
 
 _MODEL_FIELDS = (
-    # Per-category tonnage (Mt)
-    "measured_resource_mt",
-    "indicated_resource_mt",
+    # Measured + Indicated combined (M&I)
+    "mi_tonnage_mt",
+    "mi_grade",
+    "mi_contained",
+    # Inferred
     "inferred_resource_mt",
-    # Per-category grade (same units as project.grade_unit)
-    "measured_grade",
-    "indicated_grade",
     "inferred_grade",
-    # Per-category contained metal (Moz precious / Mlb base)
-    "measured_contained",
-    "indicated_contained",
     "inferred_contained",
     # Totals
     "tonnage_mt",

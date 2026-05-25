@@ -72,27 +72,6 @@ def _route_after_check(state: ModelRunnerState) -> str:
     return END if state.get("error") else "load_rules"
 
 
-def _split_mi_by_stage(stage: Optional[str]) -> tuple[float, float]:
-    """Within the Measured+Indicated bucket the model produces, return
-    (measured_fraction, indicated_fraction). Drill density goes up with
-    stage maturity, so later stages have more Measured.
-    """
-    s = (stage or "").lower()
-    if any(k in s for k in ("production", "producing", "operating", "operation", "construction")):
-        return (0.70, 0.30)
-    if any(k in s for k in ("bankable", "definitive feasibility", " dfs", " bfs")) or (
-        "feasibility" in s and "pre" not in s and "prefeasibility" not in s
-    ):
-        return (0.50, 0.50)
-    if any(k in s for k in ("pre-feasibility", "prefeasibility", " pfs")):
-        return (0.30, 0.70)
-    if any(k in s for k in ("pea", "scoping", "preliminary economic", "preliminary assessment")):
-        return (0.15, 0.85)
-    if "exploration" in s or not s:
-        return (0.00, 1.00)
-    return (0.20, 0.80)
-
-
 def _round(x: Optional[float], digits: int = 4) -> Optional[float]:
     if x is None:
         return None
@@ -103,17 +82,16 @@ def _round(x: Optional[float], digits: int = 4) -> Optional[float]:
 
 
 def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
-    """Translate a Model 1 / Model 2 output dict into the 12 columns we persist.
+    """Translate a Model 1 / Model 2 output dict into the 9 columns we persist.
 
-    Per category (Measured / Indicated / Inferred): tonnage_mt, grade,
-    contained. Plus totals (tonnage_mt, grade_value, total_contained).
+    Industry resource statements bundle Measured + Indicated together as
+    "M&I" — the model itself doesn't split them, and re-splitting them
+    via a stage heuristic added noise without information. We now store
+    M&I as a single triple (tonnage, grade, contained) alongside the
+    Inferred triple and the totals.
+
     Conviction is the tier code ("PRE-1".."PRE-5" / "POST-1".."POST-5");
     conviction_tier carries the full human label.
-
-    The underlying model already splits its output into M+I vs Inferred
-    (industry standard). We split the M+I bucket between Measured and
-    Indicated using stage-keyed ratios — production-stage projects skew
-    Measured-heavy, exploration-stage projects skew Indicated.
     """
     mi_kt   = float(model.get("mi_tonnage_kt") or 0)
     mi_g    = model.get("mi_grade_pct")
@@ -125,17 +103,9 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
     tot_g   = model.get("total_grade_pct")
     tot_c   = model.get("total_contained_mlb")
 
-    m_frac, i_frac = _split_mi_by_stage(project.get("project_stage"))
-
-    measured_mt  = _round((mi_kt * m_frac) / 1000.0) if mi_kt else None
-    indicated_mt = _round((mi_kt * i_frac) / 1000.0) if mi_kt else None
-    inferred_mt  = _round(inf_kt / 1000.0) if inf_kt else None
-    total_mt     = _round(tot_kt / 1000.0) if tot_kt else None
-
-    measured_contained  = _round((float(mi_cont) * m_frac), 3) if mi_cont is not None else None
-    indicated_contained = _round((float(mi_cont) * i_frac), 3) if mi_cont is not None else None
-    inferred_contained  = _round(inf_c, 3) if inf_c is not None else None
-    total_contained     = _round(tot_c, 3) if tot_c is not None else None
+    mi_mt       = _round(mi_kt / 1000.0) if mi_kt else None
+    inferred_mt = _round(inf_kt / 1000.0) if inf_kt else None
+    total_mt    = _round(tot_kt / 1000.0) if tot_kt else None
 
     conviction_num = float(model.get("conviction_pct") or 0)
     if is_post_mre:
@@ -144,22 +114,18 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
         tier_code, tier_label = model_builder._compute_pre_tier(conviction_num)
 
     return {
-        # Per-category tonnage (existing column names — column is "Tonnage (Mt)")
-        "measured_resource_mt":  measured_mt,
-        "indicated_resource_mt": indicated_mt,
+        # Measured + Indicated combined (M&I)
+        "mi_tonnage_mt":         mi_mt,
+        "mi_grade":              _round(mi_g),
+        "mi_contained":          _round(mi_cont, 3),
+        # Inferred
         "inferred_resource_mt":  inferred_mt,
-        # Per-category grade (same units as project.grade_unit, e.g. "g/t Au")
-        "measured_grade":        _round(mi_g),
-        "indicated_grade":       _round(mi_g),
         "inferred_grade":        _round(inf_g),
-        # Per-category contained metal (Moz for precious metals, Mlb otherwise)
-        "measured_contained":    measured_contained,
-        "indicated_contained":   indicated_contained,
-        "inferred_contained":    inferred_contained,
+        "inferred_contained":    _round(inf_c, 3),
         # Totals
         "tonnage_mt":            total_mt,
         "grade_value":           _round(tot_g),
-        "total_contained":       total_contained,
+        "total_contained":       _round(tot_c, 3),
         # Conviction
         "conviction_score":      tier_code,
         "conviction_tier":       f"{tier_code}: {tier_label}",
