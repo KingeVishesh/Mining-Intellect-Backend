@@ -1,0 +1,72 @@
+{
+  "id": "83d32125-7437-4f2b-b4fa-7137bf9ad725",
+  "name": "Hammerdown Gold Project",
+  "material": "gold",
+  "deposit_type": null,
+  "tectonic_belt": "newfoundland_appalachian",
+  "metal_suite": "au_only",
+  "recovery_method": "cn_leach",
+  "country": "Canada",
+  "region": "Newfoundland and Labrador",
+  "district": "Baie Verte mining district",
+  "project_stage": "Production",
+  "project_stage_class": "production",
+  "resource_category": "Measured + Indicated + Inferred",
+  "mining_method": "Open pit",
+  "mine_life_years": 13,
+  "tonnage_mt": 5.46,
+  "grade_value": 2.39,
+  "grade_unit": "g/t Au",
+  "mineralization_pattern": null,
+  "strike_length_meters": null,
+  "width_meters": null,
+  "depth_meters": null,
+  "analogs": [
+    {
+      "name": "Dingman Gold Project",
+      "country": "Canada",
+      "material": "gold",
+      "tonnage_mt": 12.6,
+      "grade_value": 0.94,
+      "deposit_type": "orogenic",
+      "project_stage": "advanced exploration",
+      "mineralization_style": "lode/vein",
+      "similarity_score": 85.7,
+      "source": "library"
+    },
+    {
+      "name": "True North Gold Project",
+      "country": "Canada",
+      "material": "gold",
+      "tonnage_mt": 3.52,
+      "grade_value": 4.41,
+      "deposit_type": "orogenic/mesothermal",
+      "project_stage": "Indicated + Inferred",
+      "mineralization_style": "quartz-carbonate veins in brittle-ductile shear zones",
+      "similarity_score": 83.3,
+      "source": "library"
+    },
+    {
+      "name": "Pahtavaara Gold Project",
+      "country": "Finland",
+      "material": "gold",
+      "tonnage_mt": 4.64,
+      "grade_value": 3.2,
+      "deposit_type": "orogenic gold (shear zone/vein)",
+      "project_stage": "Inferred",
+      "similarity_score": 66.7,
+      "source": "library"
+    },
+    {
+      "name": "Beta Hunt Mine",
+      "country": "Australia",
+      "material": "gold",
+      "tonnage_mt": 4.538,
+      "grade_value": 2.8,
+      "deposit_type": "orogenic gold (fault-controlled veins, Western Flanks/A Zone)",
+      "project_stage": "Proven & Probable",
+      "similarity_score": 80,
+      "source": "library"
+    }
+  ]
+}

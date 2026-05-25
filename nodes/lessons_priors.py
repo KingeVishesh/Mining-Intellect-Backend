@@ -76,35 +76,50 @@ _MATERIAL_FALLBACK_RANGE_MT: Dict[str, Tuple[float, float]] = {
 _Z80 = 1.2815515655446004  # standard normal z for P10/P90
 
 
-def _classify_deposit_family(deposit_type: str, mineralization_pattern: str) -> str:
+def _classify_deposit_family(deposit_type: str, mineralization_pattern: str):
     """Map freeform deposit_type + mineralization_pattern strings to one of
     the three families the lesson tables index on: vein / bulk / porphyry.
+    Returns None when there's no information at all to classify on —
+    callers fall back to the wide material-level prior in that case
+    rather than mis-applying a "bulk" default (which drove the Hammerdown
+    backtest +455% error).
 
-    The mapping intentionally errs toward `bulk` for ambiguous cases — that's
-    the broadest category and produces the most conservative tonnage band.
+    Resolution order: the controlled-vocab `mineralization_pattern` slug
+    wins over the freeform `deposit_type` text. A project whose pattern
+    is `disseminated_bulk` is a bulk system regardless of whether its
+    deposit_type says "orogenic" — orogenic gold systems include both
+    bulk (Detour Lake, Canadian Malartic, Fenn-Gib) and vein-hosted
+    (Brucejack, True North) types.
     """
-    dt = (deposit_type or "").lower()
-    mp = (mineralization_pattern or "").lower()
+    dt = (deposit_type or "").lower().strip()
+    mp = (mineralization_pattern or "").lower().strip()
 
-    # Porphyry family — clearly identified by deposit_type
+    # No signal at all — let the caller fall back to the material-wide range.
+    if not dt and not mp:
+        return None
+
+    # Porphyry / IOCG / skarn — deposit_type is decisive
     if any(k in dt for k in ("porphyry", "iocg", "skarn")):
         return "porphyry"
 
-    # Vein family — both freeform deposit_type signals (orogenic veins,
-    # epithermal veins, CRD/manto veins) AND the controlled mineralization_pattern
-    # slug `vein_hosted` from project_research.
+    # Explicit bulk-pattern slugs win — the project_research/analog_finder
+    # writes `disseminated_bulk` for systems that are bulk-tonnage regardless
+    # of geological family. Same for "stockwork" and "halo" indicators.
+    if any(b in mp for b in ("disseminated", "bulk", "stockwork", "halo")):
+        return "bulk"
+    if any(b in dt for b in ("disseminated", "bulk", "carlin", "halo",
+                              "heap-leach", "heap leach")):
+        return "bulk"
+
+    # Vein indicators in pattern, then in deposit_type
     if "vein" in mp or mp in {"vein_hosted", "vein-hosted"}:
         return "vein"
-    if "orogenic" in dt and "bulk" not in dt:
-        # Orogenic gold defaults to vein-hosted; the bulk-orogenic exception
-        # (e.g. Cassiar Taurus) carries "bulk" explicitly in deposit_type.
-        return "vein"
-    if any(k in dt for k in ("low-sulfidation epithermal vein", "epithermal vein",
-                              "ls epithermal vein", "hs epithermal vein", "crd")):
+    if any(k in dt for k in ("orogenic", "epithermal vein", "ls epithermal vein",
+                              "hs epithermal vein", "crd", "manto",
+                              "low-sulfidation epithermal", "high-sulfidation epithermal")):
         return "vein"
 
-    # Bulk family — Carlin disseminated, bulk epithermal, heap-leach,
-    # RIRGS, manto stratiform, and the fallback for unclassified.
+    # Some signal but ambiguous — bulk is still the broadest catch-all
     return "bulk"
 
 
@@ -155,7 +170,11 @@ def stage_tonnage_prior(
     """
     family = _classify_deposit_family(deposit_type, mineralization_pattern)
     stage = _classify_stage(project_stage)
-    rng = _STAGE_TONNAGE_RANGES_MT.get((family, stage))
+    # When the classifier returned None (no signal at all), or the
+    # (family, stage) lookup misses, drop to the material-wide range. This
+    # is intentionally wide so the analog signal dominates — better than
+    # mis-applying a tight prior centred on the wrong scale.
+    rng = _STAGE_TONNAGE_RANGES_MT.get((family, stage)) if family else None
     if rng is None:
         rng = _MATERIAL_FALLBACK_RANGE_MT.get(
             (material or "").strip().lower(),

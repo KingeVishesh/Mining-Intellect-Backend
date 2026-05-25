@@ -1,0 +1,72 @@
+{
+  "id": "fac4e12f-cdb4-4e59-b09c-572f7e5bfdf7",
+  "name": "Tamarack",
+  "material": "gold",
+  "deposit_type": "Intrusion-related gold system",
+  "deposit_subtype": "irgs_general",
+  "mineralization_pattern": "stockwork",
+  "host_rock": "Intrusive and schist",
+  "tectonic_belt": "yukon_tintina",
+  "metal_suite": "au_only",
+  "country": "USA",
+  "region": "Alaska",
+  "district": "Fairbanks Mining District",
+  "project_stage": "PFS",
+  "project_stage_class": "exploration",
+  "resource_category": null,
+  "mining_method": "Open Pit",
+  "tonnage_mt": 4.218,
+  "grade_value": 2.5967,
+  "grade_unit": null,
+  "strike_length_meters": null,
+  "width_meters": null,
+  "depth_meters": null,
+  "analogs": [
+    {
+      "name": "Hirsikangas Gold Project",
+      "country": "Finland",
+      "material": "gold",
+      "tonnage_mt": 7.29,
+      "grade_value": 1.13,
+      "deposit_type": "orogenic gold (shear zone-hosted)",
+      "project_stage": "exploration/development",
+      "similarity_score": 100,
+      "source": "library"
+    },
+    {
+      "name": "Gold Zone 2",
+      "country": "Georgia",
+      "material": "gold",
+      "tonnage_mt": 2.29,
+      "grade_value": 0.85,
+      "deposit_type": "epithermal gold oxide",
+      "project_stage": "exploration",
+      "mineralization_style": "supergene oxide cap",
+      "similarity_score": 100,
+      "source": "library"
+    },
+    {
+      "name": "Gilar deposit",
+      "country": "Azerbaijan",
+      "material": "gold",
+      "tonnage_mt": 6.1,
+      "grade_value": 1.3,
+      "deposit_type": "polymetallic",
+      "project_stage": "exploration",
+      "similarity_score": 100,
+      "source": "library"
+    },
+    {
+      "name": "Tartan Lake Gold Project",
+      "country": "Canada",
+      "material": "gold",
+      "tonnage_mt": 1.18,
+      "grade_value": 6.32,
+      "deposit_type": "greenstone-hosted",
+      "project_stage": "past producing / exploration",
+      "mineralization_style": "quartz-carbonate veins in shear zone",
+      "similarity_score": 100,
+      "source": "library"
+    }
+  ]
+}

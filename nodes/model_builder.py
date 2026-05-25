@@ -14,7 +14,11 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 from nodes.llm_factory import get_llm
-from nodes.lessons_priors import mi_inferred_split, stage_tonnage_prior
+from nodes.lessons_priors import (
+    _classify_deposit_family,
+    mi_inferred_split,
+    stage_tonnage_prior,
+)
 from nodes.rules_engine import get_analog_rule, get_stage_modifier_map
 
 logger = logging.getLogger(__name__)
@@ -352,6 +356,40 @@ def build_model_1(
     analog_rule = get_analog_rule(material, deposit_type)
     drilling_stage = (analog_rule or {}).get("drilling_stage", "moderate")
     stage_map = get_stage_modifier_map(material)
+
+    # Family-aware analog filter (Lesson 1, Lesson 134, Lesson 154). The pool
+    # the analog finder returns is similarity-ranked but is allowed to mix
+    # deposit families — Fenn-Gib's pool, for example, has Coffee (bulk IRGS)
+    # plus three vein-orogenic analogs from Finland. Letting the vein analogs
+    # vote on a bulk project's grade and tonnage pulls the estimate the wrong
+    # way regardless of how well the math works. Rule:
+    #
+    #   If ≥1 analog matches the project's deposit family AND has a
+    #   similarity_score ≥ 70, restrict to family-matched analogs.
+    #   Otherwise keep the full pool — we'd rather have a wide posterior
+    #   than no estimate at all.
+    project_family = _classify_deposit_family(
+        deposit_type or "",
+        project.get("mineralization_pattern") or "",
+    )
+    # Skip family filtering when the project's classification is unknown —
+    # we'd otherwise drop everything (no analog would "match None").
+    if project_family is not None:
+        family_matched = [
+            a for a in valid
+            if _classify_deposit_family(
+                a.get("deposit_type") or "",
+                a.get("mineralization_pattern") or "",
+            ) == project_family
+        ]
+        high_score_match = [a for a in family_matched
+                            if float(a.get("similarity_score") or 0) >= 70]
+        if high_score_match:
+            valid = family_matched
+            logger.info(
+                f"[Model1] Family-filter ({project_family}): "
+                f"{len(family_matched)} of {len(analogs)} analog(s) retained"
+            )
     weights = [_analog_weight(a, stage_map, drilling_stage) for a in valid]
 
     tonnages_mt = [float(a["tonnage_mt"]) for a in valid]
@@ -407,45 +445,95 @@ def build_model_1(
     mu_logT += log_t_shift
     mu_logG += log_g_shift
 
-    # L151 stage × deposit-type tonnage prior — fused as an inverse-variance
-    # signal on log_T. Stops Model 1 from predicting a 500 Mt resource for
-    # an early-stage vein project or 5 Mt for a mature porphyry, which the
-    # analog pool alone (sampling globally-comparable analogs) can't anchor.
+    # Joint information-form fusion. Working with the analog 2×2 covariance
+    # rather than two independent fusions lets T-only evidence (stage prior,
+    # geometry) propagate into log_G via the analog correlation ρ. Concretely:
+    # if the analog pool shows negative ρ (bigger deposits tend to have lower
+    # grade — Fenn-Gib's family) and a new T-only signal pulls μ_T up, the
+    # joint posterior on μ_G drops automatically. Marginal-only fusion (the
+    # pre-fix path) threw this information away.
+    #
+    #   Σ_a = [[σ²_T, ρ σ_T σ_G], [ρ σ_T σ_G, σ²_G]]
+    #   det = σ²_T σ²_G (1 − ρ²)
+    #   Λ_a = inv(Σ_a) = (1/det) [[σ²_G, −ρ σ_T σ_G], [−ρ σ_T σ_G, σ²_T]]
+    #   η_a = Λ_a · [μ_T, μ_G]
+    # T-only signals (stage prior, geometry) add 1/σ²_T on Λ[0][0] and
+    # μ_T/σ²_T on η[0]. Posterior: Σ_post = inv(Λ_post); μ_post = Σ_post η_post.
+    sT2  = sigma_logT * sigma_logT
+    sG2  = sigma_logG * sigma_logG
+    cTG  = rho * sigma_logT * sigma_logG
+    det_a = sT2 * sG2 * max(1.0 - rho * rho, 1e-6)
+    Laa_00 = sG2 / det_a
+    Laa_01 = -cTG / det_a
+    Laa_11 = sT2 / det_a
+    eta_0  = Laa_00 * mu_logT + Laa_01 * mu_logG
+    eta_1  = Laa_01 * mu_logT + Laa_11 * mu_logG
+
+    # L151 stage × deposit-type tonnage prior — T-only. The prior is softened
+    # adaptively: if the analog signal disagrees by more than 2σ_prior, the
+    # project is likely from the tail of the deposit-type distribution
+    # (Tamarack — 4 Mt stockwork where the prior says 100 Mt) and the prior
+    # should yield to the specific analog evidence. Otherwise the posterior
+    # gets dragged toward an irrelevant population mean.
     mineralization_pattern = project.get("mineralization_pattern") or ""
     mu_T_prior, sigma_T_prior = stage_tonnage_prior(
         material, deposit_type or "", project.get("project_stage") or "",
         mineralization_pattern,
     )
+    sigma_T_prior_eff = sigma_T_prior
     if sigma_T_prior > 0:
-        prec_a = 1.0 / (sigma_logT ** 2)
-        prec_p = 1.0 / (sigma_T_prior ** 2)
-        mu_logT = (prec_a * mu_logT + prec_p * mu_T_prior) / (prec_a + prec_p)
-        sigma_logT = math.sqrt(1.0 / (prec_a + prec_p))
+        # Use the post-rule-shift μ_logT (= analog evidence pre-prior) for
+        # the disagreement check; that's the right baseline to compare the
+        # population prior against.
+        deviation_sigmas = abs(mu_logT - mu_T_prior) / sigma_T_prior
+        excess = max(0.0, deviation_sigmas - 2.0)
+        sigma_T_prior_eff = sigma_T_prior * (1.0 + excess)
+        prec = 1.0 / (sigma_T_prior_eff * sigma_T_prior_eff)
+        Laa_00 += prec
+        eta_0  += prec * mu_T_prior
+        if excess > 0:
+            logger.info(
+                f"[Model1] L151 prior softened: analog μ_logT={mu_logT:.2f} vs "
+                f"prior μ_logT={mu_T_prior:.2f} ({deviation_sigmas:.1f}σ off) "
+                f"→ σ_prior {sigma_T_prior:.2f} → {sigma_T_prior_eff:.2f}"
+            )
     stage_prior_contrib = {
-        "mu_logT": mu_T_prior, "sigma_logT": sigma_T_prior,
+        "mu_logT": mu_T_prior,
+        "sigma_logT": sigma_T_prior_eff,  # the σ actually applied
+        "sigma_logT_nominal": sigma_T_prior,
+        "softened": sigma_T_prior_eff > sigma_T_prior + 1e-9,
         "source": "L151_stage_tonnage_prior",
     }
 
-    # Geometry signal — competing observation on log_T only. Inverse-variance
-    # fusion with the (analog ⊕ stage-prior) signal pulls toward whichever is
-    # more confident. In P2, this generalises to a full multi-signal fusion
-    # in `nodes/fusion.py`.
+    # Geometry — T-only.
     geometry_tonnage_mt = _estimate_tonnage_from_geometry(project, deposit_type)
     geometry_contrib = None
     if geometry_tonnage_mt and geometry_tonnage_mt > 0:
         mu_T_geo = math.log(geometry_tonnage_mt)
-        # Capture-fraction uncertainty dominates — σ ≈ 0.35 corresponds to
-        # ~±40% on tonnage at 1σ, which matches the spread of deposit-type
-        # capture fractions in `_RESOURCE_CAPTURE_FRACTIONS`.
         sigma_T_geo = 0.35
-        prec_a = 1.0 / (sigma_logT ** 2)
-        prec_g = 1.0 / (sigma_T_geo ** 2)
-        mu_logT = (prec_a * mu_logT + prec_g * mu_T_geo) / (prec_a + prec_g)
-        sigma_logT = math.sqrt(1.0 / (prec_a + prec_g))
+        prec = 1.0 / (sigma_T_geo * sigma_T_geo)
+        Laa_00 += prec
+        eta_0  += prec * mu_T_geo
         geometry_contrib = {
             "mu_logT": mu_T_geo, "sigma_logT": sigma_T_geo,
             "geometry_tonnage_mt": round(geometry_tonnage_mt, 3),
         }
+
+    # Invert Λ_post (2×2) and solve μ_post = Σ_post η_post.
+    det_post = Laa_00 * Laa_11 - Laa_01 * Laa_01
+    if det_post <= 0:
+        # Degenerate case — fall back to marginal μ already computed
+        Spp_00, Spp_01, Spp_11 = sT2, cTG, sG2
+    else:
+        Spp_00 =  Laa_11 / det_post
+        Spp_01 = -Laa_01 / det_post
+        Spp_11 =  Laa_00 / det_post
+    mu_logT = Spp_00 * eta_0 + Spp_01 * eta_1
+    mu_logG = Spp_01 * eta_0 + Spp_11 * eta_1
+    sigma_logT = math.sqrt(max(Spp_00, 1e-9))
+    sigma_logG = math.sqrt(max(Spp_11, 1e-9))
+    rho = Spp_01 / max(sigma_logT * sigma_logG, 1e-9)
+    rho = max(-0.99, min(0.99, rho))
 
     # Posterior on log(contained) = log(T) + log(G).
     # var(log C) = σ²_T + σ²_G + 2 ρ σ_T σ_G. Note that fusing geometry with

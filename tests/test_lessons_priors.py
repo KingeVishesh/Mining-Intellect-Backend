@@ -27,7 +27,8 @@ class TestClassifyDepositFamily:
         ("Carlin-style sediment-hosted disseminated gold", "", "bulk"),
         ("heap-leach gold", "", "bulk"),
         ("epithermal gold-silver", "vein_hosted", "vein"),
-        ("", "", "bulk"),  # default for unknown
+        ("", "", None),  # no signal at all → None so caller falls back to material range
+        ("some weird deposit", "", "bulk"),  # signal but ambiguous → bulk
     ])
     def test_classifies_correctly(self, deposit_type, mp, expected):
         assert _classify_deposit_family(deposit_type, mp) == expected
