@@ -151,26 +151,82 @@ _POST_TIER_LABELS: Dict[int, str] = {
     5: "Feasibility",
 }
 
+# Standard normal 10th/90th-percentile z-score. Used for closed-form lognormal
+# quantiles: P_q(X) = exp(μ + z_q · σ) when X is lognormally distributed.
+_Z10 = 1.2815515655446004
+
+_PRECIOUS_METALS = {"gold", "silver", "platinum", "palladium"}
+
+
+def _contained_t_from_mt(tonnage_mt: float, grade: float, material: str) -> float:
+    """Contained metal in tonnes from tonnage in Mt and grade in native units
+    (g/t for precious metals, % for base metals). Chosen so that for precious
+    metals the formula reduces to `tonnage_mt × grade` — no conversion factor —
+    making the row arithmetic verifiable by eye.
+    """
+    mat = _norm_material(material or "")
+    if mat in _PRECIOUS_METALS:
+        return tonnage_mt * grade
+    return tonnage_mt * grade * 10000.0
+
 
 def _compute_pre_tier(conviction_pct: float) -> Tuple[str, str]:
     """
-    Convert a 0-100 Pre-MRE conviction score to a PRE-1..PRE-5 tier.
-
-    PRE-5 is only reachable when geometry-constrained (conviction > 56 bypasses
-    the analog-only ceiling of 55). Boundaries are calibrated to the conviction
-    formula outputs rather than being arbitrary percentages.
+    Legacy 0–100 conviction → PRE-1..PRE-5 tier. Retained for Model 2, which
+    blends Model 1's `conviction_pct` with the official-MRE confidence. The
+    primary path for Model 1 in v2 is `_compute_pre_tier_from_cv()`.
     """
     if conviction_pct < 10:
-        n = 1   # Industry median fallback, no usable analogs
+        n = 1
     elif conviction_pct < 25:
-        n = 2   # Project data only / very weak analogs
+        n = 2
     elif conviction_pct < 40:
-        n = 3   # Analogs found, deposit type known, no geometry
+        n = 3
     elif conviction_pct <= 56:
-        n = 4   # Strong analogs at the analog-only conviction ceiling
+        n = 4
     else:
-        n = 5   # Geometry-constrained estimate (strike × width × depth)
+        n = 5
     return f"PRE-{n}", _PRE_TIER_LABELS[n]
+
+
+def _compute_pre_tier_from_cv(cv_contained: float) -> Tuple[str, str]:
+    """Tier from the coefficient of variation of contained metal.
+
+    Tighter posterior (lower CV) → higher tier. The cutoffs are calibrated so
+    PRE-5 demands either strong geometry + many close analogs, PRE-3 is the
+    typical "analog-only with deposit type known" case, and PRE-1 fires for
+    the industry-median fallback where the posterior covers an order of
+    magnitude. Tonnage and grade are jointly lognormal, so CV is computed
+    from the variance of log(contained) — see `build_model_1`.
+    """
+    if cv_contained < 0.30:
+        n = 5
+    elif cv_contained < 0.50:
+        n = 4
+    elif cv_contained < 0.80:
+        n = 3
+    elif cv_contained < 1.30:
+        n = 2
+    else:
+        n = 1
+    return f"PRE-{n}", _PRE_TIER_LABELS[n]
+
+
+def _cv_to_conviction_pct(cv_contained: float) -> float:
+    """Smooth mapping of contained-metal CV to the legacy 0–100 scale. Model 2
+    still consumes `conviction_pct` to seed its own confidence; keeping the
+    scale lets v2 ship without rewriting Model 2 in the same change."""
+    # piecewise-linear inversion of the tier cutoffs
+    if cv_contained < 0.30:
+        return 90.0 - (cv_contained / 0.30) * 5.0          # 85–90 → PRE-5
+    if cv_contained < 0.50:
+        return 70.0 - ((cv_contained - 0.30) / 0.20) * 5.0 # 65–70 → PRE-4
+    if cv_contained < 0.80:
+        return 50.0 - ((cv_contained - 0.50) / 0.30) * 10.0 # 40–50 → PRE-3
+    if cv_contained < 1.30:
+        return 30.0 - ((cv_contained - 0.80) / 0.50) * 10.0 # 20–30 → PRE-2
+    # Asymptote toward 5 as CV grows large.
+    return max(5.0, 20.0 / (1.0 + (cv_contained - 1.30)))
 
 
 def _compute_post_tier(conviction_pct: float, project: Dict) -> Tuple[str, str]:
@@ -231,122 +287,231 @@ def _estimate_tonnage_from_geometry(project: Dict, deposit_type: str) -> Optiona
     return tonnage_mt
 
 
+def _trim_outliers_log(
+    log_t: List[float],
+    log_g: List[float],
+    weights: List[float],
+    trim_pct: float = 0.10,
+) -> List[int]:
+    """Trim the top and bottom `trim_pct` of analogs by combined distance in
+    log(T)×log(G) space. Trimming in log-space (rather than raw) correctly
+    rejects analogs that are 10× too big or 10× too small without also
+    rejecting reasonable medium-sized deposits as "outliers" relative to the
+    weighted mean. Returns indices to keep — caller falls back to the full
+    pool if too few survive.
+    """
+    n = len(log_t)
+    if n < 5:
+        return list(range(n))  # too few to bother trimming
+    W = sum(weights)
+    if W <= 0:
+        return list(range(n))
+    mu_t = sum(w * lt for w, lt in zip(weights, log_t)) / W
+    mu_g = sum(w * lg for w, lg in zip(weights, log_g)) / W
+    # squared distance in log-space (treat axes equally — Mahalanobis comes in P4)
+    d2 = [(lt - mu_t) ** 2 + (lg - mu_g) ** 2 for lt, lg in zip(log_t, log_g)]
+    ordered = sorted(range(n), key=lambda i: d2[i])
+    keep_n = max(2, int(round(n * (1 - trim_pct))))
+    return sorted(ordered[:keep_n])
+
+
 def build_model_1(
     analogs: List[Dict],
     project: Dict,
     rule_effects: Dict,
 ) -> Dict:
-    """
-    Build Model 1 (Independent estimate).
-    Uses analog-weighted average + rule multipliers.
+    """Model 1 v2: log-space credibility-weighted geometric mean with
+    closed-form lognormal posterior over (tonnage, grade) and contained metal.
+
+    Steps:
+      1. Filter analogs with both tonnage and grade.
+      2. Compute existing credibility weights via `_analog_weight()`.
+      3. Trim ~10% of analogs by log-space distance from the weighted centroid.
+      4. Compute weighted moments of (log_T, log_G) in Mt × native-unit grade,
+         inflated by 1 + 2/N_eff to shrink toward conservative σ when the
+         analog pool is thin.
+      5. Apply rule log-multipliers as point shifts to μ.
+      6. If geometry data exists, fuse it with the analog signal on log_T via
+         inverse-variance weighting (P2 generalises this to all signals).
+      7. Posterior CV on contained metal is sqrt(exp(var(log C)) - 1) where
+         var(log C) = σ²_T + σ²_G + 2ρ σ_T σ_G. Tier is read from CV.
+      8. Closed-form P10/P50/P90 via lognormal quantiles: exp(μ ± 1.2816 σ).
     """
     material = _norm_material(project.get("material", "unknown"))
-
-    # Filter analogs that have both tonnage and grade
     valid = [
         a for a in analogs
         if a.get("tonnage_mt") is not None and a.get("grade_value") is not None
+        and float(a.get("tonnage_mt") or 0) > 0 and float(a.get("grade_value") or 0) > 0
     ]
-
     if not valid:
         logger.warning("[Model1] No valid analogs with tonnage+grade — using minimal defaults")
         return _minimal_model(project, material, "MI Model (Pre-MRE)")
 
-    # Load rule-based weighting context
     deposit_type = project.get("deposit_type")
     analog_rule = get_analog_rule(material, deposit_type)
     drilling_stage = (analog_rule or {}).get("drilling_stage", "moderate")
     stage_map = get_stage_modifier_map(material)
-
-    # Rule-driven squared weights: base score + source bonus + analog stage bonus + drilling penalty
     weights = [_analog_weight(a, stage_map, drilling_stage) for a in valid]
-    tonnages_kt = [float(a["tonnage_mt"]) * 1000 for a in valid]  # convert Mt -> kt
-    grades = [float(a["grade_value"]) for a in valid]
 
-    # ── Tonnage: geometry-constrained when drilled dimensions are available ────
-    # Analogs tell us grade and deposit characteristics — not deposit SIZE.
-    # When the project has strike × width × depth, use that drilled envelope
-    # (scaled by a deposit-type capture fraction) rather than the analog average.
-    geometry_tonnage_mt = _estimate_tonnage_from_geometry(project, deposit_type)
-    analog_avg_kt = _weighted_average(tonnages_kt, weights)
+    tonnages_mt = [float(a["tonnage_mt"]) for a in valid]
+    grades      = [float(a["grade_value"]) for a in valid]
+    log_T_all   = [math.log(t) for t in tonnages_mt]
+    log_G_all   = [math.log(g) for g in grades]
 
-    if geometry_tonnage_mt is not None:
-        base_total_kt = geometry_tonnage_mt * 1000
-        tonnage_source = "geometry"
-        geo_analog_ratio = (geometry_tonnage_mt * 1000 / analog_avg_kt
-                            if analog_avg_kt > 0 else None)
-        if geo_analog_ratio and (geo_analog_ratio > 5 or geo_analog_ratio < 0.2):
-            if geo_analog_ratio < 1:
-                ratio_str = f"{1/geo_analog_ratio:.1f}× smaller than"
-            else:
-                ratio_str = f"{geo_analog_ratio:.1f}× larger than"
-            tonnage_divergence_note = (
-                f" (Note: geometry estimate {geometry_tonnage_mt:.1f} Mt is {ratio_str} "
-                f"analog average {analog_avg_kt/1000:.1f} Mt — geometry used.)"
-            )
-        else:
-            tonnage_divergence_note = ""
-    else:
-        base_total_kt = analog_avg_kt
-        tonnage_source = "analog_average"
-        tonnage_divergence_note = ""
+    keep_idx = _trim_outliers_log(log_T_all, log_G_all, weights, trim_pct=0.10)
+    log_T = [log_T_all[i] for i in keep_idx]
+    log_G = [log_G_all[i] for i in keep_idx]
+    w     = [weights[i] for i in keep_idx]
+    W     = sum(w)
+    if W <= 0:
+        return _minimal_model(project, material, "MI Model (Pre-MRE)")
 
-    # Grade always from analog weighted average (intensive property, scale-independent)
-    base_grade = _weighted_average(grades, weights)
+    # Weighted moments
+    mu_logT = sum(wi * lt for wi, lt in zip(w, log_T)) / W
+    mu_logG = sum(wi * lg for wi, lg in zip(w, log_G)) / W
+    var_logT = sum(wi * (lt - mu_logT) ** 2 for wi, lt in zip(w, log_T)) / W
+    var_logG = sum(wi * (lg - mu_logG) ** 2 for wi, lg in zip(w, log_G)) / W
+    cov_TG   = sum(wi * (lt - mu_logT) * (lg - mu_logG)
+                   for wi, lt, lg in zip(w, log_T, log_G)) / W
 
-    base_mi_kt = base_total_kt * 0.70
-    base_inferred_kt = base_total_kt * 0.30
+    # Effective sample size; inflate variances when pool is thin so percentiles
+    # widen instead of collapsing on top of a tiny analog set.
+    sumsq_w = sum(wi * wi for wi in w)
+    N_eff = (W * W) / sumsq_w if sumsq_w > 0 else 0.0
+    shrink = 1.0 + 2.0 / max(N_eff, 1.0)
+    var_logT *= shrink
+    var_logG *= shrink
 
-    # Apply rule multipliers
+    # σ floors prevent a coincidentally tight analog pool from claiming
+    # near-zero uncertainty. Roughly 16% RSD on tonnage, 10% on grade.
+    sigma_logT = max(math.sqrt(max(var_logT, 0.0)), 0.15)
+    sigma_logG = max(math.sqrt(max(var_logG, 0.0)), 0.10)
+    denom = sigma_logT * sigma_logG
+    rho = max(-0.95, min(0.95, cov_TG / denom)) if denom > 0 else 0.0
+
+    analog_signal_contrib = {
+        "mu_logT": mu_logT, "sigma_logT": sigma_logT,
+        "mu_logG": mu_logG, "sigma_logG": sigma_logG,
+        "rho": rho, "n_analogs": len(keep_idx),
+        "n_eff": round(N_eff, 2), "n_pool": len(valid),
+    }
+
+    # Rule multipliers shift μ in log-space. The variance contribution from
+    # rule uncertainty arrives in P6 (per-rule residual attribution).
     adj = rule_effects or {}
     t_mult = float(adj.get("tonnage_multiplier", 1.0))
     g_mult = float(adj.get("grade_multiplier", 1.0))
-    conf_delta = float(adj.get("confidence_delta", 0.0))
+    log_t_shift = math.log(t_mult) if t_mult > 0 else 0.0
+    log_g_shift = math.log(g_mult) if g_mult > 0 else 0.0
+    mu_logT += log_t_shift
+    mu_logG += log_g_shift
 
-    mi_kt = base_mi_kt * t_mult
-    inferred_kt = base_inferred_kt * t_mult
-    grade = base_grade * g_mult
+    # Geometry signal — competing observation on log_T only. Inverse-variance
+    # fusion with the analog signal pulls toward whichever is more confident.
+    # In P2, this generalises to a full multi-signal fusion in `nodes/fusion.py`.
+    geometry_tonnage_mt = _estimate_tonnage_from_geometry(project, deposit_type)
+    geometry_contrib = None
+    if geometry_tonnage_mt and geometry_tonnage_mt > 0:
+        mu_T_geo = math.log(geometry_tonnage_mt)
+        # Capture-fraction uncertainty dominates — σ ≈ 0.35 corresponds to
+        # ~±40% on tonnage at 1σ, which matches the spread of deposit-type
+        # capture fractions in `_RESOURCE_CAPTURE_FRACTIONS`.
+        sigma_T_geo = 0.35
+        prec_a = 1.0 / (sigma_logT ** 2)
+        prec_g = 1.0 / (sigma_T_geo ** 2)
+        mu_logT = (prec_a * mu_logT + prec_g * mu_T_geo) / (prec_a + prec_g)
+        sigma_logT = math.sqrt(1.0 / (prec_a + prec_g))
+        geometry_contrib = {
+            "mu_logT": mu_T_geo, "sigma_logT": sigma_T_geo,
+            "geometry_tonnage_mt": round(geometry_tonnage_mt, 3),
+        }
 
-    # Conviction: raw 0-100 similarity scores (not squared weights) keep the scale meaningful
-    raw_scores = [float(a["similarity_score"]) for a in valid if a.get("similarity_score") is not None]
-    avg_raw = sum(raw_scores) / len(raw_scores) if raw_scores else 50.0
-    n_high = sum(1 for s in raw_scores if s >= 70)
-    pool_quality = min(1.0, min(len(valid), 5) / 5 * 0.6 + n_high / max(1, len(valid)) * 0.4)
+    # Posterior on log(contained) = log(T) + log(G).
+    # var(log C) = σ²_T + σ²_G + 2 ρ σ_T σ_G. Note that fusing geometry with
+    # the analog signal narrows σ_T while leaving ρ unchanged — the residual
+    # correlation in the contained variance still uses the fused σ_T.
+    var_logC = (sigma_logT ** 2) + (sigma_logG ** 2) + 2.0 * rho * sigma_logT * sigma_logG
+    var_logC = max(var_logC, 1e-6)
+    sigma_logC = math.sqrt(var_logC)
+    cv_contained = math.sqrt(math.exp(var_logC) - 1.0)
 
-    # Geometry constraint raises confidence ceiling; missing geometry caps it at 55
-    max_confidence = 100.0 if tonnage_source == "geometry" else 55.0
-    geometry_bonus = 5.0 if tonnage_source == "geometry" else 0.0
-    analog_confidence = min(max_confidence, pool_quality * 60 + avg_raw * 0.4)
-    conviction = max(0.0, min(100.0, analog_confidence + conf_delta + geometry_bonus))
+    tier, tier_label = _compute_pre_tier_from_cv(cv_contained)
+    conv_pct = _cv_to_conviction_pct(cv_contained)
+    # Rule-driven confidence_delta still influences the legacy conviction_pct
+    # (consumed by Model 2). It does NOT alter the CV-based tier directly —
+    # that comes from the posterior, where rules already had their say via
+    # the log-multipliers above.
+    conv_pct = max(0.0, min(100.0, conv_pct + float(adj.get("confidence_delta", 0.0))))
 
-    tonnage_note = (
-        "drilled geometry (strike × width × depth)"
-        if tonnage_source == "geometry"
-        else "analog weighted average (no geometry data available)"
+    # Closed-form lognormal quantiles
+    p50_T_mt = math.exp(mu_logT)
+    p10_T_mt = math.exp(mu_logT - _Z10 * sigma_logT)
+    p90_T_mt = math.exp(mu_logT + _Z10 * sigma_logT)
+    p50_G    = math.exp(mu_logG)
+    p10_G    = math.exp(mu_logG - _Z10 * sigma_logG)
+    p90_G    = math.exp(mu_logG + _Z10 * sigma_logG)
+    mu_logC  = mu_logT + mu_logG
+    p50_C_t  = _contained_t_from_mt(p50_T_mt, p50_G, material)
+    # Posterior on contained is lognormal with parameters (mu_logC, sigma_logC),
+    # scaled by the material's unit-conversion constant. Since the conversion
+    # is multiplicative, the same quantile formula applies in raw space.
+    scale = _contained_t_from_mt(1.0, 1.0, material)  # 1 for precious, 1e4 for base
+    p10_C_t = scale * math.exp(mu_logC - _Z10 * sigma_logC)
+    p90_C_t = scale * math.exp(mu_logC + _Z10 * sigma_logC)
+
+    # Map posterior median back into the legacy per-category split. The 70/30
+    # M&I / Inferred split is industry convention for pre-MRE projects with
+    # no resource statement of their own; revisit in P3 once drillhole-data
+    # density lets us choose the split from project-specific evidence.
+    total_mt = p50_T_mt
+    mi_mt   = total_mt * 0.70
+    inf_mt  = total_mt * 0.30
+    grade_median = p50_G
+
+    rules_applied = adj.get("rules_applied", [])
+    n_rules = len(rules_applied)
+    tonnage_source = "geometry-fused" if geometry_contrib else "analog-only"
+    description = (
+        f"Model 1 v2 (log-space Bayesian): {len(keep_idx)} of {len(valid)} analog(s) after "
+        f"outlier trim, {n_rules} rule(s) applied, tonnage signal = {tonnage_source}. "
+        f"Posterior CV(contained) = {cv_contained:.2f} → {tier}."
     )
 
-    tier, tier_label = _compute_pre_tier(conviction)
     return {
         "model": "MI Model (Pre-MRE)",
-        "mi_tonnage_kt": round(mi_kt, 2),
-        "mi_grade_pct": round(grade, 4),
-        "mi_contained_mlb": round(_contained_metal(mi_kt, grade, material), 3),
-        "inferred_tonnage_kt": round(inferred_kt, 2),
-        "inferred_grade_pct": round(grade * 0.95, 4),
-        "inferred_contained_mlb": round(_contained_metal(inferred_kt, grade * 0.95, material), 3),
-        "total_tonnage_kt": round(mi_kt + inferred_kt, 2),
-        "total_grade_pct": round(grade, 4),
-        "total_contained_mlb": round(_contained_metal(mi_kt + inferred_kt, grade, material), 3),
-        "description": (
-            f"Independent estimate using {len(valid)} analog project(s) "
-            f"and {len(adj.get('rules_applied', []))} rules. "
-            f"Tonnage from {tonnage_note}.{tonnage_divergence_note}"
-        ),
-        "conviction_pct": round(conviction, 1),
-        "conviction_tier": tier,
-        "conviction_label": tier_label,
-        "analogs_used": [a.get("name", "unknown") for a in valid],
-        "rules_applied": adj.get("rules_applied", []),
+        # Legacy keys preserved so model_runner._fields_from_model keeps working
+        "mi_tonnage_kt":          round(mi_mt * 1000.0, 2),
+        "mi_grade_pct":           round(grade_median, 4),
+        "mi_contained_mlb":       round(_contained_metal(mi_mt * 1000.0, grade_median, material), 3),
+        "inferred_tonnage_kt":    round(inf_mt * 1000.0, 2),
+        "inferred_grade_pct":     round(grade_median * 0.95, 4),
+        "inferred_contained_mlb": round(_contained_metal(inf_mt * 1000.0, grade_median * 0.95, material), 3),
+        "total_tonnage_kt":       round(total_mt * 1000.0, 2),
+        "total_grade_pct":        round(grade_median, 4),
+        "total_contained_mlb":    round(_contained_metal(total_mt * 1000.0, grade_median, material), 3),
+        "description": description,
+        "conviction_pct":    round(conv_pct, 1),
+        "conviction_tier":   tier,
+        "conviction_label":  tier_label,
+        "analogs_used":      [valid[i].get("name", "unknown") for i in keep_idx],
+        "rules_applied":     rules_applied,
+        # ── v2: posterior percentiles + signal audit trail ────────────────────
+        "p10_total_tonnage_mt": round(p10_T_mt, 3),
+        "p50_total_tonnage_mt": round(p50_T_mt, 3),
+        "p90_total_tonnage_mt": round(p90_T_mt, 3),
+        "p10_grade":            round(p10_G, 4),
+        "p50_grade":            round(p50_G, 4),
+        "p90_grade":            round(p90_G, 4),
+        "p10_contained_t":      round(p10_C_t, 3),
+        "p50_contained_t":      round(p50_C_t, 3),
+        "p90_contained_t":      round(p90_C_t, 3),
+        "cv_contained":         round(cv_contained, 4),
+        "signal_contributions": {
+            "analog":   analog_signal_contrib,
+            "geometry": geometry_contrib,
+            "rules":    {"log_t_shift": log_t_shift, "log_g_shift": log_g_shift,
+                         "applied": rules_applied},
+        },
     }
 
 
@@ -435,6 +600,55 @@ def build_official_mre_row(project: Dict) -> Optional[Dict]:
     }
 
 
+def _percentile_block(
+    total_mt: float,
+    grade: float,
+    material: str,
+    cv_target: float,
+) -> Dict:
+    """Build a P10/P50/P90 + CV block when the central estimate exists but
+    there's no real posterior (fallback paths). Assumes a lognormal spread
+    around the center with the requested CV — most uncertainty allocated to
+    tonnage (60% of variance), the rest to grade.
+
+    Used only by `_minimal_model` so the percentile columns are never null
+    for completed runs even when analogs are absent.
+    """
+    if total_mt <= 0 or grade <= 0 or cv_target <= 0:
+        return {
+            "p10_total_tonnage_mt": 0.0, "p50_total_tonnage_mt": round(total_mt, 3),
+            "p90_total_tonnage_mt": 0.0,
+            "p10_grade": 0.0, "p50_grade": round(grade, 4), "p90_grade": 0.0,
+            "p10_contained_t": 0.0, "p50_contained_t": 0.0, "p90_contained_t": 0.0,
+            "cv_contained": round(cv_target, 4),
+        }
+    # σ_logC = sqrt(ln(1 + CV²)); split across log_T (60%) and log_G (40%).
+    sigma_logC = math.sqrt(math.log(1.0 + cv_target * cv_target))
+    sigma_logT = sigma_logC * math.sqrt(0.60)
+    sigma_logG = sigma_logC * math.sqrt(0.40)
+    p10_T = total_mt * math.exp(-_Z10 * sigma_logT)
+    p90_T = total_mt * math.exp(+_Z10 * sigma_logT)
+    p10_G = grade    * math.exp(-_Z10 * sigma_logG)
+    p90_G = grade    * math.exp(+_Z10 * sigma_logG)
+    scale = _contained_t_from_mt(1.0, 1.0, material)
+    mu_logC = math.log(total_mt) + math.log(grade)
+    p50_C = scale * math.exp(mu_logC)
+    p10_C = scale * math.exp(mu_logC - _Z10 * sigma_logC)
+    p90_C = scale * math.exp(mu_logC + _Z10 * sigma_logC)
+    return {
+        "p10_total_tonnage_mt": round(p10_T, 3),
+        "p50_total_tonnage_mt": round(total_mt, 3),
+        "p90_total_tonnage_mt": round(p90_T, 3),
+        "p10_grade":            round(p10_G, 4),
+        "p50_grade":            round(grade, 4),
+        "p90_grade":            round(p90_G, 4),
+        "p10_contained_t":      round(p10_C, 3),
+        "p50_contained_t":      round(p50_C, 3),
+        "p90_contained_t":      round(p90_C, 3),
+        "cv_contained":         round(cv_target, 4),
+    }
+
+
 def _minimal_model(project: Dict, material: str, label: str) -> Dict:
     """
     Fallback when no valid analogs are available.
@@ -444,9 +658,12 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
     own_kt = float(project.get("tonnage_mt") or 0) * 1000
     own_g  = float(project.get("grade_value") or 0)
     if own_kt > 0 and own_g > 0:
+        own_mt = own_kt / 1000.0
         mi_kt  = own_kt * 0.70
         inf_kt = own_kt * 0.30
-        tier, tier_label = _compute_pre_tier(15.0)
+        # Project data only (no analogs) — assume CV ≈ 0.7 (PRE-3 band).
+        pct = _percentile_block(own_mt, own_g, material, cv_target=0.70)
+        tier, tier_label = _compute_pre_tier_from_cv(pct["cv_contained"])
         return {
             "model": label,
             "mi_tonnage_kt": round(mi_kt, 2),
@@ -459,11 +676,13 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
             "total_grade_pct": round(own_g, 4),
             "total_contained_mlb": round(_contained_metal(own_kt, own_g, material), 3),
             "description": "Estimate based on project data only (no comparable analog data available).",
-            "conviction_pct": 15.0,
+            "conviction_pct": _cv_to_conviction_pct(pct["cv_contained"]),
             "conviction_tier": tier,
             "conviction_label": tier_label,
             "analogs_used": [],
             "rules_applied": [],
+            **pct,
+            "signal_contributions": {"fallback": "project-own-mre"},
         }
     # No project MRE — use material industry medians at 5% conviction so the report
     # is not all-zeros. Description makes clear this is a placeholder.
@@ -476,7 +695,9 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
         inf_kt   = med_kt * 0.40
         logger.warning(f"[_minimal_model] No data for {label} — using {norm} industry median "
                        f"({med['tonnage_mt']} Mt @ {med_g} {med['unit']}) at 5% conviction")
-        tier, tier_label = _compute_pre_tier(5.0)
+        # Industry-median fallback — CV ≈ 1.5 (PRE-1 band), wide posterior.
+        pct = _percentile_block(med["tonnage_mt"], med_g, material, cv_target=1.50)
+        tier, tier_label = _compute_pre_tier_from_cv(pct["cv_contained"])
         return {
             "model": label,
             "mi_tonnage_kt": round(mi_kt, 2),
@@ -493,14 +714,17 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
                 f"Industry median for {norm} exploration stage used as placeholder. "
                 "Do NOT use these numbers for investment or technical decisions."
             ),
-            "conviction_pct": 5.0,
+            "conviction_pct": _cv_to_conviction_pct(pct["cv_contained"]),
             "conviction_tier": tier,
             "conviction_label": tier_label,
             "analogs_used": [],
             "rules_applied": [],
+            **pct,
+            "signal_contributions": {"fallback": "industry-median"},
         }
     # Unknown material — truly no data
-    tier, tier_label = _compute_pre_tier(0.0)
+    tier, tier_label = _compute_pre_tier_from_cv(99.0)
+    zero_pct = _percentile_block(0.0, 0.0, material, cv_target=0.0)
     return {
         "model": label,
         "mi_tonnage_kt": 0.0,
@@ -518,6 +742,8 @@ def _minimal_model(project: Dict, material: str, label: str) -> Dict:
         "conviction_label": tier_label,
         "analogs_used": [],
         "rules_applied": [],
+        **zero_pct,
+        "signal_contributions": {"fallback": "no-data"},
     }
 
 

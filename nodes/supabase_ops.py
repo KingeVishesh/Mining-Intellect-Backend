@@ -622,22 +622,27 @@ def save_approved_analogs(
 
 # ── Model runs ─────────────────────────────────────────────────────────────────
 
-_MODEL_FIELDS = (
+# Fields written to BOTH projects (latest snapshot) and model_runs (history).
+# Subset that the `/projects-back` table relies on for rendering each row.
+_PROJECT_MODEL_FIELDS = (
     # Measured + Indicated combined (M&I)
-    "mi_tonnage_mt",
-    "mi_grade",
-    "mi_contained",
+    "mi_tonnage_mt", "mi_grade", "mi_contained",
     # Inferred
-    "inferred_resource_mt",
-    "inferred_grade",
-    "inferred_contained",
+    "inferred_resource_mt", "inferred_grade", "inferred_contained",
     # Totals
-    "tonnage_mt",
-    "grade_value",
-    "total_contained",
+    "tonnage_mt", "grade_value", "total_contained",
     # Conviction
     "conviction_score",
+)
+
+# Fields written to model_runs ONLY. P1 adds posterior percentiles + CV; the
+# matching projects-table columns are deferred to P2.
+_MODEL_RUN_FIELDS = _PROJECT_MODEL_FIELDS + (
     "conviction_tier",
+    "p10_tonnage_mt", "p50_tonnage_mt", "p90_tonnage_mt",
+    "p10_grade",       "p50_grade",       "p90_grade",
+    "p10_contained",   "p50_contained",   "p90_contained",
+    "cv_contained",
 )
 
 
@@ -649,29 +654,37 @@ def save_model_run(
     thread_id: Optional[str] = None,
     run_id: Optional[str] = None,
 ) -> None:
-    """Insert a row into model_runs capturing one Model 1 / Model 2 snapshot."""
+    """Insert a row into model_runs capturing one Model 1 / Model 2 snapshot.
+
+    The `signal_contributions_json` column captures per-signal (μ, σ) for
+    each fusion input so future recalibration passes can attribute residual
+    error back to the analog pool vs. geometry vs. rules.
+    """
     row = {
         "project_id": project_id,
         "model_type": model_type,
         "thread_id": thread_id,
         "run_id": run_id,
         "model_output_json": model_output_json or {},
+        "signal_contributions_json": fields.get("signal_contributions_json"),
         "status": "complete",
-        **{k: fields.get(k) for k in _MODEL_FIELDS},
+        **{k: fields.get(k) for k in _MODEL_RUN_FIELDS},
     }
     get_client().table("model_runs").insert(row).execute()
     logger.info(
         f"[DB] model_run saved: project={project_id} type={model_type} "
-        f"tonnage={fields.get('tonnage_mt')} conviction={fields.get('conviction_score')}"
+        f"tonnage={fields.get('tonnage_mt')} conviction={fields.get('conviction_score')} "
+        f"cv={fields.get('cv_contained')}"
     )
 
 
 def update_project_latest_model(project_id: str, fields: Dict) -> None:
     """Overwrite the latest-model columns on projects so the /projects-back
-    table reflects the most recent run.
+    table reflects the most recent run. Percentile / CV / signal-trace fields
+    are intentionally NOT mirrored to projects in P1 — they live only in
+    model_runs to keep the projects schema stable until P2.
     """
-    # conviction_tier is informational on model_runs but not on projects.
-    payload = {k: fields.get(k) for k in _MODEL_FIELDS if k != "conviction_tier"}
+    payload = {k: fields.get(k) for k in _PROJECT_MODEL_FIELDS}
     get_client().table("projects").update(payload).eq("id", project_id).execute()
     logger.info(f"[DB] projects.{{model fields}} updated for project {project_id}")
 

@@ -163,6 +163,10 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
     else:
         tier_code, tier_label = model_builder._compute_pre_tier(conviction_num)
 
+    # ── P1: posterior percentiles + CV come through from build_model_1 ─────────
+    # Model 1 v2 attaches a joint log-normal posterior. Model 2 doesn't have one
+    # yet (P5 follow-up) — when the keys are absent we pass None, which is what
+    # the nullable model_runs columns expect.
     return {
         # Measured + Indicated combined (M&I)
         "mi_tonnage_mt":         mi_mt,
@@ -179,6 +183,18 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
         # Conviction
         "conviction_score":      tier_code,
         "conviction_tier":       f"{tier_code}: {tier_label}",
+        # Posterior percentiles (Model 1 only in P1 — Model 2 leaves these null)
+        "p10_tonnage_mt":        _round(model.get("p10_total_tonnage_mt"), 3),
+        "p50_tonnage_mt":        _round(model.get("p50_total_tonnage_mt"), 3),
+        "p90_tonnage_mt":        _round(model.get("p90_total_tonnage_mt"), 3),
+        "p10_grade":             _round(model.get("p10_grade"), 4),
+        "p50_grade":             _round(model.get("p50_grade"), 4),
+        "p90_grade":             _round(model.get("p90_grade"), 4),
+        "p10_contained":         _round(model.get("p10_contained_t"), 3),
+        "p50_contained":         _round(model.get("p50_contained_t"), 3),
+        "p90_contained":         _round(model.get("p90_contained_t"), 3),
+        "cv_contained":          _round(model.get("cv_contained"), 4),
+        "signal_contributions_json": model.get("signal_contributions"),
     }
 
 
