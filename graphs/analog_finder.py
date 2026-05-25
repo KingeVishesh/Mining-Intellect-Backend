@@ -852,8 +852,13 @@ def library_search_node(state: AnalogState) -> AnalogState:
     if deposit_subtype and deposit_subtype not in accepted_subtypes:
         accepted_subtypes = accepted_subtypes + [deposit_subtype]
 
+    # Fetch ALL matching library rows — the in-Python dedupe afterwards
+    # collapses to distinct names. With a small (~1k row) library and aggressive
+    # subtype/material filters, this is cheap and avoids silent truncation
+    # where in-belt candidates (e.g. tanzania_archean rows for a Tanzanian
+    # target) fall outside an arbitrary 200-row PostgREST window.
     analogs = supabase_ops.get_approved_analogs(
-        material, deposit_type, limit=200,
+        material, deposit_type, limit=2000,
         deposit_subtype=deposit_subtype,
         deposit_subtypes=accepted_subtypes or None,
     )
