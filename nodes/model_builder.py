@@ -14,6 +14,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 from nodes.llm_factory import get_llm
+from nodes.lessons_priors import mi_inferred_split, stage_tonnage_prior
 from nodes.rules_engine import get_analog_rule, get_stage_modifier_map
 
 logger = logging.getLogger(__name__)
@@ -406,9 +407,29 @@ def build_model_1(
     mu_logT += log_t_shift
     mu_logG += log_g_shift
 
+    # L151 stage × deposit-type tonnage prior — fused as an inverse-variance
+    # signal on log_T. Stops Model 1 from predicting a 500 Mt resource for
+    # an early-stage vein project or 5 Mt for a mature porphyry, which the
+    # analog pool alone (sampling globally-comparable analogs) can't anchor.
+    mineralization_pattern = project.get("mineralization_pattern") or ""
+    mu_T_prior, sigma_T_prior = stage_tonnage_prior(
+        material, deposit_type or "", project.get("project_stage") or "",
+        mineralization_pattern,
+    )
+    if sigma_T_prior > 0:
+        prec_a = 1.0 / (sigma_logT ** 2)
+        prec_p = 1.0 / (sigma_T_prior ** 2)
+        mu_logT = (prec_a * mu_logT + prec_p * mu_T_prior) / (prec_a + prec_p)
+        sigma_logT = math.sqrt(1.0 / (prec_a + prec_p))
+    stage_prior_contrib = {
+        "mu_logT": mu_T_prior, "sigma_logT": sigma_T_prior,
+        "source": "L151_stage_tonnage_prior",
+    }
+
     # Geometry signal — competing observation on log_T only. Inverse-variance
-    # fusion with the analog signal pulls toward whichever is more confident.
-    # In P2, this generalises to a full multi-signal fusion in `nodes/fusion.py`.
+    # fusion with the (analog ⊕ stage-prior) signal pulls toward whichever is
+    # more confident. In P2, this generalises to a full multi-signal fusion
+    # in `nodes/fusion.py`.
     geometry_tonnage_mt = _estimate_tonnage_from_geometry(project, deposit_type)
     geometry_contrib = None
     if geometry_tonnage_mt and geometry_tonnage_mt > 0:
@@ -459,22 +480,33 @@ def build_model_1(
     p10_C_t = scale * math.exp(mu_logC - _Z10 * sigma_logC)
     p90_C_t = scale * math.exp(mu_logC + _Z10 * sigma_logC)
 
-    # Map posterior median back into the legacy per-category split. The 70/30
-    # M&I / Inferred split is industry convention for pre-MRE projects with
-    # no resource statement of their own; revisit in P3 once drillhole-data
-    # density lets us choose the split from project-specific evidence.
+    # Map posterior median back into the per-category split. The split is
+    # deposit-type-aware per Lessons 143/145: vein systems, bulk Carlin halos,
+    # LS-epithermal stockwork, and near-depleted epithermal each get their own
+    # ratio. Drillhole-density-driven Inferred-only demotion (L134) lands in
+    # P3 when drilling_evidence is ingested; for now we use project_stage as
+    # the maturity proxy.
     total_mt = p50_T_mt
-    mi_mt   = total_mt * 0.70
-    inf_mt  = total_mt * 0.30
+    mi_frac, inf_frac = mi_inferred_split(
+        deposit_type or "",
+        mineralization_pattern,
+        project.get("project_stage") or "",
+        mine_life_years=project.get("mine_life_years"),
+    )
+    mi_mt  = total_mt * mi_frac
+    inf_mt = total_mt * inf_frac
     grade_median = p50_G
 
     rules_applied = adj.get("rules_applied", [])
     n_rules = len(rules_applied)
-    tonnage_source = "geometry-fused" if geometry_contrib else "analog-only"
+    tonnage_sources = ["analog", f"L151_stage_prior(σ={sigma_T_prior:.2f})"]
+    if geometry_contrib:
+        tonnage_sources.append("geometry")
     description = (
         f"Model 1 v2 (log-space Bayesian): {len(keep_idx)} of {len(valid)} analog(s) after "
-        f"outlier trim, {n_rules} rule(s) applied, tonnage signal = {tonnage_source}. "
-        f"Posterior CV(contained) = {cv_contained:.2f} → {tier}."
+        f"outlier trim, {n_rules} rule(s) applied, tonnage signals = "
+        f"{' ⊕ '.join(tonnage_sources)}, split = {int(mi_frac*100)}/{int(inf_frac*100)} "
+        f"M&I/Inferred (L143/L145). Posterior CV(contained) = {cv_contained:.2f} → {tier}."
     )
 
     return {
@@ -507,10 +539,14 @@ def build_model_1(
         "p90_contained_t":      round(p90_C_t, 3),
         "cv_contained":         round(cv_contained, 4),
         "signal_contributions": {
-            "analog":   analog_signal_contrib,
-            "geometry": geometry_contrib,
-            "rules":    {"log_t_shift": log_t_shift, "log_g_shift": log_g_shift,
-                         "applied": rules_applied},
+            "analog":      analog_signal_contrib,
+            "stage_prior": stage_prior_contrib,
+            "geometry":    geometry_contrib,
+            "rules":       {"log_t_shift": log_t_shift, "log_g_shift": log_g_shift,
+                            "applied": rules_applied},
+            "split":       {"mi_frac": round(mi_frac, 3),
+                            "inf_frac": round(inf_frac, 3),
+                            "source": "L143_145_deposit_aware"},
         },
     }
 
