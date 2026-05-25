@@ -11,7 +11,7 @@ Flow (parallel fan-out):
   human_review → save_analogs → END
 
 Changes from v1:
-- library_search replaces db_analog_search: uses report_analogs (curated approved analogs)
+- library_search replaces db_analog_search: uses analogs (curated approved analogs)
 - library_search + exa_search run in parallel
 - exa_search uses rule-driven targeted query (deposit type, grade range, geo criteria)
 - scoring is fully deterministic — no LLM, no score=50 fallback
@@ -50,7 +50,7 @@ class AnalogState(TypedDict, total=False):
     project: Optional[Dict]
     analog_rule: Optional[Dict]         # matched analog_selection rule from compiled_rules
     target_profile: Optional[Dict]      # geological identity of the target project
-    library_analogs: List[Dict]         # from report_analogs (previously approved)
+    library_analogs: List[Dict]         # from `analogs` table (previously approved)
     exa_analogs: List[Dict]             # from Exa web search
     scored_analogs: List[Dict]
     low_confidence: bool                # True when <2 candidates passed L1-L5
@@ -827,7 +827,7 @@ def build_target_profile_node(state: AnalogState) -> AnalogState:
 
 
 def library_search_node(state: AnalogState) -> AnalogState:
-    """Search report_analogs for previously approved analogs of this commodity."""
+    """Search the `analogs` table for previously approved analogs of this commodity."""
     if state.get("error"):
         return {"library_analogs": []}
 
@@ -853,7 +853,7 @@ def library_search_node(state: AnalogState) -> AnalogState:
         accepted_subtypes = accepted_subtypes + [deposit_subtype]
 
     analogs = supabase_ops.get_approved_analogs(
-        material, deposit_type, limit=20,
+        material, deposit_type, limit=200,
         deposit_subtype=deposit_subtype,
         deposit_subtypes=accepted_subtypes or None,
     )
@@ -1480,6 +1480,16 @@ def save_analogs_node(state: AnalogState, config: Optional[Dict] = None) -> Anal
                 logger.info(f"[save] Persisted {len(audit_events)} audit events")
             except Exception as ae:
                 logger.warning(f"[save] Audit-event persistence failed: {ae}")
+        # Upsert the cascade-passing analogs into the shared `analogs` library
+        # so future runs of any project can reuse them. Cascade-pass is the
+        # quality gate — no human approval needed.
+        try:
+            supabase_ops.upsert_analog_library(
+                project_id=state["project_id"],
+                approved=analogs,
+            )
+        except Exception as le:
+            logger.warning(f"[save] Library upsert failed: {le}")
         return {"saved": True, "error": None}
     except Exception as e:
         logger.error(f"[save] Error: {e}")

@@ -1,6 +1,6 @@
 """
 Backfill the 6 geological profile columns on existing `projects` and
-`report_analogs` rows using nodes/geo_taxonomy heuristic detectors over the
+`analogs` rows using nodes/geo_taxonomy heuristic detectors over the
 existing freeform deposit_type, mineralization_style, processing_method,
 host_rock, district, region, country, location_name fields.
 
@@ -11,7 +11,7 @@ Usage:
     python3 scripts/backfill_geological_profiles.py            # both tables, dry-run
     python3 scripts/backfill_geological_profiles.py --apply    # write changes
     python3 scripts/backfill_geological_profiles.py --table projects --apply
-    python3 scripts/backfill_geological_profiles.py --table report_analogs --apply
+    python3 scripts/backfill_geological_profiles.py --table analogs --apply
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def _derive_profile_for_project(row: Dict) -> Dict[str, Optional[str]]:
 
 
 def _derive_profile_for_analog(row: Dict) -> Dict[str, Optional[str]]:
-    """Detect the 6 profile values from a `report_analogs` row."""
+    """Detect the 6 profile values from a `analogs` row."""
     derived: Dict[str, Optional[str]] = {}
     if not row.get("analog_deposit_subtype"):
         sub = geo_taxonomy.detect_subtype(
@@ -156,7 +156,7 @@ def backfill_projects(apply: bool) -> None:
     )
 
 
-def backfill_report_analogs(apply: bool) -> None:
+def backfill_analogs(apply: bool) -> None:
     client = get_client()
     select = (
         "id,analog_name,analog_material,analog_deposit_type,analog_mineralization_style,"
@@ -164,8 +164,8 @@ def backfill_report_analogs(apply: bool) -> None:
         "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
         "analog_metal_suite,analog_recovery_method"
     )
-    rows = _fetch_paginated("report_analogs", select)
-    logger.info(f"[report_analogs] fetched {len(rows)} rows")
+    rows = _fetch_paginated("analogs", select)
+    logger.info(f"[analogs] fetched {len(rows)} rows")
 
     updated = 0
     no_change = 0
@@ -175,12 +175,12 @@ def backfill_report_analogs(apply: bool) -> None:
             no_change += 1
             continue
         if apply:
-            client.table("report_analogs").update(derived).eq("id", row["id"]).execute()
+            client.table("analogs").update(derived).eq("id", row["id"]).execute()
         updated += 1
         if updated % 50 == 0:
-            logger.info(f"[report_analogs] {updated} updates so far...")
+            logger.info(f"[analogs] {updated} updates so far...")
     logger.info(
-        f"[report_analogs] {'APPLIED' if apply else 'DRY-RUN'}: "
+        f"[analogs] {'APPLIED' if apply else 'DRY-RUN'}: "
         f"{updated} rows derived, {no_change} unchanged"
     )
 
@@ -188,14 +188,14 @@ def backfill_report_analogs(apply: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true", help="Write changes (default: dry-run)")
-    parser.add_argument("--table", choices=["projects", "report_analogs", "both"],
+    parser.add_argument("--table", choices=["projects", "analogs", "both"],
                         default="both")
     args = parser.parse_args()
 
     if args.table in ("projects", "both"):
         backfill_projects(apply=args.apply)
-    if args.table in ("report_analogs", "both"):
-        backfill_report_analogs(apply=args.apply)
+    if args.table in ("analogs", "both"):
+        backfill_analogs(apply=args.apply)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ Each lesson is an identifier referenced by analog_selection rules in
 `scripts/seed_analog_rules.py` (the `applies_lessons` field) and surfaced
 verbatim in:
   * `_cascading_match` reason strings → LangSmith traces
-  * `report_analogs.lessons` JSON column → frontend "Why was this picked?" UI
+  * `analogs.lessons` JSON column → frontend "Why was this picked?" UI
   * the Pydantic schema validator → ensures rules can only cite known lessons
 
 Add a new lesson by appending an entry here. The Pydantic schema's

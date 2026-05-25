@@ -73,19 +73,17 @@ def get_approved_analogs(
     deposit_subtype: Optional[str] = None,
     deposit_subtypes: Optional[List[str]] = None,
 ) -> List[Dict]:
-    """Query report_analogs for previously approved analogs of this commodity.
+    """Query the `analogs` table for previously seen analogs of this commodity.
+
+    The `analogs` table is populated automatically at the end of every
+    `combine_filter_score_node` run (cascade-pass = quality gate), so the
+    library grows organically without waiting for report finalization.
 
     Filter strategy (most specific first):
       1. analog_deposit_subtype == deposit_subtype  (exact slug match — preferred)
       2. analog_deposit_type ILIKE %<family-keyword>%  (e.g., %carlin%, %porphyry%)
          where the keyword is the first geological term in deposit_type,
          stripped of qualifiers like "-style", "-type", "sediment-hosted".
-
-    Previously the function used `ILIKE %<full_deposit_type>%` which required
-    the analog's freeform deposit_type to literally contain the target's full
-    string. That failed for natural variations (Carlin-type vs Carlin-style,
-    different word orders, optional ` gold` suffix). Now we route on the
-    controlled-vocab subtype slug when both sides have one — exact and reliable.
 
     When deposit_type is None AND deposit_subtype is None, the library is
     skipped entirely (no rule = don't poison the pool).
@@ -107,10 +105,10 @@ def get_approved_analogs(
     # here without at least one filter — but defend in depth.
     if not accepted_subtypes and not dep:
         return []
-    # report_analogs stores the raw material string — try all mapped keys
+    # analogs stores the raw material string — try all mapped keys
     q = (
         get_client()
-        .table("report_analogs")
+        .table("analogs")
         .select(
             "analog_name,analog_material,analog_deposit_type,analog_country,"
             "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
@@ -689,63 +687,83 @@ def update_project_latest_model(project_id: str, fields: Dict) -> None:
     logger.info(f"[DB] projects.{{model fields}} updated for project {project_id}")
 
 
-def save_report_analogs(
-    report_id: str,
+def _analog_row(
+    a: Dict,
+    project_id: str,
+    status: str,
+    now: str,
+    report_id: Optional[str] = None,
+) -> Dict:
+    """Build an `analogs` row from a candidate dict."""
+    return {
+        "report_id": report_id,
+        "project_id": project_id,
+        "analog_name": a.get("name") or a.get("project_name") or "Unknown",
+        "analog_material": a.get("material"),
+        "analog_deposit_type": a.get("deposit_type"),
+        "analog_host_rock": a.get("host_rock"),
+        "analog_mineralization_style": a.get("mineralization_style"),
+        "analog_district": a.get("district"),
+        "analog_country": a.get("country"),
+        "analog_tonnage_mt": a.get("tonnage_mt"),
+        "analog_grade_value": a.get("grade_value"),
+        "analog_grade_unit": a.get("grade_unit"),
+        "analog_project_stage": a.get("project_stage"),
+        "analog_deposit_subtype":        a.get("deposit_subtype"),
+        "analog_mineralization_mode":    a.get("mineralization_mode"),
+        "analog_tectonic_belt":          a.get("tectonic_belt"),
+        "analog_metal_suite":            a.get("metal_suite"),
+        "analog_alteration_signature":   a.get("alteration_signature"),
+        "analog_recovery_method":        a.get("recovery_method"),
+        "analog_mineralization_pattern":      a.get("mineralization_pattern"),
+        "analog_host_rock_class":             a.get("host_rock_class"),
+        "analog_project_stage_class":         a.get("project_stage_class"),
+        "analog_mining_method_class":         a.get("mining_method_class"),
+        "analog_resource_category_class":     a.get("resource_category_class"),
+        "analog_resource_compliance_standard": a.get("resource_compliance_standard"),
+        "analog_resource_vintage_year":       a.get("resource_vintage_year"),
+        "similarity_score": a.get("similarity_score"),
+        "source": a.get("source"),
+        "source_url": a.get("source_url"),
+        "status": status,
+        "created_at": now,
+    }
+
+
+def upsert_analog_library(
     project_id: str,
     approved: List[Dict],
-    rejected: List[Dict],
+    rejected: Optional[List[Dict]] = None,
+    report_id: Optional[str] = None,
 ) -> None:
-    """Insert approved and rejected analogs into the report_analogs table."""
+    """Upsert approved + rejected analogs into the `analogs` table (library).
+
+    Conflict key is (project_id, analog_name) — re-runs of the same project
+    update the existing row in place rather than inserting duplicates. Used
+    by both:
+      * the write-on-cascade hook in combine_filter_score_node (no report_id)
+      * report finalization in pipeline_orchestrator (with report_id)
+    """
     now = datetime.now(timezone.utc).isoformat()
-    rows = []
+    rows = [_analog_row(a, project_id, "approved", now, report_id) for a in (approved or [])]
+    rows += [_analog_row(a, project_id, "rejected", now, report_id) for a in (rejected or [])]
 
-    def _row(a: Dict, status: str) -> Dict:
-        return {
-            "report_id": report_id,
-            "project_id": project_id,
-            "analog_name": a.get("name") or a.get("project_name") or "Unknown",
-            "analog_material": a.get("material"),
-            "analog_deposit_type": a.get("deposit_type"),
-            "analog_host_rock": a.get("host_rock"),
-            "analog_mineralization_style": a.get("mineralization_style"),
-            "analog_district": a.get("district"),
-            "analog_country": a.get("country"),
-            "analog_tonnage_mt": a.get("tonnage_mt"),
-            "analog_grade_value": a.get("grade_value"),
-            "analog_grade_unit": a.get("grade_unit"),
-            "analog_project_stage": a.get("project_stage"),
-            # Geological profile (cascading match)
-            "analog_deposit_subtype":        a.get("deposit_subtype"),
-            "analog_mineralization_mode":    a.get("mineralization_mode"),
-            "analog_tectonic_belt":          a.get("tectonic_belt"),
-            "analog_metal_suite":            a.get("metal_suite"),
-            "analog_alteration_signature":   a.get("alteration_signature"),
-            "analog_recovery_method":        a.get("recovery_method"),
-            "analog_mineralization_pattern":      a.get("mineralization_pattern"),
-            "analog_host_rock_class":             a.get("host_rock_class"),
-            "analog_project_stage_class":         a.get("project_stage_class"),
-            "analog_mining_method_class":         a.get("mining_method_class"),
-            "analog_resource_category_class":     a.get("resource_category_class"),
-            "analog_resource_compliance_standard": a.get("resource_compliance_standard"),
-            "analog_resource_vintage_year":       a.get("resource_vintage_year"),
-            "similarity_score": a.get("similarity_score"),
-            "source": a.get("source"),
-            "source_url": a.get("source_url"),
-            "status": status,
-            "created_at": now,
-        }
+    if not rows:
+        return
 
-    for a in approved:
-        rows.append(_row(a, "approved"))
-    for a in rejected:
-        rows.append(_row(a, "rejected"))
+    (
+        get_client()
+        .table("analogs")
+        .upsert(rows, on_conflict="project_id,analog_name")
+        .execute()
+    )
+    logger.info(
+        f"[DB] analogs upsert: {len(approved or [])} approved + "
+        f"{len(rejected or [])} rejected for project {project_id}"
+        + (f" (report {report_id})" if report_id else "")
+    )
 
-    if rows:
-        get_client().table("report_analogs").insert(rows).execute()
-        logger.info(
-            f"[DB] report_analogs: {len(approved)} approved + {len(rejected)} rejected "
-            f"for report {report_id}"
-        )
+
 
 
 # ── Workflow State ─────────────────────────────────────────────────────────────

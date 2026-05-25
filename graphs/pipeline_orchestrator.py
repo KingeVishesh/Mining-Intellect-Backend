@@ -237,11 +237,11 @@ def finalize_node(state: PipelineState) -> PipelineState:
     report_id = report["id"] if report else None
 
     if report_id and (approved or rejected):
-        supabase_ops.save_report_analogs(
-            report_id=report_id,
+        supabase_ops.upsert_analog_library(
             project_id=project_id,
             approved=approved,
             rejected=rejected,
+            report_id=report_id,
         )
         logger.info(f"[finalize] Saved {len(approved)} approved + {len(rejected)} rejected analogs")
 
