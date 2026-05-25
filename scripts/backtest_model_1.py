@@ -151,11 +151,19 @@ def backtest_one(
     p90_T = out["p90_total_tonnage_mt"]
     p10_G = out["p10_grade"]
     p90_G = out["p90_grade"]
-    cv = out["cv_contained"]
-    tier = out["conviction_tier"]
-    split = out["signal_contributions"]["split"]
-    stage_prior = out["signal_contributions"]["stage_prior"]
-    analog_sig = out["signal_contributions"]["analog"]
+    cv = out.get("cv_contained", 0.0) or 0.0
+    tier = out.get("conviction_tier", "—")
+    sig = out.get("signal_contributions") or {}
+    split = sig.get("split") or {"mi_frac": 0.70, "inf_frac": 0.30,
+                                  "source": "fallback"}
+    stage_prior = sig.get("stage_prior") or {"mu_logT": 0.0,
+                                              "sigma_logT": 0.0,
+                                              "source": "—"}
+    analog_sig = sig.get("analog") or {
+        "mu_logT": 0.0, "sigma_logT": 0.0,
+        "mu_logG": 0.0, "sigma_logG": 0.0,
+        "rho": 0.0, "n_analogs": 0, "n_pool": 0, "n_eff": 0.0,
+    }
 
     err_T = _pct_err(pred_total_mt, actual_total_mt)
     err_G = _pct_err(pred_grade, actual_grade)

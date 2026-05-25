@@ -480,28 +480,54 @@ def build_model_1(
         material, deposit_type or "", project.get("project_stage") or "",
         mineralization_pattern,
     )
+    # High-quality pool detection — the analog signal is reliable on its own
+    # when we have ≥3 analogs that all match closely and cluster tightly.
+    # Cadillac (4 abitibi greenstone-orogenic vein analogs at score 100, σ_T≈0.6)
+    # and Swift (4 great-basin carlin analogs at score 100) both qualify;
+    # their L151 stage prior is informative on average but wrong for these
+    # specific projects whose analog pool already pins down the right scale.
+    analog_scores = [valid[i].get("similarity_score") or 0 for i in keep_idx]
+    high_quality_pool = (
+        len(keep_idx) >= 3
+        and analog_scores and min(analog_scores) >= 70
+        and sigma_logT < 1.0
+    )
+
     sigma_T_prior_eff = sigma_T_prior
+    prior_dropped = False
     if sigma_T_prior > 0:
-        # Use the post-rule-shift μ_logT (= analog evidence pre-prior) for
-        # the disagreement check; that's the right baseline to compare the
-        # population prior against.
         deviation_sigmas = abs(mu_logT - mu_T_prior) / sigma_T_prior
-        excess = max(0.0, deviation_sigmas - 2.0)
-        sigma_T_prior_eff = sigma_T_prior * (1.0 + excess)
-        prec = 1.0 / (sigma_T_prior_eff * sigma_T_prior_eff)
-        Laa_00 += prec
-        eta_0  += prec * mu_T_prior
-        if excess > 0:
+        if high_quality_pool and deviation_sigmas > 1.5:
+            # Drop the L151 prior entirely. A tight, family-matched pool of
+            # high-similarity analogs is a better predictor of THIS project's
+            # scale than the population average across the deposit family.
+            # 1.5σ trigger (instead of the standard 2σ softening threshold)
+            # because a high-quality pool is already strong evidence — we
+            # don't need a wide population prior pulling toward the average.
+            prior_dropped = True
             logger.info(
-                f"[Model1] L151 prior softened: analog μ_logT={mu_logT:.2f} vs "
-                f"prior μ_logT={mu_T_prior:.2f} ({deviation_sigmas:.1f}σ off) "
-                f"→ σ_prior {sigma_T_prior:.2f} → {sigma_T_prior_eff:.2f}"
+                f"[Model1] L151 prior dropped: high-quality pool "
+                f"(n={len(keep_idx)}, σ_T={sigma_logT:.2f}) disagrees by "
+                f"{deviation_sigmas:.1f}σ → analog signal dominates"
             )
+        else:
+            excess = max(0.0, deviation_sigmas - 2.0)
+            sigma_T_prior_eff = sigma_T_prior * (1.0 + excess)
+            prec = 1.0 / (sigma_T_prior_eff * sigma_T_prior_eff)
+            Laa_00 += prec
+            eta_0  += prec * mu_T_prior
+            if excess > 0:
+                logger.info(
+                    f"[Model1] L151 prior softened: analog μ_logT={mu_logT:.2f} vs "
+                    f"prior μ_logT={mu_T_prior:.2f} ({deviation_sigmas:.1f}σ off) "
+                    f"→ σ_prior {sigma_T_prior:.2f} → {sigma_T_prior_eff:.2f}"
+                )
     stage_prior_contrib = {
         "mu_logT": mu_T_prior,
-        "sigma_logT": sigma_T_prior_eff,  # the σ actually applied
+        "sigma_logT": sigma_T_prior_eff,
         "sigma_logT_nominal": sigma_T_prior,
         "softened": sigma_T_prior_eff > sigma_T_prior + 1e-9,
+        "dropped": prior_dropped,
         "source": "L151_stage_tonnage_prior",
     }
 

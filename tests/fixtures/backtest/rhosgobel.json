@@ -1,0 +1,22 @@
+{
+  "id": "fad8a455-15d3-4f47-9982-a8110db2b395",
+  "name": "Rhosgobel Gold Deposit",
+  "material": "gold",
+  "deposit_type": "Intrusion Related",
+  "tectonic_belt": "yukon_tintina",
+  "metal_suite": "au_only",
+  "country": "Canada",
+  "region": "Yukon Territory",
+  "project_stage": "MRE",
+  "project_stage_class": null,
+  "resource_category": "Inferred",
+  "mining_method": "Open Pit",
+  "tonnage_mt": 106.9537,
+  "grade_value": 0.7263,
+  "grade_unit": "g/t",
+  "strike_length_meters": null,
+  "width_meters": null,
+  "depth_meters": 400,
+  "mineralization_pattern": null,
+  "analogs": []
+}

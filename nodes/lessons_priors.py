@@ -102,18 +102,20 @@ def _classify_deposit_family(deposit_type: str, mineralization_pattern: str):
     if any(k in dt for k in ("porphyry", "iocg", "skarn")):
         return "porphyry"
 
-    # Explicit bulk-pattern slugs win — the project_research/analog_finder
-    # writes `disseminated_bulk` for systems that are bulk-tonnage regardless
-    # of geological family. Same for "stockwork" and "halo" indicators.
+    # Controlled-vocab `mineralization_pattern` wins over freeform `deposit_type`
+    # text. Canadian Malartic Odyssey UG, for example, carries dt = "orogenic
+    # disseminated and vein-hosted gold (Cadillac Break)" but mp = "vein_hosted"
+    # — and the latter is the right family for analog matching (it's mined
+    # underground as a vein system, not bulk open-pit).
+    if "vein" in mp or mp in {"vein_hosted", "vein-hosted"}:
+        return "vein"
     if any(b in mp for b in ("disseminated", "bulk", "stockwork", "halo")):
         return "bulk"
+
+    # Now use freeform deposit_type
     if any(b in dt for b in ("disseminated", "bulk", "carlin", "halo",
                               "heap-leach", "heap leach")):
         return "bulk"
-
-    # Vein indicators in pattern, then in deposit_type
-    if "vein" in mp or mp in {"vein_hosted", "vein-hosted"}:
-        return "vein"
     if any(k in dt for k in ("orogenic", "epithermal vein", "ls epithermal vein",
                               "hs epithermal vein", "crd", "manto",
                               "low-sulfidation epithermal", "high-sulfidation epithermal")):
