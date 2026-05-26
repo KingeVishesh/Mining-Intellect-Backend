@@ -777,12 +777,23 @@ def build_model_1(
         and analog_scores and min(analog_scores) >= 70
         and sigma_logT < 1.0
     )
+    # Strong-sub-trend regime: when 3+ analogs share the project's
+    # geological sub-trend (Cadillac Break, Cortez Trend, Batchawana–Wawa)
+    # we have very strong, district-specific evidence — much stronger
+    # than the L151 population prior across the whole deposit family.
+    # In that case lower the drop threshold from 2σ to 1σ so even a
+    # modest analog/prior disagreement is enough to suppress the
+    # population prior. Without this, the bulk/early prior at 45 Mt
+    # pulled Swift's prediction from analog μ=133 Mt down to 77 Mt.
+    n_subtrend_match = sum(1 for b in sub_trend_boost if b > 1.0) if sub_trend_boost else 0
+    strong_sub_trend = n_subtrend_match >= 3
+    drop_threshold = 1.0 if strong_sub_trend else 2.0
 
     sigma_T_prior_eff = sigma_T_prior
     prior_dropped = False
     if sigma_T_prior > 0:
         deviation_sigmas = abs(mu_logT - mu_T_prior) / sigma_T_prior
-        if high_quality_pool and deviation_sigmas > 2.0:
+        if high_quality_pool and deviation_sigmas > drop_threshold:
             # Drop the L151 prior entirely. A tight, family-matched pool of
             # high-similarity analogs is a better predictor of THIS project's
             # scale than the population average across the deposit family.

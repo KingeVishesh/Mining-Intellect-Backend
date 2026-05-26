@@ -33,7 +33,8 @@
       "project_stage": "Development",
       "mineralization_pattern": null,
       "similarity_score": 100,
-      "source": "exa"
+      "source": "exa",
+      "district": "Cortez Trend"
     },
     {
       "name": "Cortez Mine (Crossroads)",
@@ -48,7 +49,8 @@
       "project_stage": "Production",
       "mineralization_pattern": null,
       "similarity_score": 100,
-      "source": "exa"
+      "source": "exa",
+      "district": "Cortez Trend"
     },
     {
       "name": "Cortez Hills",
@@ -63,7 +65,8 @@
       "project_stage": "Production",
       "mineralization_pattern": null,
       "similarity_score": 100,
-      "source": "exa"
+      "source": "exa",
+      "district": "Cortez Trend"
     },
     {
       "name": "Bald Mountain",
@@ -79,7 +82,11 @@
       "mineralization_pattern": "disseminated_bulk",
       "mining_method_class": "open_pit_bulk",
       "similarity_score": 100,
-      "source": "library"
+      "source": "library",
+      "district": "White Pine County Nevada"
     }
-  ]
+  ],
+  "location_name": "Cortez District, Lander County, Nevada, USA",
+  "latitude": 40.3067,
+  "longitude": -116.8722
 }
