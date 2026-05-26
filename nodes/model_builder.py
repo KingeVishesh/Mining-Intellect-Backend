@@ -683,28 +683,76 @@ def build_model_1(
         weights=w,
     )
     drilling_contrib: Dict = {"audit": drilling_audit}
+    # Consistency check — only apply the drilling signals when they agree
+    # with the analog pool. The drilling T-signal in particular suffers
+    # from a stage mismatch: when analog drilling totals are from mature
+    # producing mines but the project is pre-MRE, the analog
+    # `tonnage_per_meter` ratio is wildly different from the project's.
+    # Rather than letting the drilling signal pull the posterior toward a
+    # wrong answer, we treat it as a soft corroborator: applied only when
+    # |μ_drill - μ_analog| < 2σ_analog. Bad drilling data is dropped.
+    pre_drill_mu_T = (sum(w_ * lt for w_, lt in zip(w, [log_T_all[i] for i in keep_idx])) /
+                      sum(w) if sum(w) else 0.0)
+    pre_drill_mu_G = (sum(w_ * lg for w_, lg in zip(w, [log_G_all[i] for i in keep_idx])) /
+                      sum(w) if sum(w) else 0.0)
     if drilling_T is not None:
         mu_dT, sigma_dT = drilling_T
-        prec = 1.0 / (sigma_dT * sigma_dT)
-        Laa_00 += prec
-        eta_0  += prec * mu_dT
-        drilling_contrib["T_signal"] = {"mu_logT": mu_dT, "sigma_logT": sigma_dT}
-        logger.info(
-            f"[Model1] Drilling T-signal: {math.exp(mu_dT):.1f} Mt "
-            f"(σ_logT={sigma_dT:.2f}) from "
-            f"{drilling_audit['n_analogs_with_drilling']} analog ratios × "
-            f"{drilling_audit['project_total_meters']} m"
-        )
+        deviation_T = abs(mu_dT - pre_drill_mu_T) / max(sigma_logT, 0.1)
+        if deviation_T <= 2.0:
+            prec = 1.0 / (sigma_dT * sigma_dT)
+            Laa_00 += prec
+            eta_0  += prec * mu_dT
+            drilling_contrib["T_signal"] = {
+                "mu_logT": mu_dT, "sigma_logT": sigma_dT,
+                "applied": True, "deviation_sigmas": round(deviation_T, 2),
+            }
+            logger.info(
+                f"[Model1] Drilling T-signal applied: {math.exp(mu_dT):.1f} Mt "
+                f"(σ_logT={sigma_dT:.2f}, deviation {deviation_T:.1f}σ from analog)"
+            )
+        else:
+            drilling_contrib["T_signal"] = {
+                "mu_logT": mu_dT, "sigma_logT": sigma_dT,
+                "applied": False, "deviation_sigmas": round(deviation_T, 2),
+                "reason": "drilling-signal disagrees with analog pool by >2σ — "
+                          "likely stage mismatch between project and analog drilling totals",
+            }
+            logger.info(
+                f"[Model1] Drilling T-signal dropped: {math.exp(mu_dT):.1f} Mt vs "
+                f"analog {math.exp(pre_drill_mu_T):.1f} Mt ({deviation_T:.1f}σ apart)"
+            )
+
     if drilling_G is not None:
+        # Grade signal: require ≥3 intercepts (single intercepts are often
+        # bonanza hits that misrepresent the deposit grade) AND agreement
+        # with the analog pool within 2σ.
+        n_intercepts = len((project_drilling or {}).get("best_intercepts") or [])
         mu_dG, sigma_dG = drilling_G
-        prec = 1.0 / (sigma_dG * sigma_dG)
-        Laa_11 += prec
-        eta_1  += prec * mu_dG
-        drilling_contrib["G_signal"] = {"mu_logG": mu_dG, "sigma_logG": sigma_dG}
-        logger.info(
-            f"[Model1] Drilling G-signal: project weighted-intercept grade "
-            f"{math.exp(mu_dG):.2f} (σ_logG={sigma_dG:.2f})"
-        )
+        deviation_G = abs(mu_dG - pre_drill_mu_G) / max(sigma_logG, 0.1)
+        if n_intercepts >= 3 and deviation_G <= 2.0:
+            prec = 1.0 / (sigma_dG * sigma_dG)
+            Laa_11 += prec
+            eta_1  += prec * mu_dG
+            drilling_contrib["G_signal"] = {
+                "mu_logG": mu_dG, "sigma_logG": sigma_dG,
+                "applied": True, "deviation_sigmas": round(deviation_G, 2),
+            }
+            logger.info(
+                f"[Model1] Drilling G-signal applied: {math.exp(mu_dG):.2f} grade "
+                f"(σ_logG={sigma_dG:.2f}, n_intercepts={n_intercepts})"
+            )
+        else:
+            reason = ("only %d intercepts (need ≥3)" % n_intercepts
+                      if n_intercepts < 3
+                      else "grade disagrees with analog pool by >2σ")
+            drilling_contrib["G_signal"] = {
+                "mu_logG": mu_dG, "sigma_logG": sigma_dG,
+                "applied": False, "deviation_sigmas": round(deviation_G, 2),
+                "reason": reason,
+            }
+            logger.info(
+                f"[Model1] Drilling G-signal dropped ({reason})"
+            )
 
     # Invert Λ_post (2×2) and solve μ_post = Σ_post η_post.
     det_post = Laa_00 * Laa_11 - Laa_01 * Laa_01

@@ -175,51 +175,87 @@ def _analog(name, t, g, similarity=80.0, drilling=None):
 
 
 class TestBuildModel1WithDrilling:
-    def test_drilling_signal_pulls_prediction_toward_per_meter_estimate(self):
-        # Analog pool: 4 vein-orogenic analogs at 5–25 Mt
-        # Each has drilling data that says ~0.003 Mt/m
-        # Project has 30,000 m drilled → drilling-signal predicts ~90 Mt
-        # WITHOUT drilling: prediction lands at analog geomean (~12 Mt)
-        # WITH drilling: should pull up toward 90 Mt
+    def test_drilling_signal_applied_when_agrees_with_analog(self):
+        # When the drilling-derived tonnage agrees with the analog pool's
+        # central tendency (within 2σ), the consistency check passes and
+        # the signal tightens the posterior. Analog pool: 4 vein-orogenic
+        # at 10-15 Mt, each with ~5000 m drilled (3000 t/m ratio). Project
+        # at 4500 m → drilling predicts ~13.5 Mt — matches analog mean.
         analogs = [
             _analog("A1", 12, 5.0, similarity=85,
-                    drilling={"total_meters_drilled": 4000, "weighted_grade_g_t": 5.0,
-                              "best_intercepts": [{"interval_m": 5, "grade_g_t": 5.0}]}),
-            _analog("A2", 18, 5.5, similarity=85,
-                    drilling={"total_meters_drilled": 6000, "weighted_grade_g_t": 5.5,
-                              "best_intercepts": [{"interval_m": 6, "grade_g_t": 5.5}]}),
-            _analog("A3", 9,  4.5, similarity=85,
-                    drilling={"total_meters_drilled": 3000, "weighted_grade_g_t": 4.5,
-                              "best_intercepts": [{"interval_m": 4, "grade_g_t": 4.5}]}),
-            _analog("A4", 15, 5.2, similarity=85,
-                    drilling={"total_meters_drilled": 5000, "weighted_grade_g_t": 5.2,
-                              "best_intercepts": [{"interval_m": 5, "grade_g_t": 5.2}]}),
+                    drilling={"total_meters_drilled": 4000,
+                              "weighted_grade_g_t": 5.0,
+                              "best_intercepts": [
+                                  {"interval_m": 5, "grade_g_t": 5.0},
+                                  {"interval_m": 4, "grade_g_t": 5.1},
+                                  {"interval_m": 6, "grade_g_t": 4.9},
+                              ]}),
+            _analog("A2", 14, 5.2, similarity=85,
+                    drilling={"total_meters_drilled": 4800,
+                              "weighted_grade_g_t": 5.2,
+                              "best_intercepts": [
+                                  {"interval_m": 6, "grade_g_t": 5.2},
+                                  {"interval_m": 5, "grade_g_t": 5.3},
+                                  {"interval_m": 4, "grade_g_t": 5.1},
+                              ]}),
+            _analog("A3", 11, 4.8, similarity=85,
+                    drilling={"total_meters_drilled": 3800,
+                              "weighted_grade_g_t": 4.8,
+                              "best_intercepts": [
+                                  {"interval_m": 5, "grade_g_t": 4.8},
+                                  {"interval_m": 4, "grade_g_t": 4.7},
+                                  {"interval_m": 6, "grade_g_t": 4.9},
+                              ]}),
+            _analog("A4", 13, 5.1, similarity=85,
+                    drilling={"total_meters_drilled": 4500,
+                              "weighted_grade_g_t": 5.1,
+                              "best_intercepts": [
+                                  {"interval_m": 5, "grade_g_t": 5.1},
+                                  {"interval_m": 4, "grade_g_t": 5.0},
+                                  {"interval_m": 6, "grade_g_t": 5.2},
+                              ]}),
         ]
-        project_no_drilling = {
-            "id": "p", "name": "Big Project", "material": "gold",
-            "deposit_type": "orogenic gold", "mineralization_pattern": "vein_hosted",
-            "project_stage": "production",
-        }
-        project_with_drilling = {**project_no_drilling, "drilling_evidence": {
-            "total_meters_drilled": 30000,
-            "weighted_grade_g_t": 5.1,
-            "best_intercepts": [
-                {"interval_m": 8, "grade_g_t": 5.0},
-                {"interval_m": 12, "grade_g_t": 5.2},
-            ],
-        }}
-        out_no = build_model_1(analogs, project_no_drilling, {})
-        out_with = build_model_1(analogs, project_with_drilling, {})
+        project = {"id": "p", "name": "T", "material": "gold",
+                   "deposit_type": "orogenic gold",
+                   "mineralization_pattern": "vein_hosted",
+                   "project_stage": "production",
+                   "drilling_evidence": {
+                       "total_meters_drilled": 4500,
+                       "weighted_grade_g_t": 5.1,
+                       "best_intercepts": [
+                           {"interval_m": 6, "grade_g_t": 5.0},
+                           {"interval_m": 5, "grade_g_t": 5.2},
+                           {"interval_m": 4, "grade_g_t": 5.1},
+                       ],
+                   }}
+        out = build_model_1(analogs, project, {})
+        drill = out["signal_contributions"]["drilling"]
+        assert drill["audit"]["applied"] is True
+        assert drill["audit"]["n_analogs_with_drilling"] == 4
+        # T-signal should pass the consistency check and be applied
+        assert drill["T_signal"]["applied"] is True
 
-        # WITH drilling, predicted tonnage should be meaningfully higher
-        # than the pure analog-pool central tendency, because the project
-        # has drilled ~5× more meters than the typical analog.
-        assert out_with["p50_total_tonnage_mt"] > out_no["p50_total_tonnage_mt"] * 1.5
-
-        # The signal audit should show the drilling signal was applied
-        drill_contrib = out_with["signal_contributions"]["drilling"]
-        assert drill_contrib["audit"]["applied"] is True
-        assert drill_contrib["audit"]["n_analogs_with_drilling"] == 4
+    def test_drilling_signal_dropped_when_disagrees_with_analog(self):
+        # Project meters way above analog meters → drilling-predicted
+        # tonnage is ~5× the analog mean → consistency check drops it.
+        # This protects against the Cadillac-style failure where mature-
+        # mine cumulative drilling produces a wildly different ratio.
+        analogs = [
+            _analog("A1", 12, 5.0, similarity=85,
+                    drilling={"total_meters_drilled": 200_000,
+                              "weighted_grade_g_t": 5.0,
+                              "best_intercepts": [{"interval_m": 5, "grade_g_t": 5.0}]}),
+        ] * 4
+        project = {"id": "p", "name": "T", "material": "gold",
+                   "deposit_type": "orogenic gold",
+                   "mineralization_pattern": "vein_hosted",
+                   "project_stage": "production",
+                   "drilling_evidence": {"total_meters_drilled": 30_000}}
+        out = build_model_1(analogs, project, {})
+        drill = out["signal_contributions"]["drilling"]
+        # Signal was computed but consistency check rejected it
+        assert drill["T_signal"]["applied"] is False
+        assert "drilling-signal disagrees" in drill["T_signal"]["reason"]
 
     def test_drilling_signal_off_when_project_drilling_missing(self):
         # Same pool but project has NO drilling data — signal should not apply
