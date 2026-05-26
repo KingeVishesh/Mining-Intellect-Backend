@@ -38,7 +38,18 @@
       "mining_method_class": "underground_vein",
       "similarity_score": 100,
       "source": "library",
-      "district": "Val d'Or Camp Quebec"
+      "district": "Val d'Or Camp Quebec",
+      "drilling_evidence": {
+        "total_holes": 6631,
+        "total_meters_drilled": 1435381,
+        "drilled_area_km2": null,
+        "best_intercepts": [],
+        "weighted_grade_g_t": null,
+        "qa_qc_present": true,
+        "source": "ni_43_101",
+        "confidence": "high",
+        "report_cutoff_date": "2024-12-31"
+      }
     },
     {
       "name": "Canadian Malartic - Odyssey UG",
@@ -72,7 +83,18 @@
       "mining_method_class": "underground_vein",
       "similarity_score": 100,
       "source": "library",
-      "district": "Bousquet Camp Quebec"
+      "district": "Bousquet Camp Quebec",
+      "drilling_evidence": {
+        "total_holes": null,
+        "total_meters_drilled": 1015676,
+        "drilled_area_km2": null,
+        "best_intercepts": [],
+        "weighted_grade_g_t": null,
+        "qa_qc_present": true,
+        "source": "ni_43_101",
+        "confidence": "high",
+        "report_cutoff_date": "2020-04-30"
+      }
     },
     {
       "name": "Casa Berardi",
@@ -92,5 +114,28 @@
       "district": "Casa Berardi Quebec"
     }
   ],
-  "location_name": "Val-d'Or, Abitibi, Quebec, Canada"
+  "location_name": "Val-d'Or, Abitibi, Quebec, Canada",
+  "drilling_evidence": {
+    "total_holes": 3812,
+    "total_meters_drilled": 345516,
+    "drilled_area_km2": null,
+    "best_intercepts": [
+      {
+        "hole_id": "CH24-94",
+        "from_m": 42.0,
+        "to_m": 44.0,
+        "interval_m": 2.0,
+        "grade_g_t": 7.7,
+        "source_url": "https://ressourcescartier.com/news/cartier-cuts-7-7-g-t-au-over-2-0-m-in-the-vg-structure-of-the-chimo-mine-project/"
+      }
+    ],
+    "weighted_grade_g_t": 2.7,
+    "qa_qc_present": true,
+    "source": "ni_43_101",
+    "source_url": "https://ressourcescartier.com",
+    "confidence": "high",
+    "report_cutoff_date": "2022-08-22",
+    "extracted_at": "2026-05-26T00:56:29.799965+00:00",
+    "notes": "Drilling stats cumulative from Chimo (3658 holes, 290419 m as of 2020-09-01) + West Nordeau (154 holes, 55097 m as of 2022-07-12). Grade is average mined grade from PEA."
+  }
 }

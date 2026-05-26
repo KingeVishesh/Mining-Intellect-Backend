@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 EXA_SEARCH_URL   = "https://api.exa.ai/search"
 EXA_CONTENTS_URL = "https://api.exa.ai/contents"
+EXA_ANSWER_URL   = "https://api.exa.ai/answer"
 GROK_URL         = "https://api.x.ai/v1/chat/completions"
 
 # Domains where NI 43-101 / JORC technical reports actually live. Biasing
@@ -52,6 +53,86 @@ _TECHNICAL_REPORT_DOMAINS = [
     "minedocs.com", "technicalreports.miningdataonline.com",
     "q4cdn.com",  # major operator IR PDF host
 ]
+
+
+def _find_company_website(
+    project_name: str, material: str,
+    country: Optional[str] = None, region: Optional[str] = None,
+) -> Optional[str]:
+    """Ask Exa Answer for the operating company's website domain. Used as
+    a fallback search target when regulatory aggregators don't have the
+    project's technical report — juniors like Cartier Resources host
+    their NI 43-101 PDFs on their own IR site (cartierresources.com),
+    not on sedarplus or SEC.
+
+    Returns a bare domain string (e.g. "cartierresources.com") or None.
+    """
+    api_key = settings.exa_api_key
+    if not api_key:
+        return None
+    loc = ", ".join(p for p in (region, country) if p) or "unknown location"
+    query = (
+        f"What is the official website domain of the company that owns or "
+        f"operates the {project_name} {material} mining project in {loc}? "
+        f"Return only the bare domain (e.g. 'cartierresources.com'), no "
+        f"protocol, no path."
+    )
+    payload = {
+        "query": query,
+        "system_prompt": (
+            "You are a mining-industry researcher. Identify the operating "
+            "company's primary website (not LinkedIn, not Wikipedia, not "
+            "news aggregators). Return the bare hostname only."
+        ),
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "company_website": {
+                    "type": ["string", "null"],
+                    "description": "Bare domain like 'cartierresources.com'",
+                },
+                "company_name": {"type": ["string", "null"]},
+                "confidence": {
+                    "type": "string", "enum": ["high", "medium", "low"],
+                },
+            },
+            "required": ["company_website", "confidence"],
+        },
+        "text": False,
+    }
+    try:
+        resp = requests.post(
+            EXA_ANSWER_URL,
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json=payload, timeout=30,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"[NI43-101] company-website lookup error: {e}")
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        raw = resp.json().get("answer")
+        ans = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (ValueError, json.JSONDecodeError):
+        return None
+    domain = ans.get("company_website")
+    if not domain or not isinstance(domain, str):
+        return None
+    # Strip protocol and path if present
+    domain = domain.lower().strip()
+    for prefix in ("https://", "http://"):
+        if domain.startswith(prefix):
+            domain = domain[len(prefix):]
+    domain = domain.split("/")[0].strip()
+    # Require at least one dot — guards against stray strings like "company"
+    if "." not in domain or len(domain) < 5:
+        return None
+    logger.info(
+        f"[NI43-101] Company website for '{project_name}': {domain} "
+        f"(confidence={ans.get('confidence')})"
+    )
+    return domain
 
 
 def _exa_search(
@@ -231,14 +312,35 @@ def extract_from_ni_43_101(
         f"{project_name}{deposit_clause} {material} {loc}{pre_mre_clause}"
     )
 
+    # Step 1: regulatory aggregator search
     hits = _exa_search(
         query, num_results=max_docs * 3,
         include_domains=_TECHNICAL_REPORT_DOMAINS,
     )
+    # Step 2: open search if regulators don't have it
     if not hits:
-        # Fall back to a query without domain filtering if the technical-
-        # report aggregators don't have this project indexed.
         hits = _exa_search(query, num_results=max_docs * 3)
+    # Step 3: company-website fallback. Juniors like Cartier Resources host
+    # their technical reports on their own IR site rather than on
+    # sedarplus or SEC. Look up the operator's domain via Exa Answer,
+    # then re-search filtered to that domain. We append rather than
+    # replace so company-IR hits enrich whatever the open search found.
+    company_domain = _find_company_website(project_name, material, country, region)
+    if company_domain:
+        company_hits = _exa_search(
+            query, num_results=max_docs * 2,
+            include_domains=[company_domain],
+        )
+        # Dedupe by URL while preserving search ordering — company-IR hits
+        # are usually more relevant for juniors, so put them first.
+        seen = set()
+        combined: List[Dict] = []
+        for h in company_hits + hits:
+            u = h.get("url")
+            if u and u not in seen:
+                seen.add(u)
+                combined.append(h)
+        hits = combined
     if not hits:
         logger.info(f"[NI43-101] No search hits for '{project_name}'")
         return None
