@@ -60,6 +60,7 @@ class AnalogState(TypedDict, total=False):
     approved_analogs: List[Dict]
     saved: bool
     error: Optional[str]
+    research_attempted: bool            # auto-research loop-guard (set by load_project_and_rule_node)
 
 
 # ── Scoring helpers ────────────────────────────────────────────────────────────
@@ -761,39 +762,110 @@ def _parse_exclusions(analog_criteria: list) -> list[str]:
 
 # ── Nodes ──────────────────────────────────────────────────────────────────────
 
-def load_project_and_rule_node(state: AnalogState) -> AnalogState:
-    """Load project + fetch matching analog_selection rule."""
-    project_id = state["project_id"]
-    project = supabase_ops.get_project(project_id)
-    if not project:
-        return {"error": f"Project {project_id} not found"}
-
+def _derive_rule_inputs(project: Dict) -> tuple:
+    """Pull (material, deposit_type, deposit_subtype, pattern) from a project
+    row, applying the same sanitisation + heuristic detection used by the
+    rule lookup. Factored out so the auto-research recovery path can re-
+    derive after the project is re-enriched, without duplicating logic."""
     material = project.get("material") or ""
-    # Some legacy projects have deposit_type stored as a Python set-literal
-    # string like "{Epithermal}" — sanitize before any downstream use.
     deposit_type = rules_engine.sanitize_deposit_type(project.get("deposit_type"))
-    # Subtype takes precedence — alkalic_porphyry routes to the dedicated alkalic
-    # rule even when deposit_type is just "porphyry copper-gold".
     deposit_subtype = project.get("deposit_subtype") or geo_taxonomy.detect_subtype(
         deposit_type, project.get("mineralization_style"),
         project.get("alteration_signature"),
         project.get("district") or project.get("location_name"),
     )
-    # Mineralization pattern (vein vs disseminated_bulk etc.) — disambiguates
-    # sub-rules that share a subtype (orogenic-vein vs orogenic-bulk both have
-    # required_subtypes=["orogenic_general"] but different required_patterns).
     pattern = project.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
         project.get("mineralization_style"), project.get("mining_method"),
         project.get("processing_method"), deposit_type,
     )
+    return material, deposit_type, deposit_subtype, pattern
+
+
+def _trigger_project_research(project: Dict) -> Optional[Dict]:
+    """Run the project_research graph to fill missing fields, then return
+    the freshly-loaded project record. Returns None on any failure so the
+    caller can surface a clear "research is incomplete" warning instead.
+
+    Imported lazily to avoid a circular import at module load — both
+    graphs.analog_finder and graphs.project_research are top-level graphs."""
+    from graphs import project_research  # lazy to avoid module-init order issues
+
+    project_id = project.get("id")
+    if not project_id:
+        return None
+    research_input = {
+        "project_id": project_id,
+        "project_name": project.get("name") or "",
+        "material": project.get("material") or "",
+        "company": project.get("company_name") or "",
+    }
+    logger.info(
+        f"[auto-research] Triggering project_research for {project_id} "
+        f"({project.get('name')!r}) — deposit_type and deposit_subtype both empty"
+    )
+    research_result = project_research.graph.invoke(research_input)
+    if research_result.get("error"):
+        logger.warning(f"[auto-research] project_research failed: {research_result['error']}")
+        return None
+    if not research_result.get("saved"):
+        logger.warning("[auto-research] project_research returned without saving")
+        return None
+    reloaded = supabase_ops.get_project(project_id)
+    if not reloaded:
+        logger.warning(f"[auto-research] project {project_id} disappeared after research")
+        return None
+    logger.info(
+        f"[auto-research] reload OK | deposit_type={reloaded.get('deposit_type')!r} "
+        f"subtype={reloaded.get('deposit_subtype')!r} "
+        f"belt={reloaded.get('tectonic_belt')!r}"
+    )
+    return reloaded
+
+
+def load_project_and_rule_node(state: AnalogState) -> AnalogState:
+    """Load project + fetch matching analog_selection rule.
+
+    When the rule lookup fails because the project lacks both deposit_type
+    and deposit_subtype, the project_research graph is triggered inline to
+    fill the gap, the project is reloaded, and the rule lookup is retried.
+    A `research_attempted` sentinel prevents an infinite loop if the
+    research pass still doesn't yield the fields. Net effect: callers no
+    longer have to manually run project_research before re-trying analogs.
+    """
+    project_id = state["project_id"]
+    project = supabase_ops.get_project(project_id)
+    if not project:
+        return {"error": f"Project {project_id} not found"}
+
+    material, deposit_type, deposit_subtype, pattern = _derive_rule_inputs(project)
     analog_rule = rules_engine.get_analog_rule(material, deposit_type, deposit_subtype, pattern)
+
+    # Auto-research fallback: when no rule was found AND both rule-routing
+    # fields (deposit_type, deposit_subtype) are empty, the only thing
+    # standing between the user and analogs is missing enrichment. Run
+    # project_research once, reload, and retry the rule lookup.
+    if analog_rule is None and not deposit_type and not deposit_subtype and not state.get("research_attempted"):
+        try:
+            refreshed = _trigger_project_research(project)
+        except Exception as e:
+            logger.warning(f"[auto-research] non-fatal exception: {e}")
+            refreshed = None
+        if refreshed:
+            project = refreshed
+            material, deposit_type, deposit_subtype, pattern = _derive_rule_inputs(project)
+            analog_rule = rules_engine.get_analog_rule(material, deposit_type, deposit_subtype, pattern)
 
     logger.info(
         f"[load] {project.get('name')} | material={material} deposit={deposit_type} "
         f"subtype={deposit_subtype} pattern={pattern} "
         f"rule={'✓ ' + analog_rule.get('rule_id', '') if analog_rule else '✗ none'}"
     )
-    return {"project": project, "analog_rule": analog_rule, "error": None}
+    return {
+        "project": project,
+        "analog_rule": analog_rule,
+        "research_attempted": True,
+        "error": None,
+    }
 
 
 _PROFILE_DIMENSIONS = (
@@ -981,6 +1053,19 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             ))
         except Exception as gd_err:
             logger.warning(f"[gap_detector] no-rule path non-fatal: {gd_err}")
+        # If the load step already tried an inline project_research pass
+        # and we still don't have a rule, the data gap is genuine — Exa
+        # couldn't recover the geological fields. Tell the user that
+        # plainly so they don't expect another auto-retry to help.
+        auto_tried = state.get("research_attempted")
+        action_hint = (
+            "Auto-research was already attempted on this run and could not "
+            "recover the missing fields — set deposit_type/deposit_subtype "
+            "manually, then re-run analog_finder."
+            if auto_tried
+            else "Re-run project_research or set deposit_type / deposit_subtype "
+                 "manually, then re-run analog_finder."
+        )
         return {
             "scored_analogs": [],
             "low_confidence": True,
@@ -989,8 +1074,7 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
                 f"Material={material}; deposit_type={dep_t}; "
                 f"deposit_subtype={dep_s}. The analog finder requires at "
                 f"least one of (deposit_type, deposit_subtype) to map the "
-                f"project to a geological rule. Re-run the project_research "
-                f"graph or set the fields manually, then re-run analog_finder."
+                f"project to a geological rule. {action_hint}"
             ),
             "audit_events": [],
         }

@@ -292,6 +292,84 @@ def test_no_generic_fallback_rule_exists():
     assert not fb, f"generic_fallback rules must be removed: {[r['rule_id'] for r in fb]}"
 
 
+def test_load_node_auto_runs_research_when_rule_missing(monkeypatch):
+    """When the project lacks deposit_type AND deposit_subtype, the load
+    node should auto-invoke project_research, reload the project, and
+    return a rule on the second pass — no manual re-research required."""
+    from graphs import analog_finder
+    from nodes import supabase_ops
+
+    project_id = "test-auto-research-id"
+    thin = {
+        "id": project_id, "name": "Thin Gold Project", "material": "gold",
+        "deposit_type": None, "deposit_subtype": None,
+        "mineralization_pattern": None,
+    }
+    enriched = {
+        **thin,
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "mining_method_class": "underground_vein",
+        "tectonic_belt": "abitibi", "country": "Canada",
+    }
+    call_count = {"get_project": 0, "research_invoke": 0}
+
+    def fake_get_project(pid):
+        call_count["get_project"] += 1
+        return thin if call_count["get_project"] == 1 else enriched
+
+    class FakeResearchGraph:
+        def invoke(self, _input):
+            call_count["research_invoke"] += 1
+            return {"saved": True, "error": None}
+
+    monkeypatch.setattr(supabase_ops, "get_project", fake_get_project)
+    # _trigger_project_research imports lazily — patch the underlying module
+    import graphs.project_research as project_research_mod
+    monkeypatch.setattr(project_research_mod, "graph", FakeResearchGraph())
+
+    result = analog_finder.load_project_and_rule_node({"project_id": project_id})
+
+    assert call_count["research_invoke"] == 1, "project_research must be invoked once"
+    assert call_count["get_project"] == 2,    "project must be reloaded after research"
+    assert result["analog_rule"] is not None, "rule lookup should succeed on second pass"
+    assert result["research_attempted"] is True, "sentinel must be set to prevent looping"
+
+
+def test_load_node_does_not_auto_research_when_subtype_already_present(monkeypatch):
+    """Auto-research must NOT fire when deposit_subtype is set — that means
+    enrichment ran. If no rule maps to it, that's a taxonomy gap, not a
+    data gap, and another research pass won't help."""
+    from graphs import analog_finder
+    from nodes import supabase_ops
+
+    project_id = "test-no-auto-research"
+    project = {
+        "id": project_id, "name": "Vanadium Project", "material": "vanadium",
+        "deposit_type": "shale-hosted vanadium",
+        "deposit_subtype": None,  # truly unknown sub-type
+    }
+    invoke_count = {"n": 0}
+
+    monkeypatch.setattr(supabase_ops, "get_project", lambda pid: project)
+    import graphs.project_research as project_research_mod
+
+    class FakeResearchGraph:
+        def invoke(self, _input):
+            invoke_count["n"] += 1
+            return {"saved": True}
+
+    monkeypatch.setattr(project_research_mod, "graph", FakeResearchGraph())
+
+    result = analog_finder.load_project_and_rule_node({"project_id": project_id})
+
+    # deposit_type is populated → auto-research path must NOT fire even if
+    # subtype is None and no vanadium rule exists.
+    assert invoke_count["n"] == 0
+    assert result["analog_rule"] is None
+
+
 def test_belt_hard_filter_drops_cross_belt_orogenic_gold():
     """Cartier-Cadillac (Abitibi) must NOT pair with Brucejack (BC
     Quesnel-Stikine) even though both are vein-hosted greenstone-orogenic
