@@ -757,13 +757,15 @@ def build_model_1(
     prior_dropped = False
     if sigma_T_prior > 0:
         deviation_sigmas = abs(mu_logT - mu_T_prior) / sigma_T_prior
-        if high_quality_pool and deviation_sigmas > 1.5:
+        if high_quality_pool and deviation_sigmas > 2.0:
             # Drop the L151 prior entirely. A tight, family-matched pool of
             # high-similarity analogs is a better predictor of THIS project's
             # scale than the population average across the deposit family.
-            # 1.5σ trigger (instead of the standard 2σ softening threshold)
-            # because a high-quality pool is already strong evidence — we
-            # don't need a wide population prior pulling toward the average.
+            # 2σ trigger (matching the softening threshold) — the prior
+            # still helps when the analog signal lands within the prior's
+            # 95% band, since it pins down the order of magnitude when the
+            # analog cluster doesn't quite bracket the actual MRE
+            # (TPK pool ~4 Mt, prior 10 Mt, truth 7.6 Mt).
             prior_dropped = True
             logger.info(
                 f"[Model1] L151 prior dropped: high-quality pool "
