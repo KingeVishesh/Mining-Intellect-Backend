@@ -24,14 +24,44 @@ from typing import Dict, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 
 from nodes import supabase_ops, model_builder, drilling_extractor
-from nodes import ni_43_101_extractor
+from nodes import ni_43_101_extractor, rules_engine
 from graphs.report_generator import (
     load_project_and_analogs_node,
     load_rules_node,
     activate_rules_node,
-    build_model_1_node,
-    build_model_2_node,
 )
+
+
+def build_model_node(state: "ModelRunnerState") -> "ModelRunnerState":
+    """Run the single Model with `use_mre` driven by the LangGraph input.
+
+    Defaults to True (production behaviour: incorporate the published MRE
+    when available, producing a POST-tier estimate). Set False for
+    backtesting and pre-MRE prediction (PRE-tier estimate from analogs +
+    drilling + L151 prior, with the MRE deliberately hidden from the
+    model so it can be compared against ground truth).
+    """
+    if state.get("error"):
+        return {}
+    project = state["project"]
+    analogs = state.get("analogs", [])
+    activated_rules = state.get("activated_rules", [])
+    use_mre = state.get("use_mre", True)
+
+    base_tonnage = float(project.get("tonnage_mt") or 0) * 1000  # Mt -> kt
+    base_grade = float(project.get("grade_value") or 0)
+    rule_effects = rules_engine.apply_rule_multipliers(
+        base_tonnage=base_tonnage or 1000,
+        base_grade=base_grade or 1.0,
+        activated_rules=activated_rules,
+    )
+
+    model = model_builder.build_model_1(analogs, project, rule_effects, use_mre=use_mre)
+    logger.info(
+        f"[model] built ({'post-MRE' if model.get('mre_signal_applied') else 'pre-MRE'}); "
+        f"use_mre={use_mre}, tier={model.get('conviction_tier')}"
+    )
+    return {"model_1": model, "rule_effects": rule_effects}
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +355,10 @@ def save_model_run_node(
     state: ModelRunnerState,
     config: Optional[Dict] = None,
 ) -> ModelRunnerState:
-    """Persist Model 1 (+ Model 2 if built) to model_runs and overwrite projects."""
+    """Persist the single Model run to model_runs and overwrite the latest
+    projects.* fields. There's only one model now — pre-MRE vs post-MRE
+    is a flag on the run (use_mre), not a separate model row.
+    """
     if state.get("error"):
         return {}
 
@@ -335,38 +368,21 @@ def save_model_run_node(
     thread_id = cfg.get("thread_id")
     run_id = cfg.get("run_id")
 
-    model_1 = state.get("model_1")
-    model_2 = state.get("model_2")
+    model = state.get("model_1") or state.get("model_2")
+    if not model:
+        return {"saved": False, "error": "No model output produced"}
 
-    latest_fields: Optional[Dict] = None
-
-    if model_1:
-        fields_1 = _fields_from_model(project, model_1, is_post_mre=False)
-        supabase_ops.save_model_run(
-            project_id=project_id,
-            model_type="model_1",
-            fields=fields_1,
-            model_output_json=model_1,
-            thread_id=thread_id,
-            run_id=run_id,
-        )
-        latest_fields = fields_1
-
-    if model_2:
-        fields_2 = _fields_from_model(project, model_2, is_post_mre=True)
-        supabase_ops.save_model_run(
-            project_id=project_id,
-            model_type="model_2",
-            fields=fields_2,
-            model_output_json=model_2,
-            thread_id=thread_id,
-            run_id=run_id,
-        )
-        latest_fields = fields_2  # Model 2 wins as "latest" when it exists
-
-    if latest_fields:
-        supabase_ops.update_project_latest_model(project_id, latest_fields)
-
+    mre_used = bool(model.get("mre_signal_applied"))
+    fields = _fields_from_model(project, model, is_post_mre=mre_used)
+    supabase_ops.save_model_run(
+        project_id=project_id,
+        model_type=("post_mre" if mre_used else "pre_mre"),
+        fields=fields,
+        model_output_json=model,
+        thread_id=thread_id,
+        run_id=run_id,
+    )
+    supabase_ops.update_project_latest_model(project_id, fields)
     return {"saved": True, "error": None}
 
 
@@ -378,8 +394,7 @@ builder.add_node("check_analogs_present", check_analogs_present_node)
 builder.add_node("fetch_drilling_evidence", fetch_drilling_evidence_node)
 builder.add_node("load_rules", load_rules_node)
 builder.add_node("activate_rules", activate_rules_node)
-builder.add_node("build_model_1", build_model_1_node)
-builder.add_node("build_model_2", build_model_2_node)
+builder.add_node("build_model", build_model_node)
 builder.add_node("save_model_run", save_model_run_node)
 
 builder.set_entry_point("load_project_and_analogs")
@@ -390,9 +405,8 @@ builder.add_conditional_edges("check_analogs_present", _route_after_check, {
 })
 builder.add_edge("fetch_drilling_evidence", "load_rules")
 builder.add_edge("load_rules", "activate_rules")
-builder.add_edge("activate_rules", "build_model_1")
-builder.add_edge("build_model_1", "build_model_2")
-builder.add_edge("build_model_2", "save_model_run")
+builder.add_edge("activate_rules", "build_model")
+builder.add_edge("build_model", "save_model_run")
 builder.add_edge("save_model_run", END)
 
 graph = builder.compile()

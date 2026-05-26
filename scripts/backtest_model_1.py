@@ -140,7 +140,11 @@ def backtest_one(
     # (deposit type, geometry, location, stage, etc.).
     project = {**fixture, "tonnage_mt": None, "grade_value": None}
 
-    out = build_model_1(analogs, project, {})
+    # use_mre=False for backtest: the MRE IS what we're trying to predict.
+    # Even though we already blank tonnage_mt/grade_value on the project
+    # dict, the explicit flag makes intent clear and survives if a
+    # future fixture format starts retaining the MRE elsewhere.
+    out = build_model_1(analogs, project, {}, use_mre=False)
 
     pred_total_mt = out["p50_total_tonnage_mt"]
     pred_grade    = out["p50_grade"]

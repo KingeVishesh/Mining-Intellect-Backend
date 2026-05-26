@@ -516,9 +516,31 @@ def build_model_1(
     analogs: List[Dict],
     project: Dict,
     rule_effects: Dict,
+    use_mre: bool = True,
 ) -> Dict:
-    """Model 1 v2: log-space credibility-weighted geometric mean with
-    closed-form lognormal posterior over (tonnage, grade) and contained metal.
+    """The single Model. Log-space credibility-weighted geometric mean
+    with closed-form lognormal posterior over (tonnage, grade) and
+    contained metal.
+
+    The `use_mre` flag controls whether the project's published MRE is
+    fused into the posterior:
+
+      * `use_mre=True` (default, production): if the project carries an
+        official MRE (`tonnage_mt` and `grade_value` are both populated),
+        those values are added as a high-precision signal in the joint
+        fusion. The posterior median lands at or very near the MRE,
+        with the analog/drilling/prior signals refining the M&I/Inferred
+        split and the percentile band. Tier comes from
+        `_compute_post_tier` (POST-1..5).
+
+      * `use_mre=False` (backtesting and pre-MRE prediction): the MRE is
+        ignored entirely. The model predicts what the MRE *would* be
+        from analogs + drilling + geometry + L151 prior. Tier comes from
+        `_compute_pre_tier_from_cv` (PRE-1..5).
+
+    This replaces the old Model 1 + Model 2 split — there's only one
+    model now; the flag picks the regime. Backtest harness sets
+    use_mre=False so the MRE we're trying to predict can't leak in.
 
     Steps:
       1. Filter analogs with both tonnage and grade.
@@ -529,10 +551,13 @@ def build_model_1(
          analog pool is thin.
       5. Apply rule log-multipliers as point shifts to μ.
       6. If geometry data exists, fuse it with the analog signal on log_T via
-         inverse-variance weighting (P2 generalises this to all signals).
-      7. Posterior CV on contained metal is sqrt(exp(var(log C)) - 1) where
-         var(log C) = σ²_T + σ²_G + 2ρ σ_T σ_G. Tier is read from CV.
-      8. Closed-form P10/P50/P90 via lognormal quantiles: exp(μ ± 1.2816 σ).
+         inverse-variance weighting.
+      7. Drilling-evidence signal (when available).
+      8. MRE signal when use_mre=True — dominates because σ is tight.
+      9. Posterior CV on contained metal is sqrt(exp(var(log C)) - 1) where
+         var(log C) = σ²_T + σ²_G + 2ρ σ_T σ_G.
+      10. Tier: POST-1..5 when MRE was fused, PRE-1..5 otherwise.
+      11. Closed-form P10/P50/P90 via lognormal quantiles.
     """
     material = _norm_material(project.get("material", "unknown"))
     valid = [
@@ -912,6 +937,33 @@ def build_model_1(
                 f"[Model1] Drilling G-signal dropped ({reason})"
             )
 
+    # MRE signal — applied last so it dominates the joint posterior when
+    # the project carries an official MRE and use_mre=True. σ is tight
+    # (5% RSD on each axis) because the MRE is the closest thing to
+    # ground truth we have; the other signals just refine the M&I/Inf
+    # split and the percentile band around it. Skipped entirely when
+    # use_mre=False (backtest) or the project has no MRE.
+    mre_signal_applied = False
+    mre_T = project.get("tonnage_mt")
+    mre_G = project.get("grade_value")
+    if (use_mre and mre_T and mre_G
+            and float(mre_T) > 0 and float(mre_G) > 0):
+        mre_T = float(mre_T)
+        mre_G = float(mre_G)
+        sigma_mre_T = 0.05  # ~5% RSD on tonnage — MRE numbers are very tight
+        sigma_mre_G = 0.05  # ~5% RSD on grade
+        prec_T = 1.0 / (sigma_mre_T * sigma_mre_T)
+        prec_G = 1.0 / (sigma_mre_G * sigma_mre_G)
+        Laa_00 += prec_T
+        Laa_11 += prec_G
+        eta_0  += prec_T * math.log(mre_T)
+        eta_1  += prec_G * math.log(mre_G)
+        mre_signal_applied = True
+        logger.info(
+            f"[Model] MRE signal fused: {mre_T:.2f} Mt @ {mre_G:.3f} "
+            f"(σ_logT=σ_logG={sigma_mre_T:.2f}); posterior will land near MRE."
+        )
+
     # Invert Λ_post (2×2) and solve μ_post = Σ_post η_post.
     det_post = Laa_00 * Laa_11 - Laa_01 * Laa_01
     if det_post <= 0:
@@ -937,8 +989,17 @@ def build_model_1(
     sigma_logC = math.sqrt(var_logC)
     cv_contained = math.sqrt(math.exp(var_logC) - 1.0)
 
-    tier, tier_label = _compute_pre_tier_from_cv(cv_contained)
-    conv_pct = _cv_to_conviction_pct(cv_contained)
+    # Tier: POST-1..5 when the MRE was fused (high-confidence regime),
+    # PRE-1..5 otherwise (pre-MRE prediction from analogs alone).
+    if mre_signal_applied:
+        conv_pct_pre = _cv_to_conviction_pct(cv_contained)
+        # Post-MRE conviction starts high and only floors when the
+        # underlying pre-MRE estimate was very weak (cv > 1.3).
+        conv_pct = min(100.0, conv_pct_pre * 0.3 + 65.0)
+        tier, tier_label = _compute_post_tier(conv_pct, project)
+    else:
+        tier, tier_label = _compute_pre_tier_from_cv(cv_contained)
+        conv_pct = _cv_to_conviction_pct(cv_contained)
     # Rule-driven confidence_delta still influences the legacy conviction_pct
     # (consumed by Model 2). It does NOT alter the CV-based tier directly —
     # that comes from the posterior, where rules already had their say via
@@ -983,15 +1044,19 @@ def build_model_1(
     tonnage_sources = ["analog", f"L151_stage_prior(σ={sigma_T_prior:.2f})"]
     if geometry_contrib:
         tonnage_sources.append("geometry")
+    if mre_signal_applied:
+        tonnage_sources.append("MRE")
     description = (
-        f"Model 1 v2 (log-space Bayesian): {len(keep_idx)} of {len(valid)} analog(s) after "
-        f"outlier trim, {n_rules} rule(s) applied, tonnage signals = "
+        f"Model ({('post-MRE' if mre_signal_applied else 'pre-MRE')}, log-space "
+        f"Bayesian): {len(keep_idx)} of {len(valid)} analog(s) after outlier trim, "
+        f"{n_rules} rule(s) applied, tonnage signals = "
         f"{' ⊕ '.join(tonnage_sources)}, split = {int(mi_frac*100)}/{int(inf_frac*100)} "
         f"M&I/Inferred (L143/L145). Posterior CV(contained) = {cv_contained:.2f} → {tier}."
     )
 
     return {
-        "model": "MI Model (Pre-MRE)",
+        "model": f"MI Model ({'Post-MRE' if mre_signal_applied else 'Pre-MRE'})",
+        "mre_signal_applied": mre_signal_applied,
         # Legacy keys preserved so model_runner._fields_from_model keeps working
         "mi_tonnage_kt":          round(mi_mt * 1000.0, 2),
         "mi_grade_pct":           round(grade_median, 4),
@@ -1029,6 +1094,13 @@ def build_model_1(
             "split":       {"mi_frac": round(mi_frac, 3),
                             "inf_frac": round(inf_frac, 3),
                             "source": "L143_145_deposit_aware"},
+            "mre":         ({"mu_logT": math.log(mre_T), "sigma_logT": 0.05,
+                             "mu_logG": math.log(mre_G), "sigma_logG": 0.05,
+                             "applied": True}
+                            if mre_signal_applied else
+                            {"applied": False,
+                             "reason": ("use_mre=False" if not use_mre
+                                        else "no MRE on project")}),
         },
     }
 
