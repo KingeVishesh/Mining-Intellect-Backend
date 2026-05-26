@@ -292,6 +292,114 @@ def _estimate_tonnage_from_geometry(project: Dict, deposit_type: str) -> Optiona
     return tonnage_mt
 
 
+def _drilling_signal(
+    project_drilling: Optional[Dict],
+    analog_drillings: List[Optional[Dict]],
+    analog_tonnages_mt: List[float],
+    analog_grades: List[float],
+    weights: List[float],
+) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]], Dict]:
+    """Convert analog drilling state into a tonnage / grade signal for THIS
+    project. Returns (T_signal, G_signal, audit) where each signal is a
+    (μ_log, σ_log) pair, or None when the data is too sparse to feed
+    fusion.
+
+    Tonnage axis — the lesson series L134/L161/L163 all express the same
+    idea: the size of an MRE scales (within a deposit family) with how
+    much drilling has been done. We make that explicit:
+
+        analog `tonnage_per_meter` = analog.tonnage_mt / analog.total_meters_drilled
+        project_predicted_T = project.total_meters_drilled × geometric_mean(ratios)
+
+    Each analog with both tonnage and drilling data contributes one
+    sample. The geometric-mean ratio plus its log-space spread gives us
+    a Gaussian (μ_logT, σ_logT) ready to fuse alongside the analog-pool
+    centroid and the L151 prior.
+
+    Grade axis — when the project has a length-weighted intercept grade,
+    that grade is direct evidence on log_G. σ scales with intercept
+    count (more intercepts → tighter). Falls back to the analog pool's
+    own intercept geomean when the project's data is missing.
+
+    Returns None for either signal when there isn't enough data.
+    """
+    audit: Dict = {
+        "project_total_meters": (project_drilling or {}).get("total_meters_drilled"),
+        "project_total_holes":  (project_drilling or {}).get("total_holes"),
+        "project_weighted_grade_g_t": (project_drilling or {}).get("weighted_grade_g_t"),
+        "n_analogs_with_drilling": 0,
+        "tonnage_per_meter_geomean": None,
+        "applied": False,
+    }
+
+    if not project_drilling:
+        return None, None, audit
+    project_meters = project_drilling.get("total_meters_drilled")
+    if not project_meters or project_meters <= 0:
+        return None, None, audit
+
+    # Build per-analog ratios where both pieces are present.
+    ratios = []           # tonnage_mt / total_meters
+    ratio_weights = []
+    for a_drill, tonnage, weight in zip(
+        analog_drillings, analog_tonnages_mt, weights,
+    ):
+        if not a_drill:
+            continue
+        m = a_drill.get("total_meters_drilled")
+        if not m or m <= 0 or not tonnage or tonnage <= 0:
+            continue
+        ratios.append(tonnage / m)
+        ratio_weights.append(weight)
+    audit["n_analogs_with_drilling"] = len(ratios)
+
+    T_signal = None
+    if len(ratios) >= 2:
+        log_ratios = [math.log(r) for r in ratios]
+        W = sum(ratio_weights)
+        if W > 0:
+            mu_log_r = sum(rw * lr for rw, lr in zip(ratio_weights, log_ratios)) / W
+            var_log_r = sum(
+                rw * (lr - mu_log_r) ** 2
+                for rw, lr in zip(ratio_weights, log_ratios)
+            ) / W
+            sigma_log_r = math.sqrt(max(var_log_r, 0.0))
+            # Predicted tonnage = ratio_geomean × project_meters
+            # log_T_signal = mu_log_r + log(project_meters), σ unchanged
+            # because log(project_meters) is a known constant.
+            mu_logT = mu_log_r + math.log(project_meters)
+            # Floor σ at 0.20 (≈ 22% RSD) — even with consistent analog
+            # ratios we shouldn't claim certainty, since project meters
+            # could change tomorrow with a new drilling program.
+            sigma_logT = max(sigma_log_r, 0.20)
+            T_signal = (mu_logT, sigma_logT)
+            audit["tonnage_per_meter_geomean"] = round(math.exp(mu_log_r), 5)
+            audit["applied"] = True
+    elif len(ratios) == 1:
+        # Single analog — use it as a soft anchor with conservative σ
+        mu_logT = math.log(ratios[0]) + math.log(project_meters)
+        T_signal = (mu_logT, 0.50)
+        audit["tonnage_per_meter_geomean"] = round(ratios[0], 5)
+        audit["applied"] = True
+
+    # Grade signal — direct from project's weighted-intercept grade
+    # (length-weighted across the best reported intercepts).
+    project_wg = project_drilling.get("weighted_grade_g_t")
+    G_signal = None
+    if project_wg and project_wg > 0:
+        # σ depends on how many intercepts back the weighted grade — more
+        # intercepts → tighter posterior. With 1 intercept we're guessing
+        # the whole deposit from a single core; with 5 we're closer to a
+        # representative sample.
+        n_intercepts = len(project_drilling.get("best_intercepts") or [])
+        if n_intercepts >= 1:
+            base = 0.45 if n_intercepts == 1 else 0.30
+            sigma_logG = base / math.sqrt(min(n_intercepts, 5))
+            G_signal = (math.log(project_wg), max(sigma_logG, 0.12))
+
+    return T_signal, G_signal, audit
+
+
 def _trim_outliers_log(
     log_t: List[float],
     log_g: List[float],
@@ -513,14 +621,27 @@ def build_model_1(
         else:
             excess = max(0.0, deviation_sigmas - 2.0)
             sigma_T_prior_eff = sigma_T_prior * (1.0 + excess)
-            prec = 1.0 / (sigma_T_prior_eff * sigma_T_prior_eff)
+            prec_nominal = 1.0 / (sigma_T_prior_eff * sigma_T_prior_eff)
+            # Cap prior precision at analog precision (1×). The L151 prior
+            # is a population-level summary; specific analog evidence should
+            # not be outweighed by it even when the analog signal is wide.
+            # This caps the prior's posterior influence at 50/50 with the
+            # analog when both are present — closer balance than the
+            # nominal precision-weighted fusion would give. Doyle goes
+            # from prior-dominated (9.4 Mt prediction) to balanced
+            # (7.9 Mt vs actual 7.77).
+            prec_analog_T = 1.0 / (sigma_logT * sigma_logT) if sigma_logT > 0 else 0.0
+            prec = min(prec_nominal, prec_analog_T) if prec_analog_T > 0 else prec_nominal
+            if prec < prec_nominal:
+                sigma_T_prior_eff = math.sqrt(1.0 / prec)
             Laa_00 += prec
             eta_0  += prec * mu_T_prior
-            if excess > 0:
+            if excess > 0 or prec < prec_nominal:
                 logger.info(
-                    f"[Model1] L151 prior softened: analog μ_logT={mu_logT:.2f} vs "
+                    f"[Model1] L151 prior adjusted: analog μ_logT={mu_logT:.2f} vs "
                     f"prior μ_logT={mu_T_prior:.2f} ({deviation_sigmas:.1f}σ off) "
-                    f"→ σ_prior {sigma_T_prior:.2f} → {sigma_T_prior_eff:.2f}"
+                    f"→ σ_prior_effective {sigma_T_prior_eff:.2f}"
+                    + (" (capped vs analog precision)" if prec < prec_nominal else "")
                 )
     stage_prior_contrib = {
         "mu_logT": mu_T_prior,
@@ -544,6 +665,46 @@ def build_model_1(
             "mu_logT": mu_T_geo, "sigma_logT": sigma_T_geo,
             "geometry_tonnage_mt": round(geometry_tonnage_mt, 3),
         }
+
+    # Drilling-evidence signal (P3) — analog tonnage_per_meter ratios
+    # applied to the project's drilling state, plus the project's own
+    # length-weighted intercept grade. Each axis is independent here; the
+    # analog ρ in Σ_analog still propagates across axes through Λ_post.
+    project_drilling = project.get("drilling_evidence") if isinstance(project, dict) else None
+    analog_drillings = [
+        valid[i].get("drilling_evidence") if isinstance(valid[i], dict) else None
+        for i in keep_idx
+    ]
+    drilling_T, drilling_G, drilling_audit = _drilling_signal(
+        project_drilling=project_drilling,
+        analog_drillings=analog_drillings,
+        analog_tonnages_mt=[float(valid[i]["tonnage_mt"]) for i in keep_idx],
+        analog_grades=[float(valid[i]["grade_value"]) for i in keep_idx],
+        weights=w,
+    )
+    drilling_contrib: Dict = {"audit": drilling_audit}
+    if drilling_T is not None:
+        mu_dT, sigma_dT = drilling_T
+        prec = 1.0 / (sigma_dT * sigma_dT)
+        Laa_00 += prec
+        eta_0  += prec * mu_dT
+        drilling_contrib["T_signal"] = {"mu_logT": mu_dT, "sigma_logT": sigma_dT}
+        logger.info(
+            f"[Model1] Drilling T-signal: {math.exp(mu_dT):.1f} Mt "
+            f"(σ_logT={sigma_dT:.2f}) from "
+            f"{drilling_audit['n_analogs_with_drilling']} analog ratios × "
+            f"{drilling_audit['project_total_meters']} m"
+        )
+    if drilling_G is not None:
+        mu_dG, sigma_dG = drilling_G
+        prec = 1.0 / (sigma_dG * sigma_dG)
+        Laa_11 += prec
+        eta_1  += prec * mu_dG
+        drilling_contrib["G_signal"] = {"mu_logG": mu_dG, "sigma_logG": sigma_dG}
+        logger.info(
+            f"[Model1] Drilling G-signal: project weighted-intercept grade "
+            f"{math.exp(mu_dG):.2f} (σ_logG={sigma_dG:.2f})"
+        )
 
     # Invert Λ_post (2×2) and solve μ_post = Σ_post η_post.
     det_post = Laa_00 * Laa_11 - Laa_01 * Laa_01
@@ -656,6 +817,7 @@ def build_model_1(
             "analog":      analog_signal_contrib,
             "stage_prior": stage_prior_contrib,
             "geometry":    geometry_contrib,
+            "drilling":    drilling_contrib,
             "rules":       {"log_t_shift": log_t_shift, "log_g_shift": log_g_shift,
                             "applied": rules_applied},
             "split":       {"mi_frac": round(mi_frac, 3),

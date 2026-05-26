@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
 
-from nodes import supabase_ops, model_builder
+from nodes import supabase_ops, model_builder, drilling_extractor
 from graphs.report_generator import (
     load_project_and_analogs_node,
     load_rules_node,
@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 class ModelRunnerState(TypedDict, total=False):
     # Input
     project_id: str
+    # Force-refresh drilling data even if the cached copy is < 7 days old.
+    # When omitted or false, fetch_drilling_evidence_node uses the cache
+    # unless it's stale or missing.
+    fetch_recent_drill_holes: bool
 
     # Loaded
     project: Optional[Dict]
@@ -68,8 +72,103 @@ def check_analogs_present_node(state: ModelRunnerState) -> ModelRunnerState:
     return {}
 
 
+def fetch_drilling_evidence_node(state: ModelRunnerState) -> ModelRunnerState:
+    """Pull or refresh drilling data for the project and its top analogs.
+
+    Strategy:
+      * Project: refetch if `fetch_recent_drill_holes=True` was passed as a
+        LangGraph input, OR if the cached drilling_evidence is missing /
+        older than 7 days. Save back to projects.drilling_evidence.
+      * Analogs: lazily extract once per analog and cache on the analogs
+        table. We only fetch the top-N analogs by similarity_score so a
+        model run doesn't kick off a dozen Exa requests.
+      * Errors are tolerated — Model 1 still runs with whatever drilling
+        evidence is available (or none).
+    """
+    if state.get("error"):
+        return {}
+
+    project = state.get("project") or {}
+    analogs = state.get("analogs") or []
+    project_id = state["project_id"]
+    force = bool(state.get("fetch_recent_drill_holes"))
+
+    # ── Project drilling evidence ────────────────────────────────────────
+    cached_evidence = project.get("drilling_evidence")
+    cached_at = project.get("drilling_evidence_fetched_at")
+    if drilling_extractor.should_refetch(cached_evidence, cached_at, force=force):
+        logger.info(
+            f"[fetch_drilling] Project {project_id} drilling-data refetch "
+            f"(force={force}, cached_at={cached_at})"
+        )
+        evidence = drilling_extractor.extract_drilling_evidence(
+            project_name=project.get("name") or "",
+            material=project.get("material") or "",
+            country=project.get("country"),
+            region=project.get("region"),
+            deposit_type=project.get("deposit_type"),
+        )
+        if evidence:
+            try:
+                supabase_ops.save_project_drilling_evidence(project_id, evidence)
+            except Exception as e:
+                logger.warning(f"[fetch_drilling] DB save failed: {e}")
+            project = {**project, "drilling_evidence": evidence}
+
+    # ── Analog drilling evidence (lazy, top-N by similarity) ─────────────
+    # Only extract for analogs with valid tonnage+grade; without those the
+    # drilling-density ratio (tonnage / total_meters) can't be computed.
+    enriched_analogs: List[Dict] = []
+    candidates = [
+        a for a in analogs
+        if a.get("tonnage_mt") and a.get("grade_value")
+    ]
+    candidates.sort(
+        key=lambda a: float(a.get("similarity_score") or 0),
+        reverse=True,
+    )
+    TOP_N = 5  # cap Exa hits per model run
+    for i, a in enumerate(analogs):
+        if a not in candidates[:TOP_N]:
+            enriched_analogs.append(a)
+            continue
+        # Check whether this analog already has drilling_evidence inline
+        if a.get("drilling_evidence"):
+            enriched_analogs.append(a)
+            continue
+        try:
+            cached, cached_when = supabase_ops.get_analog_drilling_evidence(
+                a.get("name", ""), a.get("material", project.get("material", "")),
+            )
+        except Exception:
+            cached, cached_when = None, None
+        if cached and not drilling_extractor.should_refetch(cached, cached_when, force=force):
+            enriched_analogs.append({**a, "drilling_evidence": cached})
+            continue
+        # Fetch fresh for this analog
+        ev = drilling_extractor.extract_drilling_evidence(
+            project_name=a.get("name") or "",
+            material=a.get("material") or project.get("material") or "",
+            country=a.get("country"),
+            region=a.get("region"),
+            deposit_type=a.get("deposit_type"),
+        )
+        if ev:
+            try:
+                supabase_ops.save_analog_drilling_evidence(
+                    a.get("name", ""), a.get("material", project.get("material", "")), ev,
+                )
+            except Exception as e:
+                logger.warning(f"[fetch_drilling] analog DB save failed: {e}")
+            enriched_analogs.append({**a, "drilling_evidence": ev})
+        else:
+            enriched_analogs.append(a)
+
+    return {"project": project, "analogs": enriched_analogs}
+
+
 def _route_after_check(state: ModelRunnerState) -> str:
-    return END if state.get("error") else "load_rules"
+    return END if state.get("error") else "fetch_drilling_evidence"
 
 
 def _round(x: Optional[float], digits: int = 4) -> Optional[float]:
@@ -252,6 +351,7 @@ def save_model_run_node(
 builder = StateGraph(ModelRunnerState)
 builder.add_node("load_project_and_analogs", load_project_and_analogs_node)
 builder.add_node("check_analogs_present", check_analogs_present_node)
+builder.add_node("fetch_drilling_evidence", fetch_drilling_evidence_node)
 builder.add_node("load_rules", load_rules_node)
 builder.add_node("activate_rules", activate_rules_node)
 builder.add_node("build_model_1", build_model_1_node)
@@ -261,9 +361,10 @@ builder.add_node("save_model_run", save_model_run_node)
 builder.set_entry_point("load_project_and_analogs")
 builder.add_edge("load_project_and_analogs", "check_analogs_present")
 builder.add_conditional_edges("check_analogs_present", _route_after_check, {
-    "load_rules": "load_rules",
+    "fetch_drilling_evidence": "fetch_drilling_evidence",
     END: END,
 })
+builder.add_edge("fetch_drilling_evidence", "load_rules")
 builder.add_edge("load_rules", "activate_rules")
 builder.add_edge("activate_rules", "build_model_1")
 builder.add_edge("build_model_1", "build_model_2")

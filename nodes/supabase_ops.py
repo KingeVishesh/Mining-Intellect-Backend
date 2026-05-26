@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from supabase import create_client, Client
@@ -712,6 +712,76 @@ def update_project_latest_model(project_id: str, fields: Dict) -> None:
     payload = {k: fields.get(k) for k in _PROJECT_MODEL_FIELDS}
     get_client().table("projects").update(payload).eq("id", project_id).execute()
     logger.info(f"[DB] projects.{{model fields}} updated for project {project_id}")
+
+
+# ── Drilling evidence (Model 1 v2 P3) ──────────────────────────────────────────
+
+def get_project_drilling_evidence(
+    project_id: str,
+) -> Tuple[Optional[Dict], Optional[str]]:
+    """Return (drilling_evidence, fetched_at_iso) for a project, or (None, None)
+    when unset. Powers the cache check in fetch_drilling_evidence_node so we
+    don't re-hit Exa on every model run.
+    """
+    res = (
+        get_client().table("projects")
+        .select("drilling_evidence,drilling_evidence_fetched_at")
+        .eq("id", project_id).maybe_single().execute()
+    )
+    if not res.data:
+        return None, None
+    return res.data.get("drilling_evidence"), res.data.get("drilling_evidence_fetched_at")
+
+
+def save_project_drilling_evidence(project_id: str, evidence: Dict) -> None:
+    """Persist freshly-extracted drilling evidence to the projects row."""
+    payload = {
+        "drilling_evidence": evidence,
+        "drilling_evidence_fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    get_client().table("projects").update(payload).eq("id", project_id).execute()
+    logger.info(f"[DB] drilling_evidence saved for project {project_id}")
+
+
+def get_analog_drilling_evidence(
+    analog_name: str, material: str,
+) -> Tuple[Optional[Dict], Optional[str]]:
+    """Look up cached drilling evidence by analog name + material. Returns
+    (evidence, fetched_at_iso) or (None, None) when not yet extracted.
+    """
+    res = (
+        get_client().table("analogs")
+        .select("drilling_evidence,drilling_evidence_fetched_at")
+        .eq("analog_name", analog_name)
+        .ilike("analog_material", material)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        return None, None
+    return rows[0].get("drilling_evidence"), rows[0].get("drilling_evidence_fetched_at")
+
+
+def save_analog_drilling_evidence(
+    analog_name: str, material: str, evidence: Dict,
+) -> None:
+    """Persist analog drilling evidence across every analogs row matching
+    (name, material). The same library analog can appear in many reports;
+    we want a single drilling_evidence value shared across them.
+    """
+    payload = {
+        "drilling_evidence": evidence,
+        "drilling_evidence_fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    (
+        get_client().table("analogs")
+        .update(payload)
+        .eq("analog_name", analog_name)
+        .ilike("analog_material", material)
+        .execute()
+    )
+    logger.info(f"[DB] drilling_evidence saved for analog '{analog_name}'")
 
 
 def _analog_row(
