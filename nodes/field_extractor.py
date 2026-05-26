@@ -47,6 +47,12 @@ TARGET_FIELDS = [
     "project_stage_class", "mining_method_class",
     "resource_category_class", "resource_compliance_standard",
     "resource_vintage_year",
+    # MRE breakdown — Measured+Indicated and Inferred reported separately
+    # in the resource statement. Populated when the published MRE splits
+    # them out; left null when only an aggregate total is disclosed.
+    "mre_mi_tonnage_mt", "mre_mi_grade", "mre_mi_contained",
+    "mre_inferred_tonnage_mt", "mre_inferred_grade", "mre_inferred_contained",
+    "resource_effective_date",
 ]
 
 
@@ -284,8 +290,39 @@ Output ONLY this JSON object, no other text:
   "alteration_signature": string | null,
   "recovery_method": string | null,
   "mineralization_pattern": string | null,
-  "host_rock_class": string | null
+  "host_rock_class": string | null,
+  "mre_mi_tonnage_mt": number | null,
+  "mre_mi_grade": number | null,
+  "mre_mi_contained": number | null,
+  "mre_inferred_tonnage_mt": number | null,
+  "mre_inferred_grade": number | null,
+  "mre_inferred_contained": number | null,
+  "resource_effective_date": string | null
 }}
+
+MRE BREAKDOWN GUIDANCE
+======================
+Resource statements typically list M+I and Inferred separately. Extract
+each tonnage in Mt and the grade in the SAME unit as `grade_value`.
+
+  mre_mi_tonnage_mt: Combined Measured + Indicated tonnage (Mt).
+    Some reports list Measured and Indicated as separate lines — sum
+    them. If only "Indicated" is reported (no Measured), use the
+    Indicated tonnage alone.
+  mre_mi_grade: Tonnage-weighted average grade of the M&I bucket.
+    Same unit as grade_value.
+  mre_mi_contained: Contained metal in the M&I bucket. Convert to
+    tonnes for base metals and Moz / koz for precious metals — use
+    whichever the report cites.
+  mre_inferred_tonnage_mt / mre_inferred_grade / mre_inferred_contained:
+    Same fields for the Inferred-only bucket.
+  resource_effective_date: The MRE's effective cutoff date, ISO 8601
+    (YYYY-MM-DD). When the report says "as of December 31, 2023",
+    use "2023-12-31".
+
+If the report only quotes an aggregate total (no M&I / Inf split),
+leave the four breakdown fields null — `tonnage_mt` and `grade_value`
+already capture the total.
 
 Project context: {company} - {project_name} ({material})
 

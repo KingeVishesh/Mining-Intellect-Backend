@@ -714,6 +714,164 @@ def update_project_latest_model(project_id: str, fields: Dict) -> None:
     logger.info(f"[DB] projects.{{model fields}} updated for project {project_id}")
 
 
+# ── MRE history (mre_runs) ────────────────────────────────────────────────────
+
+# A 1% tolerance on tonnage / grade is the threshold for "MRE actually
+# changed". Below that we treat repeated extractions as the same MRE and
+# don't insert a new mre_runs row — saves the table from filling up with
+# noise when project_research re-fetches the same NI 43-101 report.
+_MRE_CHANGE_TOLERANCE = 0.01
+
+
+def get_latest_mre_run(project_id: str) -> Optional[Dict]:
+    """Return the most-recently-inserted mre_runs row for a project, or
+    None when no MRE has ever been recorded.
+    """
+    res = (
+        get_client().table("mre_runs")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("fetched_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    return rows[0] if rows else None
+
+
+def _mre_changed(latest: Optional[Dict], new: Dict) -> bool:
+    """Whether a new extraction represents an actual MRE update.
+
+    Considers the totals, the M&I and Inferred breakdowns when present,
+    the resource_category text, and the effective_date. A new effective
+    date (the MRE's reported cutoff) always counts as a new update, even
+    if the numbers happen to match.
+    """
+    if latest is None:
+        # First time we've recorded an MRE for this project — anything
+        # numeric is worth saving.
+        return any(
+            new.get(k) is not None
+            for k in ("total_tonnage_mt", "total_grade",
+                      "mi_tonnage_mt", "inferred_tonnage_mt")
+        )
+    # Effective-date change always wins
+    if new.get("effective_date") and new["effective_date"] != latest.get("effective_date"):
+        return True
+    # Category change is also a content change
+    if (new.get("resource_category") or "").strip() != (latest.get("resource_category") or "").strip():
+        return True
+    # Numeric drift on any tracked field beyond 1%
+    for field in (
+        "total_tonnage_mt", "total_grade", "total_contained",
+        "mi_tonnage_mt", "mi_grade", "mi_contained",
+        "inferred_tonnage_mt", "inferred_grade", "inferred_contained",
+    ):
+        old_v = latest.get(field)
+        new_v = new.get(field)
+        if old_v is None and new_v is None:
+            continue
+        if (old_v is None) != (new_v is None):
+            return True
+        if old_v == 0 and new_v == 0:
+            continue
+        denom = abs(old_v) if old_v else 1.0
+        if abs((new_v or 0) - (old_v or 0)) / denom > _MRE_CHANGE_TOLERANCE:
+            return True
+    return False
+
+
+def save_mre_run_if_changed(
+    project_id: str,
+    extracted: Dict,
+    thread_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> Optional[Dict]:
+    """Insert a new mre_runs row when the extracted MRE differs from the
+    latest cached row; otherwise skip. Returns the inserted row dict on
+    save, or None when no insert happened.
+
+    Caller is responsible for also updating the projects.* mirror columns
+    (tonnage_mt, grade_value, mre_mi_*, mre_inferred_*) — those reflect
+    the LATEST values, while mre_runs preserves the history.
+    """
+    latest = get_latest_mre_run(project_id)
+    if not _mre_changed(latest, extracted):
+        logger.info(
+            f"[mre_runs] No change vs latest for project {project_id} — "
+            f"not inserting duplicate row"
+        )
+        return None
+    row = {
+        "project_id": project_id,
+        "thread_id": thread_id,
+        "run_id": run_id,
+        # Fields below are pulled from `extracted` defensively so a caller
+        # can pass a subset (e.g. totals only, no breakdown) and the
+        # rest stay NULL.
+        "effective_date":       extracted.get("effective_date"),
+        "resource_category":    extracted.get("resource_category"),
+        "total_tonnage_mt":     extracted.get("total_tonnage_mt"),
+        "total_grade":          extracted.get("total_grade"),
+        "total_contained":      extracted.get("total_contained"),
+        "grade_unit":           extracted.get("grade_unit"),
+        "mi_tonnage_mt":        extracted.get("mi_tonnage_mt"),
+        "mi_grade":             extracted.get("mi_grade"),
+        "mi_contained":         extracted.get("mi_contained"),
+        "inferred_tonnage_mt":  extracted.get("inferred_tonnage_mt"),
+        "inferred_grade":       extracted.get("inferred_grade"),
+        "inferred_contained":   extracted.get("inferred_contained"),
+        "source":               extracted.get("source", "ni_43_101"),
+        "source_url":           extracted.get("source_url"),
+        "notes":                extracted.get("notes"),
+    }
+    res = get_client().table("mre_runs").insert(row).execute()
+    logger.info(
+        f"[mre_runs] Inserted MRE update for project {project_id}: "
+        f"total={extracted.get('total_tonnage_mt')} Mt @ "
+        f"{extracted.get('total_grade')} {extracted.get('grade_unit','')} "
+        f"(M&I={extracted.get('mi_tonnage_mt')}, "
+        f"Inf={extracted.get('inferred_tonnage_mt')})"
+    )
+    return res.data[0] if res.data else row
+
+
+def update_project_mre_mirror(project_id: str, extracted: Dict) -> None:
+    """Mirror the latest MRE values to the projects table so existing
+    queries continue to work. Only writes fields that have non-null
+    values in `extracted` — preserves previously-known values when a
+    fresh extraction is partial.
+    """
+    payload: Dict = {}
+    # The legacy totals already live on projects.tonnage_mt / grade_value
+    if extracted.get("total_tonnage_mt") is not None:
+        payload["tonnage_mt"] = extracted["total_tonnage_mt"]
+    if extracted.get("total_grade") is not None:
+        payload["grade_value"] = extracted["total_grade"]
+    if extracted.get("grade_unit"):
+        payload["grade_unit"] = extracted["grade_unit"]
+    if extracted.get("resource_category"):
+        payload["resource_category"] = extracted["resource_category"]
+    # New breakdown columns
+    for src, dst in (
+        ("mi_tonnage_mt",      "mre_mi_tonnage_mt"),
+        ("mi_grade",           "mre_mi_grade"),
+        ("mi_contained",       "mre_mi_contained"),
+        ("inferred_tonnage_mt","mre_inferred_tonnage_mt"),
+        ("inferred_grade",     "mre_inferred_grade"),
+        ("inferred_contained", "mre_inferred_contained"),
+    ):
+        if extracted.get(src) is not None:
+            payload[dst] = extracted[src]
+    if not payload:
+        return
+    get_client().table("projects").update(payload).eq("id", project_id).execute()
+    logger.info(
+        f"[mre_mirror] project {project_id} updated with "
+        f"{list(payload.keys())}"
+    )
+
+
 # ── Drilling evidence (Model 1 v2 P3) ──────────────────────────────────────────
 
 def get_project_drilling_evidence(

@@ -511,12 +511,19 @@ def validate_node(state: ResearchState) -> ResearchState:
     return {"extracted_fields": fields, "validation_errors": errors}
 
 
-def save_to_supabase_node(state: ResearchState) -> ResearchState:
+def save_to_supabase_node(state: ResearchState, config: Optional[Dict] = None) -> ResearchState:
     """Save extracted project fields to Supabase. No human gate.
 
     Null / empty extracted values are dropped so a re-research run never
     wipes good data that the LLM happens to miss on this pass. A field is
     only written when the extractor produced a positive value.
+
+    MRE versioning: when the extracted fields contain MRE totals or a
+    breakdown, hand them to `save_mre_run_if_changed` so each genuine
+    MRE update gets its own row in `mre_runs` (the chart reads from
+    that table for the historical MRE line). The latest values are
+    mirrored to projects.* via `update_project_mre_mirror` so existing
+    queries that read tonnage_mt / grade_value / mre_mi_* keep working.
     """
     if state.get("error"):
         logger.info(f"[save] Upstream error — not saving: {state['error']}")
@@ -546,6 +553,37 @@ def save_to_supabase_node(state: ResearchState) -> ResearchState:
             row["company_name"] = company_name
             row["company_id"] = supabase_ops.upsert_company(company_name)
         supabase_ops.upsert_project(row)
+
+        # ── MRE versioning ──────────────────────────────────────────
+        # Build the mre_runs payload from whatever the extractor pulled
+        # (totals + optional M&I/Inferred split). Skip the save when no
+        # MRE-related fields are present at all — that's a project that
+        # doesn't have a published resource estimate yet.
+        mre_payload = {
+            "total_tonnage_mt":     fields.get("tonnage_mt"),
+            "total_grade":          fields.get("grade_value"),
+            "grade_unit":           fields.get("grade_unit"),
+            "resource_category":    fields.get("resource_category"),
+            "effective_date":       fields.get("resource_effective_date"),
+            "mi_tonnage_mt":        fields.get("mre_mi_tonnage_mt"),
+            "mi_grade":             fields.get("mre_mi_grade"),
+            "mi_contained":         fields.get("mre_mi_contained"),
+            "inferred_tonnage_mt":  fields.get("mre_inferred_tonnage_mt"),
+            "inferred_grade":       fields.get("mre_inferred_grade"),
+            "inferred_contained":   fields.get("mre_inferred_contained"),
+            "source":               "project_research",
+            "source_url":           (state.get("exa_sources") or [None])[0],
+        }
+        if any(v is not None for k, v in mre_payload.items()
+               if k in ("total_tonnage_mt", "total_grade",
+                        "mi_tonnage_mt", "inferred_tonnage_mt")):
+            cfg = (config or {}).get("configurable") or {}
+            supabase_ops.save_mre_run_if_changed(
+                state["project_id"], mre_payload,
+                thread_id=cfg.get("thread_id"), run_id=cfg.get("run_id"),
+            )
+            supabase_ops.update_project_mre_mirror(state["project_id"], mre_payload)
+
         logger.info(f"[save] Project {state['project_id']} saved to Supabase")
         return {"saved": True, "error": None}
     except Exception as e:
