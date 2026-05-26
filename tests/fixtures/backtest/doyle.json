@@ -35,7 +35,8 @@
       "mineralization_style": "orogenic vein",
       "mineralization_mode": "primary_sulfide",
       "similarity_score": 100,
-      "source": "exa"
+      "source": "exa",
+      "district": "Wawa/Michipicoten greenstone belt"
     },
     {
       "name": "Eagle River Mine",
@@ -50,7 +51,8 @@
       "project_stage": "Producing",
       "mineralization_style": "orogenic vein",
       "similarity_score": 100,
-      "source": "exa"
+      "source": "exa",
+      "district": "Wawa/Michipicoten greenstone belt"
     },
     {
       "name": "Wawa Gold Project",
@@ -65,7 +67,8 @@
       "project_stage": "Advanced Exploration",
       "mineralization_style": "orogenic vein",
       "similarity_score": 90,
-      "source": "exa"
+      "source": "exa",
+      "district": "Wawa/Michipicoten greenstone belt"
     },
     {
       "name": "Red Lake Gold Mines",
@@ -80,7 +83,9 @@
       "project_stage": "Production",
       "mineralization_pattern": "vein_hosted",
       "similarity_score": 87.5,
-      "source": "library"
+      "source": "library",
+      "district": "Red Lake greenstone belt Ontario"
     }
-  ]
+  ],
+  "location_name": "Batchawana Greenstone Belt, north of Sault Ste. Marie, Ontario, Canada"
 }

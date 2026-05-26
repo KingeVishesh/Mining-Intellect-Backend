@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 
 from nodes import supabase_ops, model_builder, drilling_extractor
+from nodes import ni_43_101_extractor
 from graphs.report_generator import (
     load_project_and_analogs_node,
     load_rules_node,
@@ -101,13 +102,27 @@ def fetch_drilling_evidence_node(state: ModelRunnerState) -> ModelRunnerState:
             f"[fetch_drilling] Project {project_id} drilling-data refetch "
             f"(force={force}, cached_at={cached_at})"
         )
-        evidence = drilling_extractor.extract_drilling_evidence(
+        # Try the NI 43-101 technical-report extractor first — it returns
+        # cumulative project-history drilling totals rather than the press-
+        # release headlines that the Answer-API extractor surfaces. Fall
+        # back to the cheaper press-release path if no technical report
+        # text can be retrieved.
+        evidence = ni_43_101_extractor.extract_from_ni_43_101(
             project_name=project.get("name") or "",
             material=project.get("material") or "",
             country=project.get("country"),
             region=project.get("region"),
             deposit_type=project.get("deposit_type"),
+            pre_mre=True,
         )
+        if not evidence:
+            evidence = drilling_extractor.extract_drilling_evidence(
+                project_name=project.get("name") or "",
+                material=project.get("material") or "",
+                country=project.get("country"),
+                region=project.get("region"),
+                deposit_type=project.get("deposit_type"),
+            )
         if evidence:
             try:
                 supabase_ops.save_project_drilling_evidence(project_id, evidence)
@@ -145,14 +160,23 @@ def fetch_drilling_evidence_node(state: ModelRunnerState) -> ModelRunnerState:
         if cached and not drilling_extractor.should_refetch(cached, cached_when, force=force):
             enriched_analogs.append({**a, "drilling_evidence": cached})
             continue
-        # Fetch fresh for this analog
-        ev = drilling_extractor.extract_drilling_evidence(
+        # Fetch fresh for this analog — NI 43-101 first, press-release fallback
+        ev = ni_43_101_extractor.extract_from_ni_43_101(
             project_name=a.get("name") or "",
             material=a.get("material") or project.get("material") or "",
             country=a.get("country"),
             region=a.get("region"),
             deposit_type=a.get("deposit_type"),
+            pre_mre=False,  # analogs use their as-published totals, not pre-MRE
         )
+        if not ev:
+            ev = drilling_extractor.extract_drilling_evidence(
+                project_name=a.get("name") or "",
+                material=a.get("material") or project.get("material") or "",
+                country=a.get("country"),
+                region=a.get("region"),
+                deposit_type=a.get("deposit_type"),
+            )
         if ev:
             try:
                 supabase_ops.save_analog_drilling_evidence(

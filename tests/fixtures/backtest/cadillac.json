@@ -37,7 +37,8 @@
       "mineralization_pattern": "vein_hosted",
       "mining_method_class": "underground_vein",
       "similarity_score": 100,
-      "source": "library"
+      "source": "library",
+      "district": "Val d'Or Camp Quebec"
     },
     {
       "name": "Canadian Malartic - Odyssey UG",
@@ -53,7 +54,8 @@
       "mineralization_pattern": "vein_hosted",
       "mining_method_class": "underground_vein",
       "similarity_score": 100,
-      "source": "library"
+      "source": "library",
+      "district": "Malartic Quebec"
     },
     {
       "name": "Westwood Mine",
@@ -69,7 +71,8 @@
       "mineralization_pattern": "vein_hosted",
       "mining_method_class": "underground_vein",
       "similarity_score": 100,
-      "source": "library"
+      "source": "library",
+      "district": "Bousquet Camp Quebec"
     },
     {
       "name": "Casa Berardi",
@@ -85,7 +88,9 @@
       "mineralization_pattern": "vein_hosted",
       "mining_method_class": "underground_vein",
       "similarity_score": 100,
-      "source": "library"
+      "source": "library",
+      "district": "Casa Berardi Quebec"
     }
-  ]
+  ],
+  "location_name": "Val-d'Or, Abitibi, Quebec, Canada"
 }

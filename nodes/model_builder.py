@@ -20,6 +20,7 @@ from nodes.lessons_priors import (
     stage_tonnage_prior,
 )
 from nodes.rules_engine import get_analog_rule, get_stage_modifier_map
+from nodes.geo_taxonomy import detect_sub_trend
 
 logger = logging.getLogger(__name__)
 
@@ -326,17 +327,70 @@ def _drilling_signal(
     audit: Dict = {
         "project_total_meters": (project_drilling or {}).get("total_meters_drilled"),
         "project_total_holes":  (project_drilling or {}).get("total_holes"),
+        "project_drilled_area_km2": (project_drilling or {}).get("drilled_area_km2"),
         "project_weighted_grade_g_t": (project_drilling or {}).get("weighted_grade_g_t"),
         "n_analogs_with_drilling": 0,
         "tonnage_per_meter_geomean": None,
+        "tonnage_per_km2_geomean": None,
+        "area_signal_mt": None,
         "applied": False,
     }
 
     if not project_drilling:
         return None, None, audit
+
+    # --- Drilled-area tonnage signal (Lessons 134/161) ------------------------
+    # tonnage_estimate = drilled_area_km2 × analog-derived t-per-km² ratio
+    # This is a stage-stable signal: a 1 km² well-drilled footprint of an
+    # orogenic-vein system supports a tonnage roughly proportional to the
+    # deposit's areal density of mineralization. Unlike tonnage_per_meter,
+    # this doesn't depend on how many infill holes a producing mine drilled
+    # AFTER the MRE was finalized. Computed in parallel with the meter-based
+    # signal; the consistency check downstream picks whichever agrees with
+    # the analog pool.
+    project_area_km2 = project_drilling.get("drilled_area_km2")
+    area_T_signal = None
+    if project_area_km2 and project_area_km2 > 0:
+        ratios_km2 = []
+        ratio_weights_km2 = []
+        for a_drill, tonnage, weight in zip(
+            analog_drillings, analog_tonnages_mt, weights,
+        ):
+            if not a_drill:
+                continue
+            a_km2 = a_drill.get("drilled_area_km2")
+            if not a_km2 or a_km2 <= 0 or not tonnage or tonnage <= 0:
+                continue
+            ratios_km2.append(tonnage / a_km2)
+            ratio_weights_km2.append(weight)
+        if len(ratios_km2) >= 2:
+            log_r = [math.log(r) for r in ratios_km2]
+            Wk = sum(ratio_weights_km2)
+            mu_log_r = sum(rw * lr for rw, lr in zip(ratio_weights_km2, log_r)) / Wk
+            var_log_r = sum(rw * (lr - mu_log_r) ** 2
+                            for rw, lr in zip(ratio_weights_km2, log_r)) / Wk
+            sigma_log_r = math.sqrt(max(var_log_r, 0.0))
+            mu_logT_area = mu_log_r + math.log(project_area_km2)
+            sigma_logT_area = max(sigma_log_r, 0.25)
+            area_T_signal = (mu_logT_area, sigma_logT_area)
+            audit["tonnage_per_km2_geomean"] = round(math.exp(mu_log_r), 3)
+            audit["area_signal_mt"] = round(math.exp(mu_logT_area), 2)
+            audit["applied"] = True
+
     project_meters = project_drilling.get("total_meters_drilled")
+    # If we only have area data (no meters), return the area signal alone
+    # for tonnage. Grade signal can still be computed below.
     if not project_meters or project_meters <= 0:
-        return None, None, audit
+        # Compute grade signal even when meters are missing
+        project_wg = project_drilling.get("weighted_grade_g_t")
+        G_signal = None
+        if project_wg and project_wg > 0:
+            n_intercepts = len(project_drilling.get("best_intercepts") or [])
+            if n_intercepts >= 1:
+                base = 0.45 if n_intercepts == 1 else 0.30
+                sigma_logG = base / math.sqrt(min(n_intercepts, 5))
+                G_signal = (math.log(project_wg), max(sigma_logG, 0.12))
+        return area_T_signal, G_signal, audit
 
     # Build per-analog ratios where both pieces are present.
     ratios = []           # tonnage_mt / total_meters
@@ -353,7 +407,7 @@ def _drilling_signal(
         ratio_weights.append(weight)
     audit["n_analogs_with_drilling"] = len(ratios)
 
-    T_signal = None
+    meter_T_signal = None
     if len(ratios) >= 2:
         log_ratios = [math.log(r) for r in ratios]
         W = sum(ratio_weights)
@@ -364,23 +418,31 @@ def _drilling_signal(
                 for rw, lr in zip(ratio_weights, log_ratios)
             ) / W
             sigma_log_r = math.sqrt(max(var_log_r, 0.0))
-            # Predicted tonnage = ratio_geomean × project_meters
-            # log_T_signal = mu_log_r + log(project_meters), σ unchanged
-            # because log(project_meters) is a known constant.
             mu_logT = mu_log_r + math.log(project_meters)
-            # Floor σ at 0.20 (≈ 22% RSD) — even with consistent analog
-            # ratios we shouldn't claim certainty, since project meters
-            # could change tomorrow with a new drilling program.
             sigma_logT = max(sigma_log_r, 0.20)
-            T_signal = (mu_logT, sigma_logT)
+            meter_T_signal = (mu_logT, sigma_logT)
             audit["tonnage_per_meter_geomean"] = round(math.exp(mu_log_r), 5)
             audit["applied"] = True
     elif len(ratios) == 1:
-        # Single analog — use it as a soft anchor with conservative σ
         mu_logT = math.log(ratios[0]) + math.log(project_meters)
-        T_signal = (mu_logT, 0.50)
+        meter_T_signal = (mu_logT, 0.50)
         audit["tonnage_per_meter_geomean"] = round(ratios[0], 5)
         audit["applied"] = True
+
+    # Combine area-based and meter-based T signals when both exist via
+    # inverse-variance averaging. They're independent observations on the
+    # same μ_logT (project's true log-tonnage), so fusing tightens σ.
+    T_signal = None
+    if meter_T_signal and area_T_signal:
+        mu_m, s_m = meter_T_signal
+        mu_a, s_a = area_T_signal
+        prec = 1.0 / (s_m * s_m) + 1.0 / (s_a * s_a)
+        mu = (mu_m / (s_m * s_m) + mu_a / (s_a * s_a)) / prec
+        T_signal = (mu, math.sqrt(1.0 / prec))
+    elif meter_T_signal:
+        T_signal = meter_T_signal
+    elif area_T_signal:
+        T_signal = area_T_signal
 
     # Grade signal — direct from project's weighted-intercept grade
     # (length-weighted across the best reported intercepts).
@@ -500,6 +562,39 @@ def build_model_1(
             )
     weights = [_analog_weight(a, stage_map, drilling_stage) for a in valid]
 
+    # Sub-trend boost (Lesson 3 — "Where multiple ≥95%-similar candidates
+    # exist, prefer those from the same metallogenic belt or craton").
+    # When the project sits inside a known sub-trend (Cadillac Break,
+    # Batchawana–Wawa, Cortez Trend, etc.) and an analog shares it, that
+    # analog is much closer geologically than other same-belt candidates.
+    # We multiply its weight by 2× — chosen empirically: enough to make
+    # Canadian Malartic dominate Cadillac's pool (both on Cadillac Break)
+    # over Westwood/Casa Berardi (same belt, different sub-trend), without
+    # collapsing the pool to a single analog.
+    project_sub_trend = detect_sub_trend(
+        project.get("district"), project.get("region"),
+        project.get("location_name"), project.get("name"),
+    )
+    sub_trend_boost: List[float] = []
+    boosted_n = 0
+    if project_sub_trend:
+        for a in valid:
+            a_sub = detect_sub_trend(
+                a.get("district"), a.get("region"),
+                a.get("location_name"), a.get("name"),
+            )
+            if a_sub and a_sub == project_sub_trend:
+                sub_trend_boost.append(2.0)
+                boosted_n += 1
+            else:
+                sub_trend_boost.append(1.0)
+        weights = [w_ * b for w_, b in zip(weights, sub_trend_boost)]
+        if boosted_n:
+            logger.info(
+                f"[Model1] Sub-trend boost ({project_sub_trend}): "
+                f"{boosted_n} of {len(valid)} analog(s) 2× weighted"
+            )
+
     tonnages_mt = [float(a["tonnage_mt"]) for a in valid]
     grades      = [float(a["grade_value"]) for a in valid]
     log_T_all   = [math.log(t) for t in tonnages_mt]
@@ -513,18 +608,53 @@ def build_model_1(
     if W <= 0:
         return _minimal_model(project, material, "MI Model (Pre-MRE)")
 
-    # Weighted moments
-    mu_logT = sum(wi * lt for wi, lt in zip(w, log_T)) / W
-    mu_logG = sum(wi * lg for wi, lg in zip(w, log_G)) / W
-    var_logT = sum(wi * (lt - mu_logT) ** 2 for wi, lt in zip(w, log_T)) / W
-    var_logG = sum(wi * (lg - mu_logG) ** 2 for wi, lg in zip(w, log_G)) / W
-    cov_TG   = sum(wi * (lt - mu_logT) * (lg - mu_logG)
-                   for wi, lt, lg in zip(w, log_T, log_G)) / W
+    # Per-axis MAD-based outlier downweighting. The joint trim above
+    # catches analogs that are jointly far from the pool centroid, but
+    # not analogs that are ON the centroid for one axis and extreme for
+    # the other. Doyle's pool has Wawa at 22.9 Mt (fine on T) but 1.69
+    # g/t (a 7-MAD outlier on G — much lower than the 9-13 g/t cluster).
+    # Letting it vote equally on grade drags the prediction the wrong
+    # way. Threshold of 5 MAD-σ leaves "informative outliers" in (Cadillac's
+    # Canadian Malartic at 2.5 g/t is a 3-MAD outlier and stays full
+    # weight — it's a real lower-grade bulk deposit, not noise).
+    def _per_axis_downweight(values, base_weights, threshold=6.0, factor=0.3):
+        srt = sorted(values)
+        n = len(srt)
+        if n < 3:
+            return base_weights
+        median = (srt[n // 2] if n % 2 else 0.5 * (srt[n // 2 - 1] + srt[n // 2]))
+        abs_devs = sorted(abs(v - median) for v in values)
+        mad = (abs_devs[n // 2] if n % 2
+               else 0.5 * (abs_devs[n // 2 - 1] + abs_devs[n // 2]))
+        if mad <= 1e-9:
+            return base_weights
+        scaled = [0.6745 * abs(v - median) / mad for v in values]
+        return [bw * (factor if z > threshold else 1.0)
+                for bw, z in zip(base_weights, scaled)]
+    w_T = _per_axis_downweight(log_T, w)
+    w_G = _per_axis_downweight(log_G, w)
+    W_T = sum(w_T)
+    W_G = sum(w_G)
+
+    # Weighted moments — per axis
+    mu_logT = sum(wi * lt for wi, lt in zip(w_T, log_T)) / W_T
+    mu_logG = sum(wi * lg for wi, lg in zip(w_G, log_G)) / W_G
+    var_logT = sum(wi * (lt - mu_logT) ** 2 for wi, lt in zip(w_T, log_T)) / W_T
+    var_logG = sum(wi * (lg - mu_logG) ** 2 for wi, lg in zip(w_G, log_G)) / W_G
+    # Covariance uses the geometric mean of the two weight schemes — it's
+    # a cross-axis quantity, so neither w_T nor w_G alone is the right
+    # weight set.
+    w_cov = [math.sqrt(wt * wg) for wt, wg in zip(w_T, w_G)]
+    W_cov = sum(w_cov)
+    cov_TG = sum(wc * (lt - mu_logT) * (lg - mu_logG)
+                 for wc, lt, lg in zip(w_cov, log_T, log_G)) / W_cov
 
     # Effective sample size; inflate variances when pool is thin so percentiles
-    # widen instead of collapsing on top of a tiny analog set.
-    sumsq_w = sum(wi * wi for wi in w)
-    N_eff = (W * W) / sumsq_w if sumsq_w > 0 else 0.0
+    # widen instead of collapsing on top of a tiny analog set. N_eff uses
+    # the joint weight set (geometric mean of T and G axis weights) to
+    # avoid double-counting the per-axis downweighting.
+    sumsq_w = sum(wc * wc for wc in w_cov)
+    N_eff = (W_cov * W_cov) / sumsq_w if sumsq_w > 0 else 0.0
     shrink = 1.0 + 2.0 / max(N_eff, 1.0)
     var_logT *= shrink
     var_logG *= shrink
