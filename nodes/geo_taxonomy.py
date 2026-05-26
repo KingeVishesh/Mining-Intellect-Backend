@@ -363,23 +363,47 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
         "regions": ["andes", "atacama", "antofagasta", "tarapacá"],
     },
     "brazilian_shield": {
+        # Carajás IOCG-Cu-Au + Quadrilátero Ferrífero IOCG/orogenic.
+        # Tapajós Archean greenstone (Cuiú Cuiú etc.) moved to the
+        # dedicated `tapajos_archean` belt below so the cascade can route
+        # those projects into the archean_greenstone compatibility group.
         "countries": ["brazil"],
         "regions": [
-            "carajás", "carajas", "minas gerais", "bahia", "goiás",
-            "tapajós", "tapajos", "pará", "para state", "amazonas",
-            "rondônia", "mato grosso", "cuiu cuiu",
+            "carajás", "carajas", "minas gerais", "quadrilátero ferrífero",
+            "quadrilatero ferrifero", "bahia", "goiás", "rondônia",
+            "mato grosso",
+        ],
+    },
+    "tapajos_archean": {
+        # Tapajós and adjacent Archean–Paleoproterozoic greenstone belts
+        # (Cuiú Cuiú, Tocantinzinho, Coringa, São Jorge, Palito). Same
+        # geological family as West African Birimian / Guiana Shield /
+        # Tanzania Archean orogenic gold — belongs in the
+        # archean_greenstone compatibility group.
+        "countries": ["brazil"],
+        "regions": [
+            "tapajós", "tapajos", "tapajós region", "tapajos region",
+            "tapajós mineral province", "tapajos mineral province",
+            "cuiú cuiú", "cuiu cuiu", "tocantinzinho", "coringa",
+            "são jorge", "sao jorge", "palito", "pará", "para state",
+            "amazonas", "gurupi",
         ],
     },
     "trans_hudson_orogen": {
         # Trans-Hudson Orogen — Saskatchewan / Manitoba / Nunavut greenstone
         # belts. Hosts orogenic gold (Goldfields, Seabee, Wheaton River) and
-        # the Athabasca uranium basin to the north. Distinct from Abitibi
-        # (Superior craton) — same continent, different orogen.
-        "countries": ["canada"],
+        # the Athabasca uranium basin to the north. Extends south into the
+        # Black Hills (Homestake — BIF-hosted Archean gold) along the
+        # Wyoming Craton edge. Distinct from Abitibi (Superior craton) —
+        # same continent, different orogen.
+        "countries": ["canada", "usa"],
         "regions": [
             "saskatchewan", "northern saskatchewan", "manitoba",
             "athabasca", "reindeer", "glennie", "flin flon",
             "goldfields", "seabee", "lynn lake", "thompson",
+            # Black Hills / Homestake — South Dakota, Wyoming Craton margin
+            "black hills", "homestake", "lead", "lawrence county",
+            "south dakota", "wyoming craton",
         ],
     },
     "guiana_shield": {
@@ -405,8 +429,39 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
         "regions": ["bushveld", "rustenburg", "merensky", "ug2", "platreef"],
     },
     "west_african_birimian": {
-        "countries": ["ghana", "mali", "burkina faso", "senegal", "ivory coast", "guinea"],
-        "regions": ["birimian", "ashanti"],
+        # Birimian greenstone-orogenic gold + base metals, extends across
+        # West Africa from Mauritania/Senegal in the west through Liberia
+        # / Sierra Leone / Côte d'Ivoire / Ghana to Burkina Faso / Niger.
+        # Côte d'Ivoire aliases listed in straight-ASCII form because
+        # `_norm()` flattens curly apostrophes (U+2019) to U+0027.
+        "countries": [
+            "ghana", "mali", "burkina faso", "senegal", "ivory coast",
+            "côte d'ivoire", "cote d'ivoire", "republic of côte d'ivoire",
+            "guinea", "liberia", "sierra leone", "mauritania", "niger",
+            "togo", "benin",
+        ],
+        "regions": [
+            "birimian", "ashanti", "sefwi", "asankrangwa", "kibi",
+            "houndé", "hounde", "banfora", "boromo", "loulo",
+            "kédougou-kéniéba", "kedougou", "siguiri", "lefa",
+        ],
+    },
+    "kibara_belt": {
+        # Kibaran / Karagwe-Ankole orogen — Mesoproterozoic orogenic gold +
+        # Sn-Ta in DRC South Kivu / Burundi / Rwanda / NW Tanzania. Geology
+        # is greenstone-orogenic; analogs should be drawn from the Archean
+        # greenstone compatibility group, NOT the Lufilian Copperbelt
+        # (which is sediment-hosted Cu and structurally different).
+        "countries": [
+            "democratic republic of the congo", "democratic republic of congo",
+            "drc", "dr congo", "congo", "burundi", "rwanda", "uganda",
+            "tanzania",
+        ],
+        "regions": [
+            "kibara", "kibaran", "karagwe-ankole", "karagwe ankole",
+            "fizi", "south kivu", "misisi", "twangiza", "namoya",
+            "kamituga",
+        ],
     },
     "tanzania_archean": {
         "countries": ["tanzania", "kenya"],
@@ -459,6 +514,73 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
         "countries": ["portugal", "spain"],
         "regions": ["iberian pyrite belt", "ipb", "alentejo", "huelva"],
     },
+    "tethyan_arc": {
+        # Tethyan / Carpathian-Balkan / Caucasus / Anatolide arc —
+        # Phanerozoic Cu-Au porphyry + high-sulfidation epithermal province
+        # running from the Eastern Alps through the Carpathian-Balkan
+        # (Serbia / Romania / Bulgaria), the Pontides (Turkey), the Lesser
+        # Caucasus (Georgia / Armenia) into Iran. Canonical members:
+        # Bor / Majdanpek / Timok (Serbia), Roşia Montană (Romania),
+        # Chelopech / Elatsite (Bulgaria), Çöpler (Turkey), Bolnisi /
+        # Madneuli (Georgia), Kaymas (Iran).
+        "countries": [
+            "serbia", "republic of serbia", "romania", "bulgaria",
+            "turkey", "türkiye", "turkiye", "greece", "north macedonia",
+            "macedonia", "kosovo", "georgia", "armenia", "azerbaijan",
+            "iran", "islamic republic of iran",
+        ],
+        "regions": [
+            "tethyan", "carpathian-balkan", "carpathian", "balkan",
+            "apuseni", "south apuseni", "bor", "timok", "majdanpek",
+            "chelopech", "elatsite", "roşia montană", "rosia montana",
+            "pontides", "eastern pontides", "anatolide", "tauride",
+            "lesser caucasus", "bolnisi", "madneuli",
+        ],
+    },
+    "pine_creek_orogen": {
+        # Pine Creek Orogen — Paleoproterozoic greenstone-orogenic gold
+        # province in the Northern Territory of Australia. Geologically
+        # analogous to Birimian / Trans-Hudson / Tanzania Archean — fluid
+        # chemistry and host stratigraphy (turbidite + mafic volcanics
+        # under amphibolite-grade metamorphism) place it in the
+        # archean_greenstone compatibility group.
+        "countries": ["australia"],
+        "regions": [
+            "pine creek", "pine creek province", "pine creek orogen",
+            "northern territory", "rum jungle", "cosmo deeps",
+            "union reefs", "tom's gully", "toms gully",
+        ],
+    },
+    "new_zealand_otago": {
+        # New Zealand orogenic + Phanerozoic epithermal gold.
+        # Otago Schist (Macraes — turbidite-orogenic) and Hauraki /
+        # Coromandel (low-sulfidation epithermal — Waihi / Martha).
+        # Phanerozoic arc-affinity → grouped with phanerozoic_arc so it
+        # can analog Lachlan / BC / Andean and vice versa.
+        "countries": ["new zealand"],
+        "regions": [
+            "otago", "macraes", "central otago", "hauraki",
+            "coromandel", "waihi", "martha", "wharekirauponga",
+            "reefton",
+        ],
+    },
+    "grenville_province": {
+        # Grenville Province — Mesoproterozoic (~1.1 Ga) collisional
+        # orogen exposed along the south-east edge of the Canadian Shield
+        # (Capitale-Nationale region of Quebec into the Adirondacks,
+        # Ontario). Geologically distinct from the Archean Superior /
+        # Abitibi belts to the north — high-grade gneiss, marble,
+        # anorthosite host rocks; mineralisation is dominantly skarn /
+        # IOCG-related / vein gold in shear zones (e.g. Montauban Au-Zn,
+        # Calumet Pb-Zn). Kept isolated until analog coverage justifies
+        # grouping.
+        "countries": ["canada", "usa"],
+        "regions": [
+            "grenville", "grenville province", "capitale-nationale",
+            "notre-dame-de-montauban", "montauban", "mont-laurier",
+            "charlevoix", "labrador trough", "adirondack", "adirondacks",
+        ],
+    },
 }
 ALL_BELT_SLUGS: FrozenSet[str] = frozenset(TECTONIC_BELTS.keys())
 
@@ -495,6 +617,18 @@ BELT_COMPATIBILITY_GROUPS: Dict[str, FrozenSet[str]] = {
     "archean_greenstone": frozenset({
         "abitibi", "yilgarn", "fennoscandian", "tanzania_archean",
         "west_african_birimian", "trans_hudson_orogen",
+        # 2026-05-26 taxonomy expansion — see TECTONIC_BELTS for rationale.
+        # Tapajós Archean greenstone (Brazil): same host stratigraphy as
+        # West African Birimian under the pre-Gondwana fit.
+        "tapajos_archean",
+        # Pine Creek Orogen (NT Australia): Paleoproterozoic greenstone-
+        # orogenic — fluid chemistry / host rocks consistent with the group.
+        "pine_creek_orogen",
+        # Kibara (DRC / Burundi / Rwanda): Mesoproterozoic but greenstone-
+        # orogenic by mineralisation style. Was being mis-tagged as
+        # central_african_copperbelt (sediment-hosted Cu) which blocked
+        # all sensible analogs.
+        "kibara_belt",
     }),
     # Guiana Shield — Birimian-equivalent age, but kept strict per the
     # May-2026 Cartier audit (see archean_greenstone note).
@@ -514,6 +648,15 @@ BELT_COMPATIBILITY_GROUPS: Dict[str, FrozenSet[str]] = {
         "bc_quesnel_stikine", "yukon_tintina", "laramide_southwest",
         "andean", "indonesia_philippines_arc", "lachlan",
         "central_asian_orogenic",
+        # 2026-05-26 taxonomy expansion.
+        # Tethyan / Carpathian-Balkan / Caucasus Cu-Au porphyry +
+        # epithermal — same fluid chemistry and Phanerozoic arc setting as
+        # the existing members. Lets Bor (Serbia) / Çöpler (Turkey) /
+        # Bolnisi (Georgia) analog against Andean / BC / Lachlan canonicals.
+        "tethyan_arc",
+        # New Zealand Otago (turbidite-orogenic) + Hauraki/Coromandel
+        # (LS-epithermal). Phanerozoic; sits naturally in this group.
+        "new_zealand_otago",
     }),
     # Newfoundland Appalachian — distinct Caledonide / Acadian orogen
     # accreted to Laurentia. Strict; canonical members Valentine /
@@ -535,6 +678,10 @@ BELT_COMPATIBILITY_GROUPS: Dict[str, FrozenSet[str]] = {
     "brazilian_shield": frozenset({"brazilian_shield"}),
     # New Caledonia laterite — strict (Ni laterite province).
     "new_caledonia_laterite": frozenset({"new_caledonia_laterite"}),
+    # Grenville Province — strict; Mesoproterozoic collisional orogen, host
+    # rocks and mineralisation style don't match any other entry until we
+    # accumulate more Grenville analogs in the library.
+    "grenville_province": frozenset({"grenville_province"}),
 }
 
 
@@ -984,7 +1131,20 @@ RECOVERY_INCOMPATIBILITY: Dict[str, FrozenSet[str]] = {
 # ── Detection helpers ────────────────────────────────────────────────────────
 
 def _norm(s: Optional[str]) -> str:
-    return (s or "").strip().lower()
+    """Lowercase, strip, and normalise common Unicode punctuation that
+    breaks naive `in` matching against ASCII keywords. Curly apostrophes
+    (U+2019) and similar variants are flattened to straight ASCII so
+    `"côte d'ivoire"` matches `"Côte d’Ivoire"` after the user's enrichment
+    pipeline stores whichever variant the source HTML produced."""
+    if not s:
+        return ""
+    return (
+        s.strip().lower()
+         .replace("’", "'")  # right single quotation mark → apostrophe
+         .replace("‘", "'")  # left single quotation mark
+         .replace("ʼ", "'")  # modifier letter apostrophe
+         .replace("´", "'")  # acute accent (sometimes used as quote)
+    )
 
 
 def detect_subtype(
