@@ -658,6 +658,164 @@ def _predict_inferred_axis(
     else:
         sigma_logT = 1.0  # wide default — single analog gives little spread info
 
+    # ── Drilling-intensity signal for the Inferred axis ─────────────────────
+    # The geometric mean of analog Inferred tonnages caps the prediction at
+    # the pool max — wrong physics when the project has drilled MORE
+    # extensively (more meters, larger area) than its analogs. Add
+    # drilling-intensity signals so a 165 000 m / 8.5 km² project can
+    # predict a LARGER Inferred than an analog with 60 000 m / 3 km², in
+    # direct proportion to the drilling delta.
+    #
+    # Two parallel signals: tonnage-per-meter and tonnage-per-km². Both
+    # fuse into the Inferred posterior via precision-weighted log-space
+    # combination (same information-form math as the M&I axis), with σ
+    # floors that make them "supportive but not dominant" relative to the
+    # analog-GM signal.
+    #
+    # Stage-mismatch correction: when the analogs in the pool are at later
+    # stages than the project (typical: producing mines vs exploration-
+    # stage project), the analog's `Inferred / meters` ratio
+    # UNDER-estimates the project's Inferred-per-meter — the analog has
+    # done years of infill drilling that upgraded most of its halo to
+    # M&I, leaving small residual Inferred; the project hasn't done that
+    # infill yet, so its Inferred-per-meter ratio is structurally larger.
+    # Inflation factor of 1.6× per stage gap (median across the analogs
+    # with drilling data) re-bases the signal back to the project's stage.
+    STAGE_RANK = {
+        "exploration": 1, "early_exploration": 1, "exploration_stage": 1,
+        "advanced_exploration": 2, "advanced exploration": 2,
+        "scoping": 2, "preliminary_economic_assessment": 2, "pea": 2,
+        "pre_feasibility": 3, "prefeasibility": 3, "pre-feasibility": 3, "pfs": 3,
+        "feasibility": 4, "bankable_feasibility": 4, "bankable_feasibility_study": 4, "bfs": 4, "dfs": 4,
+        "construction": 5,
+        "production": 6, "producing": 6, "operating": 6, "operations": 6, "operating mine": 6,
+    }
+    proj_stage = (project.get("project_stage_class")
+                  or project.get("project_stage") or "").lower().strip()
+    project_rank = STAGE_RANK.get(proj_stage)
+
+    project_drill = project.get("drilling_evidence") or {}
+    project_m   = project_drill.get("total_meters_drilled")
+    project_km2 = project_drill.get("drilled_area_km2")
+
+    drill_per_m_logs: List[float]   = []
+    drill_per_m_w: List[float]      = []
+    drill_per_km2_logs: List[float] = []
+    drill_per_km2_w: List[float]    = []
+    stage_gaps: List[int]           = []
+    for a, w in zip(valid_analogs, inf_weights):
+        a_inf_t = a.get("inferred_tonnage_mt")
+        if not a_inf_t or float(a_inf_t) <= 0:
+            continue
+        a_drill = a.get("drilling_evidence") or {}
+        a_m = a_drill.get("total_meters_drilled")
+        a_km2 = a_drill.get("drilled_area_km2")
+        a_stage = (a.get("project_stage_class")
+                   or a.get("project_stage") or "").lower().strip()
+        a_rank = STAGE_RANK.get(a_stage)
+        if project_rank is not None and a_rank is not None:
+            stage_gaps.append(a_rank - project_rank)
+        if a_m and float(a_m) > 0:
+            drill_per_m_logs.append(math.log(float(a_inf_t)) - math.log(float(a_m)))
+            drill_per_m_w.append(float(w))
+        if a_km2 and float(a_km2) > 0:
+            drill_per_km2_logs.append(math.log(float(a_inf_t)) - math.log(float(a_km2)))
+            drill_per_km2_w.append(float(w))
+
+    # Median stage gap (positive = analogs more mature than project)
+    if stage_gaps:
+        srt = sorted(stage_gaps)
+        median_gap = srt[len(srt) // 2]
+    else:
+        median_gap = 0
+    # Inflation: 1.6× per stage gap, capped at 4 gaps (producer→exploration).
+    # Each stage of infill drilling typically converts ~30–40% of residual
+    # Inferred into M&I; reversing 4 cycles of that compounds to ~6×.
+    inflation = (1.6 ** max(0, min(median_gap, 4)))
+    if inflation > 1.0:
+        logger.info(
+            f"[Model1] Inferred drilling-signal stage-mismatch inflation: "
+            f"{inflation:.2f}× (median analog {median_gap} stage(s) more mature "
+            f"than project)"
+        )
+
+    # Data-completeness gate: skip a drilling-intensity signal unless ≥75%
+    # of analogs with Inferred data also have the matching drilling field.
+    # Partial data biases the signal toward whichever analogs happen to
+    # carry drilling totals — for Cadillac that meant Lamaque + Westwood
+    # (both producing mines with massive cumulative drill metres but
+    # tiny remaining Inferred) dominated, dragging the prediction down
+    # by an order of magnitude. With the gate, partial-data pools fall
+    # back to the analog-GM posterior and the drilling signal only fires
+    # when the full pool is informative.
+    completeness_threshold = 0.75
+    n_eligible = len(raw_T_logs)  # analogs that contributed to inferred axis
+    n_with_m = len(drill_per_m_logs)
+    n_with_km2 = len(drill_per_km2_logs)
+    m_complete = (n_eligible > 0 and n_with_m / n_eligible >= completeness_threshold)
+    km2_complete = (n_eligible > 0 and n_with_km2 / n_eligible >= completeness_threshold)
+
+    drill_signals: List[Tuple[float, float, str]] = []
+    if drill_per_m_logs and project_m and float(project_m) > 0 and m_complete:
+        W = sum(drill_per_m_w)
+        log_ratio = sum(w * r for w, r in zip(drill_per_m_w, drill_per_m_logs)) / W
+        mu_drill_T = math.log(float(project_m)) + log_ratio + math.log(inflation)
+        sigma_drill_T = 0.35
+        drill_signals.append((mu_drill_T, sigma_drill_T, "per_m"))
+        logger.info(
+            f"[Model1] Inferred drilling-per-meter signal: "
+            f"{math.exp(mu_drill_T):.1f} Mt "
+            f"(project {project_m} m × geomean ratio × {inflation:.2f} stage inflation, "
+            f"n={n_with_m}/{n_eligible})"
+        )
+    elif drill_per_m_logs and not m_complete:
+        logger.info(
+            f"[Model1] Inferred drilling-per-meter signal SKIPPED: "
+            f"only {n_with_m}/{n_eligible} analogs have drilling-meter data "
+            f"(need ≥{completeness_threshold*100:.0f}% — partial data biases "
+            f"signal toward analogs that happen to carry the field)"
+        )
+
+    if drill_per_km2_logs and project_km2 and float(project_km2) > 0 and km2_complete:
+        W = sum(drill_per_km2_w)
+        log_ratio = sum(w * r for w, r in zip(drill_per_km2_w, drill_per_km2_logs)) / W
+        mu_drill_A = math.log(float(project_km2)) + log_ratio + math.log(inflation)
+        sigma_drill_A = 0.35
+        drill_signals.append((mu_drill_A, sigma_drill_A, "per_km2"))
+        logger.info(
+            f"[Model1] Inferred drilling-per-km² signal: "
+            f"{math.exp(mu_drill_A):.1f} Mt "
+            f"(project {project_km2} km² × geomean ratio × {inflation:.2f} stage inflation, "
+            f"n={n_with_km2}/{n_eligible})"
+        )
+    elif drill_per_km2_logs and not km2_complete:
+        logger.info(
+            f"[Model1] Inferred drilling-per-km² signal SKIPPED: "
+            f"only {n_with_km2}/{n_eligible} analogs have drilled-area data"
+        )
+
+    if drill_signals:
+        # Precision-weighted log-space fusion of the analog-GM signal with
+        # each drilling-intensity signal. Information form: Λ_post = Σ 1/σ²,
+        # η_post = Σ μ/σ², μ_post = η_post / Λ_post. Lets the analog GM and
+        # the drilling signals both vote; if they agree, σ tightens; if
+        # they disagree, the precision-weighted mean lands between them.
+        prec_total = 1.0 / (sigma_logT * sigma_logT)
+        eta_total  = mu_logT / (sigma_logT * sigma_logT)
+        for mu, sig, _ in drill_signals:
+            prec = 1.0 / (sig * sig)
+            prec_total += prec
+            eta_total  += prec * mu
+        mu_logT_fused = eta_total / prec_total
+        sigma_logT_fused = math.sqrt(1.0 / prec_total)
+        logger.info(
+            f"[Model1] Inferred fusion: analog-GM {math.exp(mu_logT):.1f} Mt ⊕ "
+            f"{len(drill_signals)} drilling signal(s) → posterior "
+            f"{math.exp(mu_logT_fused):.1f} Mt (σ {sigma_logT:.2f} → "
+            f"{sigma_logT_fused:.2f})"
+        )
+        mu_logT, sigma_logT = mu_logT_fused, sigma_logT_fused
+
     if inf_G_logs:
         W_G = sum(w_G)
         mu_logG = sum(w * lg for w, lg in zip(w_G, inf_G_logs)) / W_G
