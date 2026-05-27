@@ -276,10 +276,35 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
     conviction_tier carries the full human label.
     """
     material = project.get("material") or ""
-    mi_kt   = float(model.get("mi_tonnage_kt") or 0)
-    mi_g    = model.get("mi_grade_pct")
-    inf_kt  = float(model.get("inferred_tonnage_kt") or 0)
-    inf_g   = model.get("inferred_grade_pct")
+
+    # When the project carries a published MRE breakdown on the projects.
+    # mre_* columns, prefer those values directly over the heuristic split
+    # the model computed. The model's per-bucket split is a best-effort
+    # estimate from analog/lesson patterns; if the operator has published
+    # the actual Measured+Indicated and Inferred breakdown, use the real
+    # numbers. Cadillac's published MRE is M&I 9.9 Mt @ 2.40 + Inferred
+    # 35 Mt @ 2.14 — the heuristic 75/25 split of model.total_tonnage
+    # would only give M&I 7.5 Mt and Inferred 2.5 Mt, missing the huge
+    # Inferred halo that Cartier reports.
+    mre_mi_t  = project.get("mre_mi_tonnage_mt")
+    mre_mi_g  = project.get("mre_mi_grade")
+    mre_inf_t = project.get("mre_inferred_tonnage_mt")
+    mre_inf_g = project.get("mre_inferred_grade")
+    breakdown_overridden = (
+        is_post_mre
+        and mre_mi_t is not None and mre_mi_g is not None
+        and mre_inf_t is not None and mre_inf_g is not None
+    )
+    if breakdown_overridden:
+        mi_kt   = float(mre_mi_t)  * 1000.0
+        mi_g    = float(mre_mi_g)
+        inf_kt  = float(mre_inf_t) * 1000.0
+        inf_g   = float(mre_inf_g)
+    else:
+        mi_kt   = float(model.get("mi_tonnage_kt") or 0)
+        mi_g    = model.get("mi_grade_pct")
+        inf_kt  = float(model.get("inferred_tonnage_kt") or 0)
+        inf_g   = model.get("inferred_grade_pct")
 
     mi_mt       = _round(mi_kt / 1000.0) if mi_kt else None
     inferred_mt = _round(inf_kt / 1000.0) if inf_kt else None

@@ -1128,6 +1128,7 @@ def build_model_1(
         mineralization_pattern,
         project.get("project_stage") or "",
         mine_life_years=project.get("mine_life_years"),
+        resource_category=project.get("resource_category"),
     )
     mi_mt  = total_mt * mi_frac
     inf_mt = total_mt * inf_frac

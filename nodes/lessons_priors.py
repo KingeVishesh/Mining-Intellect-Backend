@@ -202,10 +202,19 @@ def mi_inferred_split(
     mineralization_pattern: str,
     project_stage: str,
     mine_life_years: float = None,
+    resource_category: str = None,
 ) -> Tuple[float, float]:
     """Return `(mi_frac, inf_frac)` summing to 1.0.
 
     Order of precedence (most specific first):
+      0. Resource-category hint. When the published MRE category tells us
+         which classes are actually reported (e.g. "Measured & Indicated
+         & Inferred", "Indicated + Inferred", "Inferred only"), use that
+         as the strongest signal — it's the operator's own statement of
+         the deposit's confidence breakdown. This trumps stage-based
+         heuristics because some projects publish full M+I at the PEA
+         stage (Cartier Cadillac) while others stay Inferred-only well
+         into pre-feasibility.
       1. Mature near-depleted epithermal vein with <2yr mine life
          → M&I 0.87, Inferred 0.13  (L143: "Inferred = 10–15% of M&I")
       2. Bulk Carlin/orogenic with low-grade halos at mid+ stage
@@ -224,6 +233,27 @@ def mi_inferred_split(
     mp = (mineralization_pattern or "").lower()
     stage = _classify_stage(project_stage)
     family = _classify_deposit_family(deposit_type, mineralization_pattern)
+
+    # 0. Resource-category hint — the published MRE category names the
+    # buckets that actually exist. Use as the strongest signal.
+    rc = (resource_category or "").lower()
+    has_measured  = "measured" in rc
+    has_indicated = "indicated" in rc
+    has_inferred  = "inferred" in rc
+    if has_measured and has_indicated and has_inferred:
+        # Full M+I+Inferred reported. M&I dominates for orogenic vein
+        # PEAs that include Measured (Cartier-Cadillac falls here).
+        return 0.75, 0.25
+    if has_indicated and has_inferred and not has_measured:
+        # Indicated + Inferred (no Measured). Typical mid-PEA stage.
+        return 0.65, 0.35
+    if has_inferred and not (has_measured or has_indicated):
+        # Inferred-only — early stage; nothing in M&I bucket
+        return 0.0, 1.0
+    if has_measured and has_indicated and not has_inferred:
+        # M&I only (no Inferred). Mature operating mines sometimes
+        # report this when all upside is converted to reserves.
+        return 1.0, 0.0
 
     is_vein = family == "vein"
     is_epithermal = "epithermal" in dt

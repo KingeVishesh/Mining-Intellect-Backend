@@ -16,8 +16,8 @@
   "mining_method": "Underground",
   "recovery_rate": 96.3,
   "mine_life_years": 9.7,
-  "tonnage_mt": 9.9,
-  "grade_value": 2.4,
+  "tonnage_mt": 44.9,
+  "grade_value": 2.197,
   "grade_unit": "g/t Au",
   "strike_length_meters": null,
   "width_meters": null,
@@ -137,5 +137,11 @@
     "report_cutoff_date": "2022-08-22",
     "extracted_at": "2026-05-26T00:56:29.799965+00:00",
     "notes": "Drilling stats cumulative from Chimo (3658 holes, 290419 m as of 2020-09-01) + West Nordeau (154 holes, 55097 m as of 2022-07-12). Grade is average mined grade from PEA."
-  }
+  },
+  "mre_mi_tonnage_mt": 9.9,
+  "mre_mi_grade": 2.4,
+  "mre_mi_contained": 23.76,
+  "mre_inferred_tonnage_mt": 35.0,
+  "mre_inferred_grade": 2.14,
+  "mre_inferred_contained": 74.9
 }
