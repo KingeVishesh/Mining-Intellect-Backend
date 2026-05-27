@@ -942,6 +942,70 @@ def save_analog_drilling_evidence(
     logger.info(f"[DB] drilling_evidence saved for analog '{analog_name}'")
 
 
+def get_analog_inferred_data(
+    analog_name: str, material: str,
+) -> Tuple[Optional[Dict], Optional[str]]:
+    """Look up the cached Inferred breakdown for an analog by (name, material).
+    Returns ({inferred_tonnage_mt, inferred_grade}, fetched_at_iso) or
+    (None, None) when the analog hasn't been extracted yet. A row that
+    HAS been extracted but reported null for both fields (analog has no
+    Inferred or no M&I/Inferred breakdown) returns
+    ({inferred_tonnage_mt: None, inferred_grade: None}, iso) so callers
+    know not to refetch within the staleness window.
+    """
+    res = (
+        get_client().table("analogs")
+        .select("analog_inferred_tonnage_mt,analog_inferred_grade,inferred_extracted_at")
+        .eq("analog_name", analog_name)
+        .ilike("analog_material", material)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if not rows:
+        return None, None
+    row = rows[0]
+    if row.get("inferred_extracted_at") is None:
+        return None, None
+    return (
+        {
+            "inferred_tonnage_mt": row.get("analog_inferred_tonnage_mt"),
+            "inferred_grade":      row.get("analog_inferred_grade"),
+        },
+        row.get("inferred_extracted_at"),
+    )
+
+
+def save_analog_inferred_data(
+    analog_name: str, material: str,
+    inferred_tonnage_mt: Optional[float],
+    inferred_grade: Optional[float],
+) -> None:
+    """Persist the analog's M&I + Inferred breakdown across every analogs
+    row matching (name, material). The same library analog can appear in
+    many reports; we want a single canonical value shared across them.
+
+    NULLs are persisted (they mean "extraction attempted, no data found")
+    so the staleness window suppresses re-fetches.
+    """
+    payload = {
+        "analog_inferred_tonnage_mt": inferred_tonnage_mt,
+        "analog_inferred_grade":      inferred_grade,
+        "inferred_extracted_at":      datetime.now(timezone.utc).isoformat(),
+    }
+    (
+        get_client().table("analogs")
+        .update(payload)
+        .eq("analog_name", analog_name)
+        .ilike("analog_material", material)
+        .execute()
+    )
+    logger.info(
+        f"[DB] inferred data saved for analog '{analog_name}': "
+        f"{inferred_tonnage_mt} Mt @ {inferred_grade}"
+    )
+
+
 def _analog_row(
     a: Dict,
     project_id: str,

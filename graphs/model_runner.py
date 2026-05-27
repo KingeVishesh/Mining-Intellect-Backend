@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 
 from nodes import supabase_ops, model_builder, drilling_extractor
-from nodes import ni_43_101_extractor, rules_engine
+from nodes import ni_43_101_extractor, rules_engine, inferred_extractor
 from graphs.report_generator import (
     load_project_and_analogs_node,
     load_rules_node,
@@ -219,6 +219,114 @@ def fetch_drilling_evidence_node(state: ModelRunnerState) -> ModelRunnerState:
             enriched_analogs.append(a)
 
     return {"project": project, "analogs": enriched_analogs}
+
+
+def fetch_inferred_evidence_node(state: ModelRunnerState) -> ModelRunnerState:
+    """Pull or refresh the M&I + Inferred breakdown for each analog.
+
+    The independent-axis Inferred predictor in `build_model_1` reads
+    `inferred_tonnage_mt` / `inferred_grade` off each analog dict. The
+    production `analogs` table was built without those fields; this node
+    backfills them on first use and caches the result on the row.
+
+    Strategy:
+      * For each analog used in this model run, check the cached value.
+      * If absent or stale (>90 days), call the Exa-based extractor and
+        save the result to `public.analogs` for all rows matching
+        (analog_name, material).
+      * Errors are tolerated — `build_model_1` still runs, just without
+        that analog contributing to the Inferred-axis posterior.
+
+    No top-N cap here (unlike drilling): inferred extraction is cheaper
+    (one Exa call per unique analog name), the cache is sticky (90-day
+    staleness window), and Inferred-axis fusion benefits from MORE
+    analogs, not just the top few.
+    """
+    if state.get("error"):
+        return {}
+
+    project = state.get("project") or {}
+    analogs = state.get("analogs") or []
+    if not analogs:
+        return {}
+
+    project_material = project.get("material") or ""
+    force = bool(state.get("fetch_recent_drill_holes"))
+
+    enriched: List[Dict] = []
+    # Dedupe by (analog_name, material) within this run so we don't hit
+    # Exa twice for the same analog appearing on multiple rows.
+    seen: Dict[str, Dict] = {}
+    for a in analogs:
+        name = (a.get("name") or "").strip()
+        material = (a.get("material") or project_material or "").strip()
+        if not name:
+            enriched.append(a)
+            continue
+
+        key = f"{name.lower()}|{material.lower()}"
+
+        # 1. Already inlined on the analog dict (backtest fixtures path)
+        if a.get("inferred_tonnage_mt") is not None or a.get("inferred_grade") is not None:
+            enriched.append(a)
+            seen[key] = {
+                "inferred_tonnage_mt": a.get("inferred_tonnage_mt"),
+                "inferred_grade":      a.get("inferred_grade"),
+            }
+            continue
+
+        # 2. Resolved already in this run
+        if key in seen:
+            enriched.append({**a, **seen[key]})
+            continue
+
+        # 3. Cached on the analogs row?
+        try:
+            cached, cached_at = supabase_ops.get_analog_inferred_data(name, material)
+        except Exception as e:
+            logger.warning(f"[fetch_inferred] DB lookup failed for '{name}': {e}")
+            cached, cached_at = None, None
+
+        if cached is not None and not inferred_extractor.should_refetch(cached, cached_at, force=force):
+            enriched.append({**a, **cached})
+            seen[key] = cached
+            continue
+
+        # 4. Fetch fresh from Exa
+        ev = inferred_extractor.extract_inferred_breakdown(
+            analog_name=name,
+            material=material,
+            country=a.get("country"),
+            region=a.get("region"),
+            deposit_type=a.get("deposit_type"),
+        )
+
+        if ev:
+            inf_t = ev.get("inferred_tonnage_mt")
+            inf_g = ev.get("inferred_grade")
+        else:
+            # Extraction failed — persist NULLs anyway so the staleness
+            # window suppresses re-fetches for 90 days. Avoids hammering
+            # Exa with the same fail every run.
+            inf_t, inf_g = None, None
+
+        try:
+            supabase_ops.save_analog_inferred_data(name, material, inf_t, inf_g)
+        except Exception as e:
+            logger.warning(f"[fetch_inferred] DB save failed for '{name}': {e}")
+
+        cached_now = {"inferred_tonnage_mt": inf_t, "inferred_grade": inf_g}
+        seen[key] = cached_now
+        enriched.append({**a, **cached_now})
+
+    n_with_inferred = sum(
+        1 for a in enriched if a.get("inferred_tonnage_mt") is not None
+    )
+    logger.info(
+        f"[fetch_inferred] {n_with_inferred}/{len(enriched)} analog(s) carry "
+        f"inferred_tonnage_mt for build_model_1's Inferred axis"
+    )
+    return {"analogs": enriched}
 
 
 def _route_after_check(state: ModelRunnerState) -> str:
@@ -428,6 +536,7 @@ builder = StateGraph(ModelRunnerState)
 builder.add_node("load_project_and_analogs", load_project_and_analogs_node)
 builder.add_node("check_analogs_present", check_analogs_present_node)
 builder.add_node("fetch_drilling_evidence", fetch_drilling_evidence_node)
+builder.add_node("fetch_inferred_evidence", fetch_inferred_evidence_node)
 builder.add_node("load_rules", load_rules_node)
 builder.add_node("activate_rules", activate_rules_node)
 builder.add_node("build_model", build_model_node)
@@ -439,7 +548,8 @@ builder.add_conditional_edges("check_analogs_present", _route_after_check, {
     "fetch_drilling_evidence": "fetch_drilling_evidence",
     END: END,
 })
-builder.add_edge("fetch_drilling_evidence", "load_rules")
+builder.add_edge("fetch_drilling_evidence", "fetch_inferred_evidence")
+builder.add_edge("fetch_inferred_evidence", "load_rules")
 builder.add_edge("load_rules", "activate_rules")
 builder.add_edge("activate_rules", "build_model")
 builder.add_edge("build_model", "save_model_run")
