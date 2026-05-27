@@ -885,6 +885,13 @@ def build_model_1(
                       sum(w) if sum(w) else 0.0)
     pre_drill_mu_G = (sum(w_ * lg for w_, lg in zip(w, [log_G_all[i] for i in keep_idx])) /
                       sum(w) if sum(w) else 0.0)
+    # Stage-mismatch detection — set when drilling-T agrees with the
+    # L151 prior but strongly disagrees with the analog pool. Signals
+    # that the analog pool is the wrong scale class for this project
+    # (e.g. Cadillac PEA at 9.9 Mt vs analog majors at 30-110 Mt). Used
+    # below to tighten the drilling-G σ so the joint posterior's ρ pull
+    # is countered by the drilling grade signal rather than blowing G up.
+    drilling_T_corroborated = False
     if drilling_T is not None:
         mu_dT, sigma_dT = drilling_T
         # Two-reference consistency check: accept the drilling signal when
@@ -898,6 +905,9 @@ def build_model_1(
         deviation_T_prior = (abs(mu_dT - mu_T_prior) / max(sigma_T_prior, 0.1)
                              if sigma_T_prior > 0 else float("inf"))
         deviation_T = min(deviation_T_analog, deviation_T_prior)
+        drilling_T_corroborated = (
+            deviation_T_prior <= 1.0 and deviation_T_analog > 2.0
+        )
         if deviation_T <= 2.0:
             prec = 1.0 / (sigma_dT * sigma_dT)
             Laa_00 += prec
@@ -931,6 +941,18 @@ def build_model_1(
         n_intercepts = len((project_drilling or {}).get("best_intercepts") or [])
         is_report_grade = drilling_audit.get("grade_signal_kind") == "report_derived"
         mu_dG, sigma_dG = drilling_G
+        # Corroboration-based σ tightening. When the drilling-T signal
+        # corroborated the L151 prior (against an off-scale analog pool),
+        # the drilling source is internally consistent — trust its grade
+        # too. Tighter σ on G counters the analog ρ's tendency to pull
+        # G the wrong way when T is yanked off the analog centroid.
+        # Cadillac: report-grade σ goes 1.20 → 0.40, G predict 7.08 → ~3.
+        if drilling_T_corroborated and is_report_grade:
+            sigma_dG = 0.25
+            logger.info(
+                f"[Model] Drilling-G σ tightened to {sigma_dG} (analog stage-mismatch "
+                f"corroborated by prior → trust drilling source's grade reading)"
+            )
         deviation_G = abs(mu_dG - pre_drill_mu_G) / max(sigma_logG, 0.1)
         intercept_check_ok = is_report_grade or n_intercepts >= 3
         if intercept_check_ok and deviation_G <= 2.0:
@@ -1000,6 +1022,31 @@ def build_model_1(
     sigma_logG = math.sqrt(max(Spp_11, 1e-9))
     rho = Spp_01 / max(sigma_logT * sigma_logG, 1e-9)
     rho = max(-0.99, min(0.99, rho))
+
+    # Marginal-G override under analog stage-mismatch. When the drilling-T
+    # signal corroborated the L151 prior against an off-scale analog pool,
+    # the analog pool's ρ reflects ITS T–G structure, not the project's.
+    # Propagating the (correct) T-pull-down through that ρ yanks G in the
+    # wrong direction — Cadillac's grade blew up to 7.08 g/t (true 2.4)
+    # because of this. Recompute μ_logG from the marginal G signals only
+    # (analog μ_G + drilling-G, no ρ cross-talk). Keep the joint μ_logT —
+    # that one was driven correctly by drilling + prior.
+    if drilling_T_corroborated and drilling_G is not None:
+        mu_dG_marg, sigma_dG_marg = drilling_G
+        if drilling_audit.get("grade_signal_kind") == "report_derived":
+            sigma_dG_marg = 0.25  # match the tightened σ from earlier
+        prec_g_analog = 1.0 / max(sG2, 1e-6)
+        prec_g_drill  = 1.0 / max(sigma_dG_marg * sigma_dG_marg, 1e-6)
+        total_prec = prec_g_analog + prec_g_drill
+        mu_logG = (prec_g_analog * pre_drill_mu_G
+                   + prec_g_drill * mu_dG_marg) / total_prec
+        sigma_logG = math.sqrt(1.0 / total_prec)
+        rho = 0.0  # ρ is no longer meaningful — independent G axis
+        logger.info(
+            f"[Model] Marginal-G override: μ_G {math.exp(mu_logG):.2f} "
+            f"(analog {math.exp(pre_drill_mu_G):.2f} + drilling-G "
+            f"{math.exp(mu_dG_marg):.2f}, σ={sigma_logG:.2f})"
+        )
 
     # Posterior on log(contained) = log(T) + log(G).
     # var(log C) = σ²_T + σ²_G + 2 ρ σ_T σ_G. Note that fusing geometry with
