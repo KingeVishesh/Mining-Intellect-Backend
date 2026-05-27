@@ -236,31 +236,40 @@ def _round(x: Optional[float], digits: int = 4) -> Optional[float]:
 
 _PRECIOUS_METALS = {"gold", "silver", "platinum", "palladium"}
 
+# Troy ounces per tonne — same constant as model_builder._TROY_OZ_PER_TONNE.
+# Duplicated locally to avoid a private-symbol import; the value is fixed by
+# definition (1 troy oz = 31.1034768 g exactly).
+_TROY_OZ_PER_TONNE = 32150.7466
 
-def _contained_tonnes(
+
+def _contained_native_unit(
     tonnage_kt: float,
     grade: Optional[float],
     material: str,
 ) -> Optional[float]:
-    """Contained metal in tonnes — chosen so the table arithmetic is
-    obvious to verify.
+    """Contained metal in the material's industry-reporting unit:
 
-    Precious metals carry grade in g/t. 1 kt of ore × 1 g/t grade = 1 kg
-    of metal = 0.001 t, so contained_t = tonnage_kt × grade_g_t / 1000,
-    which simplifies to tonnage_Mt × grade_g_t. The user reads
-    `15.0 Mt × 1.74 g/t = 26.1 t Au` directly from the row.
+    Precious metals (Au/Ag/Pt/Pd): troy ounces. Grade is g/t, tonnage is
+    kt. 1 kt × 1 g/t = 1 kg metal = 1 / 31.1034768 / 1000 koz ⇒
+    contained_oz = tonnage_kt × grade_g_t × _TROY_OZ_PER_TONNE / 1000.
+    For 9.9 Mt × 2.40 g/t Au this returns ~763,861 oz, matching how
+    Cartier publishes the Cadillac MRE.
 
-    Base metals carry grade in %. 1 kt of ore × 1 % grade = 10 t metal,
-    so contained_t = tonnage_kt × grade_pct × 10 = tonnage_Mt × grade_pct
-    × 10 000. Direct multiplication of the two columns gets you the
-    answer up to that material-specific scale factor.
+    Base metals: tonnes of metal. Grade is %, tonnage is kt. 1 kt × 1 %
+    = 10 t metal ⇒ contained_t = tonnage_kt × grade_pct × 10.
     """
     if not tonnage_kt or grade is None:
         return None
     mat = model_builder._norm_material(material or "")
     if mat in _PRECIOUS_METALS:
-        return tonnage_kt * float(grade) / 1000.0
+        return tonnage_kt * float(grade) * _TROY_OZ_PER_TONNE / 1000.0
     return tonnage_kt * float(grade) * 10.0
+
+
+# Back-compat alias — older code paths in this file call _contained_tonnes.
+# Both names route to the same function; the body itself decides the unit
+# from material (oz for precious, tonnes for base).
+_contained_tonnes = _contained_native_unit
 
 
 def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
@@ -309,11 +318,13 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
     mi_mt       = _round(mi_kt / 1000.0) if mi_kt else None
     inferred_mt = _round(inf_kt / 1000.0) if inf_kt else None
 
-    # Contained metal in tonnes — computed directly from grade × tonnage
-    # so a user can verify the row by eye. For gold (g/t grade), the
-    # formula reduces to mi_tonnage_Mt × mi_grade, no conversion factor.
-    mi_contained_t  = _contained_tonnes(mi_kt, mi_g, material)
-    inf_contained_t = _contained_tonnes(inf_kt, inf_g, material)
+    # Contained metal in the material's industry-reporting unit. For
+    # precious metals (Au/Ag/Pt/Pd) the result is in troy ounces, matching
+    # how NI 43-101 / JORC / SK-1300 disclosures publish the figure (e.g.
+    # Cadillac M&I = 9.9 Mt × 2.40 g/t ≈ 763,861 oz). For base metals the
+    # result is in tonnes of metal.
+    mi_contained_native  = _contained_native_unit(mi_kt, mi_g, material)
+    inf_contained_native = _contained_native_unit(inf_kt, inf_g, material)
 
     # Totals are recomputed from the per-category values so the table is
     # internally consistent: total tonnage = M&I + Inferred, total contained
@@ -322,10 +333,10 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
     total_kt = mi_kt + inf_kt
     total_mt = _round(total_kt / 1000.0) if total_kt else None
 
-    total_contained_t = None
-    if mi_contained_t is not None or inf_contained_t is not None:
-        total_contained_t = _round(
-            (mi_contained_t or 0.0) + (inf_contained_t or 0.0), 3
+    total_contained_native = None
+    if mi_contained_native is not None or inf_contained_native is not None:
+        total_contained_native = _round(
+            (mi_contained_native or 0.0) + (inf_contained_native or 0.0), 3
         )
 
     mi_g_f  = float(mi_g) if mi_g is not None else 0.0
@@ -349,15 +360,15 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
         # Measured + Indicated combined (M&I)
         "mi_tonnage_mt":         mi_mt,
         "mi_grade":              _round(mi_g),
-        "mi_contained":          _round(mi_contained_t, 3),
+        "mi_contained":          _round(mi_contained_native, 3),
         # Inferred
         "inferred_resource_mt":  inferred_mt,
         "inferred_grade":        _round(inf_g),
-        "inferred_contained":    _round(inf_contained_t, 3),
+        "inferred_contained":    _round(inf_contained_native, 3),
         # Totals — derived as sums / weighted average for arithmetic consistency
         "tonnage_mt":            total_mt,
         "grade_value":           avg_grade,
-        "total_contained":       total_contained_t,
+        "total_contained":       total_contained_native,
         # Conviction
         "conviction_score":      tier_code,
         "conviction_tier":       f"{tier_code}: {tier_label}",

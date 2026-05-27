@@ -163,16 +163,33 @@ _Z10 = 1.2815515655446004
 
 _PRECIOUS_METALS = {"gold", "silver", "platinum", "palladium"}
 
+# Industry-standard reporting unit for precious-metal contained metal is the
+# troy ounce. 1 troy oz = 31.1034768 g, so 1 tonne of metal = 1e6 / 31.1034768
+# = 32,150.7466 troy oz. NI 43-101, JORC, and SK-1300 disclosures all report
+# Au/Ag/Pt/Pd in oz (or koz / Moz). Base metals stay in tonnes (or Mlb in the
+# legacy `_contained_metal` path, kept for backward-compatible JSON fields).
+_TROY_OZ_PER_TONNE = 32150.7466
+
 
 def _contained_t_from_mt(tonnage_mt: float, grade: float, material: str) -> float:
-    """Contained metal in tonnes from tonnage in Mt and grade in native units
-    (g/t for precious metals, % for base metals). Chosen so that for precious
-    metals the formula reduces to `tonnage_mt × grade` — no conversion factor —
-    making the row arithmetic verifiable by eye.
+    """Contained metal in the material's industry-reporting unit.
+
+    Precious metals (Au, Ag, Pt, Pd): grade in g/t, tonnage in Mt — the
+    metal-tonnage product `tonnage_mt × grade` is in tonnes of metal, which
+    we convert to troy ounces by multiplying by `_TROY_OZ_PER_TONNE`. So a
+    9.9 Mt × 2.40 g/t gold deposit returns ~764,000 oz, matching how the
+    operator publishes the figure.
+
+    Base metals (% grade, Mt tonnage): `tonnage_mt × grade × 10000` is
+    tonnes of metal — kept in tonnes here; the legacy `_contained_metal`
+    path also emits Mlb for the older `*_contained_mlb` JSON fields.
+
+    Function name retains the `_t_from_mt` suffix for diff stability; the
+    return is OZ for precious, TONNES for base metals.
     """
     mat = _norm_material(material or "")
     if mat in _PRECIOUS_METALS:
-        return tonnage_mt * grade
+        return tonnage_mt * grade * _TROY_OZ_PER_TONNE
     return tonnage_mt * grade * 10000.0
 
 

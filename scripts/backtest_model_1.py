@@ -81,17 +81,23 @@ FIXTURES_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "
 # ── Comparison ────────────────────────────────────────────────────────────────
 
 _PRECIOUS = {"gold", "silver", "platinum", "palladium"}
+_TROY_OZ_PER_TONNE = 32150.7466
 
 
-def _contained_t(tonnage_mt: float, grade: float, material: str) -> float:
-    """Tonnes of contained metal — same formula model_builder uses, kept
-    local here so we can compute the actual MRE's contained without
-    importing private helpers."""
+def _contained_native(tonnage_mt: float, grade: float, material: str) -> float:
+    """Contained metal in the material's industry-reporting unit — same
+    convention model_builder._contained_t_from_mt uses (oz for precious,
+    tonnes for base). Kept local so we can compute the actual MRE's
+    contained without importing private helpers."""
     if tonnage_mt is None or grade is None or tonnage_mt <= 0 or grade <= 0:
         return 0.0
     if _norm_material(material) in _PRECIOUS:
-        return tonnage_mt * grade
+        return tonnage_mt * grade * _TROY_OZ_PER_TONNE
     return tonnage_mt * grade * 10000.0
+
+
+# Back-compat alias for any external scripts that import _contained_t.
+_contained_t = _contained_native
 
 
 def _pct_err(predicted: float, actual: float) -> float:
@@ -132,7 +138,7 @@ def backtest_one(
     material = fixture["material"]
     actual_total_mt = float(fixture["tonnage_mt"])
     actual_grade = float(fixture["grade_value"])
-    actual_contained_t = _contained_t(actual_total_mt, actual_grade, material)
+    actual_contained_t = _contained_native(actual_total_mt, actual_grade, material)
     analogs = fixture.get("analogs", []) or []
 
     # Blank the ground truth so Model 1 can't peek at it. Everything else
@@ -188,10 +194,11 @@ def backtest_one(
     print(f"  Category: {fixture.get('resource_category') or '—'}")
     print("-" * 78)
     print(f"  {'':22s}  {'Predicted':>14s}  {'Actual':>14s}  {'Error':>10s}")
+    contained_unit = "oz" if _norm_material(material) in _PRECIOUS else "t"
     for label, pred, actual, err, ok in (
         ("Total tonnage (Mt)", pred_total_mt, actual_total_mt, err_T, pass_T),
         (f"Grade ({fixture.get('grade_unit') or '–'})", pred_grade, actual_grade, err_G, pass_G),
-        ("Contained (t)",      pred_contained_t, actual_contained_t, err_C, pass_C),
+        (f"Contained ({contained_unit})", pred_contained_t, actual_contained_t, err_C, pass_C),
     ):
         c = _color(err, threshold)
         flag = "PASS" if ok else "FAIL"

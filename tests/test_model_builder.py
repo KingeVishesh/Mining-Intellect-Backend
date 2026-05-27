@@ -56,13 +56,20 @@ def _gold_project(**overrides) -> Dict:
 # ── core math ─────────────────────────────────────────────────────────────────
 
 class TestContainedFromMt:
-    def test_precious_metals_no_conversion(self):
-        # 15 Mt × 1.5 g/t = 22.5 tonnes Au (the chosen unit lets us verify by eye)
-        assert _contained_t_from_mt(15.0, 1.5, "gold") == pytest.approx(22.5)
-        assert _contained_t_from_mt(10.0, 3.0, "silver") == pytest.approx(30.0)
+    def test_precious_metals_in_troy_ounces(self):
+        # Precious metals are reported in troy oz, matching NI 43-101 / JORC /
+        # SK-1300 industry disclosures. 1 tonne of metal = 32,150.7466 oz, so
+        # 15 Mt × 1.5 g/t = 22.5 t Au = 22.5 × 32,150.7466 ≈ 723,392 oz.
+        oz_per_t = 32150.7466
+        assert _contained_t_from_mt(15.0, 1.5, "gold") == pytest.approx(
+            22.5 * oz_per_t, rel=1e-4
+        )
+        assert _contained_t_from_mt(10.0, 3.0, "silver") == pytest.approx(
+            30.0 * oz_per_t, rel=1e-4
+        )
 
     def test_base_metals_scale_by_1e4(self):
-        # 100 Mt × 0.5% = 100 × 0.5 × 1e4 = 500,000 t Cu
+        # Base metals stay in tonnes: 100 Mt × 0.5% = 100 × 0.5 × 1e4 = 500 000 t Cu
         assert _contained_t_from_mt(100.0, 0.5, "copper") == pytest.approx(500_000.0)
 
     def test_zero_inputs_pass_through(self):
@@ -123,8 +130,10 @@ class TestPercentileBlock:
         block = _percentile_block(15.0, 1.5, "gold", cv_target=0.7)
         assert block["p50_total_tonnage_mt"] == pytest.approx(15.0)
         assert block["p50_grade"] == pytest.approx(1.5)
-        # For gold, p50 contained = tonnage × grade × 1 = 22.5
-        assert block["p50_contained_t"] == pytest.approx(22.5)
+        # For gold, p50 contained = tonnage_Mt × grade_g_t × 32150.7466 oz/t
+        # = 15 × 1.5 × 32150.7466 ≈ 723,391 oz (rounded to 3 decimals).
+        assert block["p50_contained_t"] == pytest.approx(15.0 * 1.5 * 32150.7466,
+                                                          rel=1e-4)
 
     def test_higher_cv_produces_wider_spread(self):
         narrow = _percentile_block(15.0, 1.5, "gold", cv_target=0.3)
