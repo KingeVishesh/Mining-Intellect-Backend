@@ -887,7 +887,17 @@ def build_model_1(
                       sum(w) if sum(w) else 0.0)
     if drilling_T is not None:
         mu_dT, sigma_dT = drilling_T
-        deviation_T = abs(mu_dT - pre_drill_mu_T) / max(sigma_logT, 0.1)
+        # Two-reference consistency check: accept the drilling signal when
+        # it agrees with EITHER the analog pool OR the L151 population
+        # prior within 2σ. Comparing only against the analog signal was
+        # masking cases where the analog pool is stage-mismatched (e.g.
+        # Cadillac PEA at 9.9 Mt vs analog majors averaging 40 Mt). The
+        # L151 prior (10 Mt for vein/mid) and the drilling-derived signal
+        # (7.5 Mt) both correctly anchored Cadillac, but were rejected.
+        deviation_T_analog = abs(mu_dT - pre_drill_mu_T) / max(sigma_logT, 0.1)
+        deviation_T_prior = (abs(mu_dT - mu_T_prior) / max(sigma_T_prior, 0.1)
+                             if sigma_T_prior > 0 else float("inf"))
+        deviation_T = min(deviation_T_analog, deviation_T_prior)
         if deviation_T <= 2.0:
             prec = 1.0 / (sigma_dT * sigma_dT)
             Laa_00 += prec
