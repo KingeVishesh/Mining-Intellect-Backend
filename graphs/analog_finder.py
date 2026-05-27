@@ -444,12 +444,36 @@ def _cascading_match(
         reasons.append(f"L3 sub-type unknown on candidate (target={t_sub}): pass-through")
 
     # ── L4: Mineralization mode (HARD — Lessons L86/L101) ──────────────────
-    # primary_sulfide ≠ supergene_oxide (different mineralogy + different metallurgy)
+    # primary_sulfide ≠ supergene_oxide (different mineralogy + different metallurgy).
+    # BUT: when subtype + belt both match, the mode difference reflects an
+    # oxidation/preservation state of the same genetic system rather than a
+    # different deposit family. IRGS in the Tintina belt are the canonical
+    # example: Fort Knox (primary_sulfide stockwork), Eagle Gold (free-milling
+    # oxide cap), Brewery Creek (supergene oxide blanket), and Donlin (deep
+    # refractory sulfide) are all the same deposit type at different oxidation
+    # states. Soft pass (no rank credit, no hard reject) preserves them in the
+    # pool with reduced influence rather than dropping useful scale/grade signal.
+    same_subtype_and_belt = bool(
+        target.get("deposit_subtype") and candidate.get("deposit_subtype")
+        and target["deposit_subtype"] == candidate["deposit_subtype"]
+        and target.get("tectonic_belt") and candidate.get("tectonic_belt")
+        and target["tectonic_belt"] == candidate["tectonic_belt"]
+    )
     if not geo_taxonomy.mode_compatible(target["mineralization_mode"], candidate["mineralization_mode"]):
-        return False, 0, 0, 0, [
-            f"L4 mode mismatch ({candidate['mineralization_mode']} ≠ {target['mineralization_mode']}): {rule_lessons}"
-        ], "L4"
-    if target["mineralization_mode"] and candidate["mineralization_mode"]:
+        if same_subtype_and_belt:
+            # Soft pass — note the mismatch but don't reject. No rank points
+            # awarded for L4 since the mode actually disagrees.
+            evaluated += 1
+            reasons.append(
+                f"L4 mode soft-pass ({candidate['mineralization_mode']} ≠ "
+                f"{target['mineralization_mode']}; same {target['deposit_subtype']} "
+                f"+ {target['tectonic_belt']} → oxidation/preservation variant)"
+            )
+        else:
+            return False, 0, 0, 0, [
+                f"L4 mode mismatch ({candidate['mineralization_mode']} ≠ {target['mineralization_mode']}): {rule_lessons}"
+            ], "L4"
+    elif target["mineralization_mode"] and candidate["mineralization_mode"]:
         matched += 1
         evaluated += 1
         rank_pts += 15
@@ -476,13 +500,27 @@ def _cascading_match(
     # the same family + subtype. This is the wedge between True North (vein)
     # and Springpole (bulk disseminated), and between Black Pine (bulk
     # disseminated Carlin) and Trixie (replacement Carlin).
+    #
+    # Exception: same subtype + same tectonic belt. IRGS in the Tintina belt
+    # spans stockwork (Fort Knox), disseminated_bulk (Coffee), sheeted_vein
+    # (AurMac), and vein_hosted (Valley/Rogue) — these are continuum
+    # variants of the same intrusion-related system, not distinct deposit
+    # types. Soft pass with reduced rank credit preserves them in the pool.
     t_pattern = target["mineralization_pattern"]
     c_pattern = candidate["mineralization_pattern"]
     if t_pattern and c_pattern and t_pattern != c_pattern:
-        return False, 0, 0, 0, [
-            f"L4.5 pattern mismatch ({c_pattern} ≠ {t_pattern}): {rule_lessons}"
-        ], "L4.5"
-    if t_pattern and c_pattern:
+        if same_subtype_and_belt:
+            evaluated += 1
+            reasons.append(
+                f"L4.5 pattern soft-pass ({c_pattern} ≠ {t_pattern}; same "
+                f"{target['deposit_subtype']} + {target['tectonic_belt']} → "
+                f"system geometry variant)"
+            )
+        else:
+            return False, 0, 0, 0, [
+                f"L4.5 pattern mismatch ({c_pattern} ≠ {t_pattern}): {rule_lessons}"
+            ], "L4.5"
+    elif t_pattern and c_pattern:
         matched += 1
         evaluated += 1
         rank_pts += 20
