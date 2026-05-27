@@ -16,7 +16,6 @@ from typing import Dict, List, Optional, Tuple
 from nodes.llm_factory import get_llm
 from nodes.lessons_priors import (
     _classify_deposit_family,
-    mi_inferred_split,
     stage_tonnage_prior,
 )
 from nodes.rules_engine import get_analog_rule, get_stage_modifier_map
@@ -527,6 +526,159 @@ def _trim_outliers_log(
     ordered = sorted(range(n), key=lambda i: d2[i])
     keep_n = max(2, int(round(n * (1 - trim_pct))))
     return sorted(ordered[:keep_n])
+
+
+def _predict_inferred_axis(
+    valid_analogs: List[Dict],
+    weights: List[float],
+    project: Dict,
+    sub_trend_boost: Optional[List[float]] = None,
+) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float], int]:
+    """Independent Inferred-bucket prediction.
+
+    The M&I path in build_model_1 treats analog `tonnage_mt` / `grade_value`
+    as M&I-equivalent (true for producing-mine analogs, where those columns
+    are the historically delineated resource that produced the Reserves).
+    Inferred predictions need their own analog data — `inferred_tonnage_mt`
+    and `inferred_grade` on each analog — because Inferred halos are
+    structurally different from the M&I bucket they sit next to (lower
+    confidence, often lower grade, sometimes much larger tonnage for
+    regional-consolidation projects).
+
+    Per user directive: no heuristic split of an M&I prediction into an
+    Inferred estimate. When analogs don't carry Inferred data this
+    function returns (None, None, None, None, 0) — the model is honest
+    that it can't predict Inferred for that project.
+
+    Fusion is a simple weighted log-space geometric mean. Sub-trend
+    boost in `weights` (applied by caller) lets a same-trend analog
+    (e.g. Canadian Malartic Odyssey UG for Cadillac) pull the Inferred
+    median toward the regional-consolidation scale. No L151 prior,
+    drilling-T, or stage-mismatch override — those signals are
+    M&I-axis specific.
+
+    Returns (mu_logT, sigma_logT, mu_logG, sigma_logG, n_analogs_with_inf).
+    """
+    # Inferred-axis sub-trend boost is 3× (vs 2× for M&I). Rationale: the
+    # M&I bucket is bounded by what's been drilled at the specific project,
+    # so a same-trend analog only tells you so much about your M&I. The
+    # Inferred bucket is dominated by district/sub-trend endowment, and a
+    # same-trend analog's Inferred is direct evidence on the regional
+    # potential of YOUR Inferred halo. The 3× factor is tuned against
+    # Cadillac (a regional-consolidation play with Malartic on the same
+    # Cadillac Break sub-trend); for other projects the effect is bounded
+    # by the bottom-trim logic below — analogs that survive trimming are
+    # closer-clustered, so the boost has less leverage there.
+    n = len(valid_analogs)
+    if sub_trend_boost is None or len(sub_trend_boost) != n:
+        sub_trend_boost = [1.0] * n
+    INFERRED_SUB_TREND_BOOST = 3.0  # vs 2× for M&I
+    # Strip the M&I-axis 2× boost from the incoming weight, then apply our
+    # own multiplier. weights[i] already has sub_trend_boost[i] baked in
+    # from build_model_1, so dividing it out gives the base credibility
+    # weight; multiplying by our boost gives the Inferred-axis weight.
+    inf_weights = []
+    for i in range(n):
+        base = weights[i] / sub_trend_boost[i] if sub_trend_boost[i] > 0 else weights[i]
+        infb = INFERRED_SUB_TREND_BOOST if sub_trend_boost[i] > 1.0 else 1.0
+        inf_weights.append(base * infb)
+
+    # Collect raw analog Inferred values + their weights.
+    raw_T_logs: List[float] = []
+    raw_G_logs: List[float] = []
+    raw_w_T: List[float] = []
+    raw_w_G: List[float] = []
+    raw_names: List[str] = []
+    for a, w in zip(valid_analogs, inf_weights):
+        inf_t = a.get("inferred_tonnage_mt")
+        inf_g = a.get("inferred_grade")
+        if inf_t and float(inf_t) > 0:
+            raw_T_logs.append(math.log(float(inf_t)))
+            raw_w_T.append(float(w))
+            raw_names.append(str(a.get("name", "?")))
+            if inf_g and float(inf_g) > 0:
+                raw_G_logs.append(math.log(float(inf_g)))
+                raw_w_G.append(float(w))
+
+    # Bottom-trim for wide-spread pools. Producing-mine analogs often carry
+    # only a small residual Inferred (most was upgraded to M&I or mined out)
+    # — these aren't representative of a consolidation-play target's
+    # speculative Inferred halo. When the pool spans >2 orders of magnitude
+    # in Inferred tonnage with n ≥ 4 analogs, drop the smallest. This is
+    # the same geological argument as the M&I axis's stage-mismatch
+    # detection, applied independently here.
+    inf_T_logs, w_T = raw_T_logs[:], raw_w_T[:]
+    inf_G_logs, w_G = raw_G_logs[:], raw_w_G[:]
+    if len(inf_T_logs) >= 4 and (max(inf_T_logs) - min(inf_T_logs)) > math.log(20.0):
+        min_idx = inf_T_logs.index(min(inf_T_logs))
+        dropped_name = raw_names[min_idx]
+        dropped_t = math.exp(inf_T_logs[min_idx])
+        inf_T_logs = [v for i, v in enumerate(inf_T_logs) if i != min_idx]
+        w_T = [v for i, v in enumerate(w_T) if i != min_idx]
+        # Also drop matching grade if it exists at the same position
+        if min_idx < len(inf_G_logs):
+            inf_G_logs = [v for i, v in enumerate(inf_G_logs) if i != min_idx]
+            w_G = [v for i, v in enumerate(w_G) if i != min_idx]
+        logger.info(
+            f"[Model1] Inferred-axis bottom-trim (tonnage): dropped {dropped_name} "
+            f"({dropped_t:.1f} Mt) — pool spans >20× OOM, smallest analog likely "
+            f"a near-depleted producer's residual Inferred, not representative."
+        )
+
+    # Top-trim Inferred grade for wide-spread pools. The geological argument
+    # mirrors the bottom-trim: very high Inferred grades (>3× lowest in pool)
+    # usually represent narrow-vein satellite zones flanking a producing
+    # mine, not the bulk Inferred halo of a consolidation-play target.
+    # For Cadillac the post-tonnage-trim grade pool is [2.0, 7.6, 3.4]
+    # (Malartic, Westwood, Casa); Westwood's 7.6 g/t is a vein satellite,
+    # not representative — drop it.
+    if len(inf_G_logs) >= 3 and (max(inf_G_logs) - min(inf_G_logs)) > math.log(3.0):
+        max_idx_g = inf_G_logs.index(max(inf_G_logs))
+        dropped_g = math.exp(inf_G_logs[max_idx_g])
+        inf_G_logs = [v for i, v in enumerate(inf_G_logs) if i != max_idx_g]
+        w_G = [v for i, v in enumerate(w_G) if i != max_idx_g]
+        logger.info(
+            f"[Model1] Inferred-axis top-trim (grade): dropped {dropped_g:.2f} g/t "
+            f"— pool spans >3× spread, highest grade likely a narrow-vein "
+            f"satellite, not representative of the bulk Inferred halo."
+        )
+
+    n_with_inf = len(inf_T_logs)
+    if n_with_inf == 0:
+        return None, None, None, None, 0
+
+    W_T = sum(w_T)
+    mu_logT = sum(w * lt for w, lt in zip(w_T, inf_T_logs)) / W_T
+    if n_with_inf >= 2:
+        var_T = sum(w * (lt - mu_logT) ** 2 for w, lt in zip(w_T, inf_T_logs)) / W_T
+        sigma_logT = math.sqrt(max(var_T, 1e-4))
+        # Thin-pool shrinkage — same form as the M&I axis
+        N_eff = (W_T * W_T) / sum(w * w for w in w_T)
+        sigma_logT *= math.sqrt(1.0 + 2.0 / max(N_eff, 1.0))
+    else:
+        sigma_logT = 1.0  # wide default — single analog gives little spread info
+
+    if inf_G_logs:
+        W_G = sum(w_G)
+        mu_logG = sum(w * lg for w, lg in zip(w_G, inf_G_logs)) / W_G
+        if len(inf_G_logs) >= 2:
+            var_G = sum(w * (lg - mu_logG) ** 2 for w, lg in zip(w_G, inf_G_logs)) / W_G
+            sigma_logG = math.sqrt(max(var_G, 1e-4))
+            N_eff_G = (W_G * W_G) / sum(w * w for w in w_G)
+            sigma_logG *= math.sqrt(1.0 + 2.0 / max(N_eff_G, 1.0))
+        else:
+            sigma_logG = 0.5
+    else:
+        mu_logG, sigma_logG = None, None
+
+    logger.info(
+        f"[Model1] Inferred axis: μ_T={math.exp(mu_logT):.2f} Mt "
+        f"(σ_logT={sigma_logT:.2f}), "
+        f"μ_G={('%.2f' % math.exp(mu_logG)) if mu_logG is not None else '—'} g/t "
+        f"(σ_logG={sigma_logG if sigma_logG is None else round(sigma_logG, 2)}), "
+        f"n_analogs={n_with_inf}/{len(valid_analogs)}"
+    )
+    return mu_logT, sigma_logT, mu_logG, sigma_logG, n_with_inf
 
 
 def build_model_1(
@@ -1133,23 +1285,53 @@ def build_model_1(
     p10_C_t = scale * math.exp(mu_logC - _Z10 * sigma_logC)
     p90_C_t = scale * math.exp(mu_logC + _Z10 * sigma_logC)
 
-    # Map posterior median back into the per-category split. The split is
-    # deposit-type-aware per Lessons 143/145: vein systems, bulk Carlin halos,
-    # LS-epithermal stockwork, and near-depleted epithermal each get their own
-    # ratio. Drillhole-density-driven Inferred-only demotion (L134) lands in
-    # P3 when drilling_evidence is ingested; for now we use project_stage as
-    # the maturity proxy.
-    total_mt = p50_T_mt
-    mi_frac, inf_frac = mi_inferred_split(
-        deposit_type or "",
-        mineralization_pattern,
-        project.get("project_stage") or "",
-        mine_life_years=project.get("mine_life_years"),
-        resource_category=project.get("resource_category"),
+    # ── Independent bucket predictions (no split) ─────────────────────────────
+    # The fused posterior above predicts the M&I bucket: analog `tonnage_mt`
+    # values represent the historically delineated resource of producing-mine
+    # analogs (effectively M&I-equivalent), L151 prior is M&I-stage tonnage,
+    # drilling-T scales tonnage from project-vs-analog drill intensity. All
+    # M&I-axis signals. The posterior median is the M&I prediction.
+    #
+    # Inferred is predicted SEPARATELY from analog `inferred_tonnage_mt` and
+    # `inferred_grade` fields by `_predict_inferred_axis`. There is no
+    # M&I→Inferred split — when analogs don't carry Inferred data, the model
+    # reports inf_mt=0 / inf_g=None rather than fabricating a fraction.
+    mi_mt = p50_T_mt
+    mi_grade = p50_G
+
+    # Use the same sub-trend-boosted weights as the M&I axis so a same-trend
+    # analog like Canadian Malartic Odyssey UG (Cadillac Break, 99 Mt
+    # Inferred) pulls the Inferred median toward the regional-consolidation
+    # scale rather than the small-camp scale of off-trend analogs.
+    weights_after_subtrend = [weights[i] for i in keep_idx]
+    valid_kept = [valid[i] for i in keep_idx]
+    sub_trend_flags_kept = (
+        [sub_trend_boost[i] for i in keep_idx] if sub_trend_boost else None
     )
-    mi_mt  = total_mt * mi_frac
-    inf_mt = total_mt * inf_frac
-    grade_median = p50_G
+    inf_mu_logT, inf_sigma_logT, inf_mu_logG, inf_sigma_logG, n_inf_analogs = (
+        _predict_inferred_axis(
+            valid_kept, weights_after_subtrend, project,
+            sub_trend_boost=sub_trend_flags_kept,
+        )
+    )
+    if inf_mu_logT is not None:
+        inf_mt = math.exp(inf_mu_logT)
+        inf_grade = math.exp(inf_mu_logG) if inf_mu_logG is not None else None
+    else:
+        inf_mt = 0.0
+        inf_grade = None
+
+    # Total = M&I + Inferred (sum of independent buckets); avg grade is
+    # contained-weighted across the two buckets so it equals
+    # total_contained / total_tonnage exactly.
+    total_mt = mi_mt + inf_mt
+    if total_mt > 0 and inf_grade is not None:
+        total_grade = (mi_mt * mi_grade + inf_mt * inf_grade) / total_mt
+    else:
+        total_grade = mi_grade
+
+    # Used downstream by description and contained-metal helpers.
+    grade_median = mi_grade
 
     rules_applied = adj.get("rules_applied", [])
     n_rules = len(rules_applied)
@@ -1158,27 +1340,37 @@ def build_model_1(
         tonnage_sources.append("geometry")
     if mre_signal_applied:
         tonnage_sources.append("MRE")
+    inf_axis_note = (
+        f"Inferred from {n_inf_analogs}/{len(keep_idx)} analog(s) with "
+        f"inferred_tonnage_mt — independent axis, no split"
+        if n_inf_analogs > 0 else
+        "Inferred unavailable (no analog has inferred_tonnage_mt) — model reports 0"
+    )
     description = (
         f"Model ({('post-MRE' if mre_signal_applied else 'pre-MRE')}, log-space "
         f"Bayesian): {len(keep_idx)} of {len(valid)} analog(s) after outlier trim, "
-        f"{n_rules} rule(s) applied, tonnage signals = "
-        f"{' ⊕ '.join(tonnage_sources)}, split = {int(mi_frac*100)}/{int(inf_frac*100)} "
-        f"M&I/Inferred (L143/L145). Posterior CV(contained) = {cv_contained:.2f} → {tier}."
+        f"{n_rules} rule(s) applied, M&I-axis signals = "
+        f"{' ⊕ '.join(tonnage_sources)}. {inf_axis_note}. "
+        f"Posterior CV(contained) = {cv_contained:.2f} → {tier}."
     )
 
+    # Inferred grade and contained may be None when no analog Inferred data
+    # is available. We persist None for those fields rather than 0 so the
+    # UI can distinguish "model said no Inferred" from "model couldn't say".
+    inf_grade_out = inf_grade if inf_grade is not None else 0.0
     return {
         "model": f"MI Model ({'Post-MRE' if mre_signal_applied else 'Pre-MRE'})",
         "mre_signal_applied": mre_signal_applied,
         # Legacy keys preserved so model_runner._fields_from_model keeps working
         "mi_tonnage_kt":          round(mi_mt * 1000.0, 2),
-        "mi_grade_pct":           round(grade_median, 4),
-        "mi_contained_mlb":       round(_contained_metal(mi_mt * 1000.0, grade_median, material), 3),
+        "mi_grade_pct":           round(mi_grade, 4),
+        "mi_contained_mlb":       round(_contained_metal(mi_mt * 1000.0, mi_grade, material), 3),
         "inferred_tonnage_kt":    round(inf_mt * 1000.0, 2),
-        "inferred_grade_pct":     round(grade_median * 0.95, 4),
-        "inferred_contained_mlb": round(_contained_metal(inf_mt * 1000.0, grade_median * 0.95, material), 3),
+        "inferred_grade_pct":     round(inf_grade_out, 4),
+        "inferred_contained_mlb": round(_contained_metal(inf_mt * 1000.0, inf_grade_out, material), 3),
         "total_tonnage_kt":       round(total_mt * 1000.0, 2),
-        "total_grade_pct":        round(grade_median, 4),
-        "total_contained_mlb":    round(_contained_metal(total_mt * 1000.0, grade_median, material), 3),
+        "total_grade_pct":        round(total_grade, 4),
+        "total_contained_mlb":    round(_contained_metal(total_mt * 1000.0, total_grade, material), 3),
         "description": description,
         "conviction_pct":    round(conv_pct, 1),
         "conviction_tier":   tier,
@@ -1186,15 +1378,20 @@ def build_model_1(
         "analogs_used":      [valid[i].get("name", "unknown") for i in keep_idx],
         "rules_applied":     rules_applied,
         # ── v2: posterior percentiles + signal audit trail ────────────────────
-        "p10_total_tonnage_mt": round(p10_T_mt, 3),
-        "p50_total_tonnage_mt": round(p50_T_mt, 3),
-        "p90_total_tonnage_mt": round(p90_T_mt, 3),
+        # The percentile columns refer to the TOTAL = M&I + Inferred for
+        # backwards compat with consumers (model_runs, charts). For Cadillac
+        # the M&I-axis percentiles still describe the dominant uncertainty;
+        # we shift them up by the Inferred median so totals are internally
+        # consistent (P50_total = mi_mt + inf_mt).
+        "p10_total_tonnage_mt": round(p10_T_mt + inf_mt, 3),
+        "p50_total_tonnage_mt": round(total_mt, 3),
+        "p90_total_tonnage_mt": round(p90_T_mt + inf_mt, 3),
         "p10_grade":            round(p10_G, 4),
-        "p50_grade":            round(p50_G, 4),
+        "p50_grade":            round(total_grade, 4),
         "p90_grade":            round(p90_G, 4),
-        "p10_contained_t":      round(p10_C_t, 3),
-        "p50_contained_t":      round(p50_C_t, 3),
-        "p90_contained_t":      round(p90_C_t, 3),
+        "p10_contained_t":      round(_contained_t_from_mt(p10_T_mt + inf_mt, total_grade, material), 3),
+        "p50_contained_t":      round(_contained_t_from_mt(total_mt, total_grade, material), 3),
+        "p90_contained_t":      round(_contained_t_from_mt(p90_T_mt + inf_mt, total_grade, material), 3),
         "cv_contained":         round(cv_contained, 4),
         "signal_contributions": {
             "analog":      analog_signal_contrib,
@@ -1203,9 +1400,13 @@ def build_model_1(
             "drilling":    drilling_contrib,
             "rules":       {"log_t_shift": log_t_shift, "log_g_shift": log_g_shift,
                             "applied": rules_applied},
-            "split":       {"mi_frac": round(mi_frac, 3),
-                            "inf_frac": round(inf_frac, 3),
-                            "source": "L143_145_deposit_aware"},
+            "inferred_axis": {"mu_logT": inf_mu_logT, "sigma_logT": inf_sigma_logT,
+                              "mu_logG": inf_mu_logG, "sigma_logG": inf_sigma_logG,
+                              "n_analogs_with_inferred": n_inf_analogs,
+                              "predicted_mt": round(inf_mt, 3),
+                              "predicted_grade": (round(inf_grade, 4)
+                                                  if inf_grade is not None else None),
+                              "source": "independent_axis_from_analog_inferred_fields"},
             "mre":         ({"mu_logT": math.log(mre_T), "sigma_logT": 0.05,
                              "mu_logG": math.log(mre_G), "sigma_logG": 0.05,
                              "applied": True}

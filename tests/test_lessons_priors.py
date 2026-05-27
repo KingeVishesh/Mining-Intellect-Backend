@@ -189,8 +189,13 @@ class TestIntegrationWithBuildModel1:
         # vein/early prior → geomean 10 Mt → mu ≈ ln(10) ≈ 2.30
         assert sp["mu_logT"] == pytest.approx(math.log(10.0), abs=0.1)
 
-    def test_split_metadata_records_lesson_source(self):
+    def test_inferred_axis_independent_no_split(self):
+        """No-split architecture: when analogs don't carry
+        `inferred_tonnage_mt`, model reports inf_mt=0 instead of splitting
+        the M&I prediction. Both buckets are independent posteriors.
+        """
         from nodes.model_builder import build_model_1
+        # Plain analogs without `inferred_tonnage_mt` populated.
         analogs = [{"name": f"A{i}", "tonnage_mt": 10.0, "grade_value": 1.5,
                     "similarity_score": 70.0, "project_stage": "production",
                     "source": "library"} for i in range(5)]
@@ -198,11 +203,34 @@ class TestIntegrationWithBuildModel1:
                    "deposit_type": "Carlin-style bulk disseminated gold with halos",
                    "project_stage": "PFS"}
         out = build_model_1(analogs, project, {})
-        split = out["signal_contributions"]["split"]
-        # Carlin bulk with halos at mid stage → 80/20
-        assert split["mi_frac"] == pytest.approx(0.80)
-        assert split["inf_frac"] == pytest.approx(0.20)
-        # Verify the actual fields also reflect this split
-        total_kt = out["total_tonnage_kt"]
-        mi_kt = out["mi_tonnage_kt"]
-        assert mi_kt == pytest.approx(total_kt * 0.80, rel=0.01)
+        inf_axis = out["signal_contributions"]["inferred_axis"]
+        assert inf_axis["n_analogs_with_inferred"] == 0
+        assert inf_axis["source"] == "independent_axis_from_analog_inferred_fields"
+        # No Inferred analog data → inf bucket is 0
+        assert out["inferred_tonnage_kt"] == 0
+        # M&I bucket carries the full posterior
+        assert out["mi_tonnage_kt"] > 0
+        # Total = M&I + Inferred (no split — just sum)
+        assert out["total_tonnage_kt"] == pytest.approx(
+            out["mi_tonnage_kt"] + out["inferred_tonnage_kt"], rel=1e-3
+        )
+
+    def test_inferred_axis_with_analog_data(self):
+        """When analogs DO carry `inferred_tonnage_mt`, the Inferred posterior
+        is computed independently as a weighted geometric mean.
+        """
+        from nodes.model_builder import build_model_1
+        analogs = [{"name": f"A{i}", "tonnage_mt": 10.0, "grade_value": 1.5,
+                    "inferred_tonnage_mt": 4.0, "inferred_grade": 1.2,
+                    "similarity_score": 70.0, "project_stage": "production",
+                    "source": "library"} for i in range(5)]
+        project = {"id": "p", "name": "T", "material": "gold",
+                   "deposit_type": "orogenic gold", "project_stage": "exploration"}
+        out = build_model_1(analogs, project, {})
+        inf_axis = out["signal_contributions"]["inferred_axis"]
+        # After log-space outlier trim ~10% of analogs are dropped — 5 in → 4
+        # survive. The Inferred posterior fuses whatever survives.
+        assert inf_axis["n_analogs_with_inferred"] >= 4
+        # All analogs have the same Inferred tonnage → posterior median = 4 Mt
+        assert out["inferred_tonnage_kt"] == pytest.approx(4000.0, rel=0.05)
+        assert out["inferred_grade_pct"] == pytest.approx(1.2, rel=0.05)

@@ -164,8 +164,14 @@ def backtest_one(
     cv = out.get("cv_contained", 0.0) or 0.0
     tier = out.get("conviction_tier", "—")
     sig = out.get("signal_contributions") or {}
-    split = sig.get("split") or {"mi_frac": 0.70, "inf_frac": 0.30,
-                                  "source": "fallback"}
+    # The legacy "split" field is gone after the independent-axis refactor;
+    # surface the Inferred-axis audit info instead. Backwards-compat synthetic
+    # split keeps any older display code from KeyError'ing.
+    inf_axis = sig.get("inferred_axis") or {}
+    total_pred = (out["mi_tonnage_kt"] + out["inferred_tonnage_kt"])
+    mi_frac_actual = (out["mi_tonnage_kt"] / total_pred) if total_pred > 0 else 1.0
+    split = {"mi_frac": mi_frac_actual, "inf_frac": 1.0 - mi_frac_actual,
+             "source": "independent_axis"}
     stage_prior = sig.get("stage_prior") or {"mu_logT": 0.0,
                                               "sigma_logT": 0.0,
                                               "source": "—"}
@@ -210,8 +216,32 @@ def backtest_one(
     print(f"  P10–P90 grade:   {p10_G:.3f} – {p90_G:.3f}  "
           f"(actual {actual_grade:.3f} {'inside' if p10_G <= actual_grade <= p90_G else 'OUTSIDE'})")
     print(f"  CV(contained) = {cv:.2f}  →  {tier}")
-    print(f"  Split: {int(split['mi_frac']*100)}/{int(split['inf_frac']*100)} M&I/Inf  "
-          f"→ M&I {pred_mi_mt:.1f} Mt, Inf {pred_inf_mt:.1f} Mt")
+
+    # Independent M&I + Inferred breakdown comparison (no split — these are
+    # two posterior medians from two independent fusions).
+    actual_mi_t  = fixture.get("mre_mi_tonnage_mt")
+    actual_mi_g  = fixture.get("mre_mi_grade")
+    actual_inf_t = fixture.get("mre_inferred_tonnage_mt")
+    actual_inf_g = fixture.get("mre_inferred_grade")
+    pred_mi_g    = out["mi_grade_pct"]
+    pred_inf_g   = out["inferred_grade_pct"]
+    if actual_mi_t and actual_inf_t:
+        print("-" * 78)
+        print("  Independent axes (no split — Inferred from analog "
+              f"inferred_tonnage_mt: {inf_axis.get('n_analogs_with_inferred', 0)} "
+              "analog(s)):")
+        print(f"  {'':22s}  {'Predicted':>14s}  {'Actual':>14s}  {'Error':>10s}")
+        for label, pred, actual in (
+            ("M&I tonnage (Mt)",   pred_mi_mt,  float(actual_mi_t)),
+            ("M&I grade",          pred_mi_g,   float(actual_mi_g or 0)),
+            ("Inferred tonn (Mt)", pred_inf_mt, float(actual_inf_t)),
+            ("Inferred grade",     pred_inf_g,  float(actual_inf_g or 0)),
+        ):
+            err = _pct_err(pred, actual) if actual else 0.0
+            c = _color(err, threshold)
+            flag = "PASS" if abs(err) <= threshold else "FAIL"
+            print(f"  {label:22s}  {pred:14.3f}  {actual:14.3f}  "
+                  f"{c}{_fmt_pct(err):>10s} {flag}\033[0m")
 
     if verbose:
         print("-" * 78)
