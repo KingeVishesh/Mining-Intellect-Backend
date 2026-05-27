@@ -233,4 +233,6 @@ class TestIntegrationWithBuildModel1:
         assert inf_axis["n_analogs_with_inferred"] >= 4
         # All analogs have the same Inferred tonnage → posterior median = 4 Mt
         assert out["inferred_tonnage_kt"] == pytest.approx(4000.0, rel=0.05)
-        assert out["inferred_grade_pct"] == pytest.approx(1.2, rel=0.05)
+        # Inferred grade carries the 0.95 PEA-vs-MRE-Inferred calibration:
+        # all analogs at 1.2 g/t → predicted 1.2 × 0.95 = 1.14 g/t.
+        assert out["inferred_grade_pct"] == pytest.approx(1.2 * 0.95, rel=0.05)
