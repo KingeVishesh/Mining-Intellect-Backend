@@ -82,6 +82,18 @@
       "similarity_score": 100,
       "source": "library",
       "district": "Malartic Quebec",
+      "drilling_evidence": {
+        "total_holes": 18637,
+        "total_meters_drilled": 2622512,
+        "drilled_area_km2": null,
+        "best_intercepts": [],
+        "qa_qc_present": true,
+        "source": "ni_43_101",
+        "confidence": "high",
+        "source_url": "https://s28.q4cdn.com/334653565/files/Yamana-Canadian-Malartic-N-43-101-March-25-2021.pdf",
+        "report_cutoff_date": "2020-10-07",
+        "notes": "Odyssey Project (3 deposits) per Table 14.1 (p.122-123): Odyssey 777,975 m / 1,151 holes + East Malartic 1,534,689 m / 17,284 holes + East Gouldie 309,848 m / 202 holes = 2,622,512 m / 18,637 holes total. This matches the umbrella M&I+P+P 105.5 Mt figure used above (Reading A — Odyssey-mine umbrella incl. all 3 deposits)."
+      },
       "data_source": {
         "verification_status": "verified",
         "publisher": "Agnico Eagle Mines",
@@ -154,13 +166,15 @@
       "drilling_evidence": {
         "total_holes": 16489,
         "total_meters_drilled": 2037477,
-        "drilled_area_km2": 5.74,
+        "drilled_area_km2": null,
         "best_intercepts": [],
         "weighted_grade_g_t": null,
         "qa_qc_present": true,
         "source": "sk_1300_trs",
         "confidence": "high",
-        "report_cutoff_date": "2023-12-31"
+        "source_url": "https://www.hecla.com/wp-content/uploads/HECLA-CASA-BERARDI-SK1300-RESPEC-V8.pdf",
+        "report_cutoff_date": "2023-12-31",
+        "notes": "Per Table 11-4 (p.142): 13,917 core (1,959,133 m) + 2,469 RC (74,943 m) + 103 sonic (3,401 m) = 16,489 holes / 2,037,477 m. The 574 ha 'immediate mine area' is the mining-lease footprint, NOT a drilled-area km² figure — primary source does not publish drilled-area as km². Removed prior 5.74 km² claim as it conflated mine-area with drilled-area."
       },
       "data_source": {
         "verification_status": "verified",

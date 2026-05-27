@@ -46,14 +46,16 @@
       "source": "library",
       "district": "Fairbanks District",
       "drilling_evidence": {
-        "total_holes": null,
-        "total_meters_drilled": null,
+        "total_holes": 2581,
+        "total_meters_drilled": 525293,
         "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
         "source": "ni_43_101",
         "confidence": "high",
-        "notes": "Cumulative drilling not disclosed in 2024 AMRRS; older Fort Knox NI 43-101 may have it (pending NI 43-101 PDF extraction)."
+        "source_url": "https://s204.q4cdn.com/896213035/files/doc_downloads/2018/Fort-Knox-June-2018-Technical-Report.pdf",
+        "report_cutoff_date": "2018-06-30",
+        "notes": "Fort Knox deposit 451,417 m / 1,843 holes (Table 10-1, p.40) + Gil deposit 73,876 m / 738 holes (Table 10-2, p.41) = 525,293 m / 2,581 holes total. Drilled-area not published as a km² figure in the 2018 NI 43-101."
       },
       "data_source": {
         "verification_status": "verified",
@@ -86,14 +88,16 @@
       "source": "library",
       "district": "Mayo Mining District",
       "drilling_evidence": {
-        "total_holes": null,
-        "total_meters_drilled": null,
-        "drilled_area_km2": null,
+        "total_holes": 943,
+        "total_meters_drilled": 180319,
+        "drilled_area_km2": 13.12,
         "best_intercepts": [],
         "qa_qc_present": true,
         "source": "ni_43_101",
         "confidence": "high",
-        "notes": "Cumulative drilling not disclosed in Feb 2023 press release; needs older NI 43-101 PDF extraction (pending agent #84)."
+        "source_url": "https://minedocs.com/24/Eagle-Gold-TR-12312022.pdf",
+        "report_cutoff_date": "2022-12-31",
+        "notes": "Eagle Zone 625 holes / 127,485 m (Table 10-1, p.10-2) + Olive Zone 318 holes / 52,834 m (Table 10-3, p.10-6) = 180,319 m / 943 holes total. Drilled-area DERIVED from collar coordinate min/max in Tables 10-2 (p.10-4) and 10-4 (p.10-7): Eagle Zone bounding box 2.74 km × 2.19 km = 6.00 km²; Olive Zone 2.27 km × 3.14 km = 7.12 km²; combined ≈ 13.12 km²."
       },
       "data_source": {
         "verification_status": "verified",
@@ -126,14 +130,16 @@
       "source": "library",
       "district": "Dawson Mining District",
       "drilling_evidence": {
-        "total_holes": null,
-        "total_meters_drilled": null,
+        "total_holes": 5491,
+        "total_meters_drilled": 423648,
         "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
         "source": "ni_43_101",
         "confidence": "high",
-        "notes": "Cumulative across historical Sabina/Golden Predator/Sabre programs not aggregated in any single press release; pending NI 43-101 PDF extraction (agent #84)."
+        "source_url": "https://minedocs.com/22/Brewery-Creek-PEA-01182022.pdf",
+        "report_cutoff_date": "2022-01-18",
+        "notes": "Cumulative 905 core + 4,555 RC + 31 auger = 5,491 holes / 423,648 m per Table 10-2, p.10-9. Reserve Trend strike ~3.5 km, deposits span 6-7 km E-W along trend (Figure 10-1). Drilled-area not published as km²."
       },
       "data_source": {
         "verification_status": "verified",
@@ -166,14 +172,16 @@
       "source": "library",
       "district": "Dawson Mining District",
       "drilling_evidence": {
-        "total_holes": 4568,
-        "total_meters_drilled": 614575,
+        "total_holes": 4638,
+        "total_meters_drilled": 616930,
         "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
         "source": "ni_43_101",
         "confidence": "high",
-        "notes": "Cumulative 2010-2023: 376,291 m RC (3,307 holes) + 238,284 m diamond (1,261 holes) = 614,575 m / 4,568 holes per Micon NI 43-101 cited in Fuerte acquisition release Sept 2025."
+        "source_url": "https://fuertemetals.com/site/assets/files/6192/ni_43-101_tr_coffee_project_mre_06oct2025_final.pdf",
+        "report_cutoff_date": "2025-08-21",
+        "notes": "Per Micon NI 43-101 Table 10.1 (p.67) and Table 14.3 (p.135): 1,170 core + 91 core-GT + 35 RAB + 2,998 RC + 309 RC-spacing + 35 sonic = 4,638 holes / 616,930 m total. The 614,575 m press-release figure is the subset used in the MRE."
       },
       "data_source": {
         "verification_status": "verified",
