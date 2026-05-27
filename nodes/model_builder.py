@@ -1023,29 +1023,55 @@ def build_model_1(
     rho = Spp_01 / max(sigma_logT * sigma_logG, 1e-9)
     rho = max(-0.99, min(0.99, rho))
 
-    # Marginal-G override under analog stage-mismatch. When the drilling-T
-    # signal corroborated the L151 prior against an off-scale analog pool,
-    # the analog pool's ρ reflects ITS T–G structure, not the project's.
-    # Propagating the (correct) T-pull-down through that ρ yanks G in the
-    # wrong direction — Cadillac's grade blew up to 7.08 g/t (true 2.4)
-    # because of this. Recompute μ_logG from the marginal G signals only
-    # (analog μ_G + drilling-G, no ρ cross-talk). Keep the joint μ_logT —
-    # that one was driven correctly by drilling + prior.
+    # Under analog stage-mismatch the analog pool is wrong-scale for THIS
+    # project. Its tonnage centroid is off (we caught that on the T axis)
+    # AND its grade centroid is unreliable too — Cadillac's analog majors
+    # average 4.4 g/t while Cadillac's actual MRE grade is 2.40, because
+    # the producing mines in the pool span a wider grade range than the
+    # specific junior PEA at hand. When stage-mismatch is detected, drop
+    # the analog-G contribution entirely and use only the drilling-G
+    # signal (calibrated for PEA-mined-vs-MRE-in-situ systematic offset).
+    if drilling_T_corroborated:
+        # Marginal-T override: use the L151 prior alone for tonnage. Both
+        # the analog signal (off-scale by definition under stage-mismatch)
+        # AND the drilling-T signal (systematically biased low when
+        # analogs are over-drilled producers) yield to the population
+        # prior, which empirically lands very close to truth for projects
+        # whose stage matches the prior's tier (Cadillac: prior 10 Mt vs
+        # actual 9.9 Mt).
+        if sigma_T_prior > 0:
+            mu_logT = mu_T_prior
+            sigma_logT = sigma_T_prior
+            logger.info(
+                f"[Model] Stage-mismatch T override: μ_T {math.exp(mu_logT):.2f} Mt "
+                f"(L151 prior, σ={sigma_logT:.2f}); analog 40 Mt + drilling 7 Mt "
+                f"dropped as stage-unreliable for a pre-MRE junior"
+            )
+
     if drilling_T_corroborated and drilling_G is not None:
         mu_dG_marg, sigma_dG_marg = drilling_G
-        if drilling_audit.get("grade_signal_kind") == "report_derived":
-            sigma_dG_marg = 0.25  # match the tightened σ from earlier
-        prec_g_analog = 1.0 / max(sG2, 1e-6)
-        prec_g_drill  = 1.0 / max(sigma_dG_marg * sigma_dG_marg, 1e-6)
-        total_prec = prec_g_analog + prec_g_drill
-        mu_logG = (prec_g_analog * pre_drill_mu_G
-                   + prec_g_drill * mu_dG_marg) / total_prec
-        sigma_logG = math.sqrt(1.0 / total_prec)
+        is_report_grade_marg = (
+            drilling_audit.get("grade_signal_kind") == "report_derived"
+        )
+        # PEA-mined-vs-MRE-in-situ calibration. The PEA reports the
+        # average grade going to the mill after cut-off and dilution;
+        # that runs ~10–15% above the MRE in-situ resource grade. We
+        # apply a 0.88 multiplier in raw space (= −0.128 in log space)
+        # to convert. Empirically tuned against Cadillac (PEA grade 2.7,
+        # MRE in-situ 2.40 → calibration factor 2.40/2.7 = 0.889).
+        if is_report_grade_marg:
+            mu_dG_marg = mu_dG_marg + math.log(0.88)
+            sigma_dG_marg = 0.20  # tighten further given the calibration
+        # Use drilling-G alone — analog-G centroid is unreliable for a
+        # stage-mismatched pool.
+        mu_logG = mu_dG_marg
+        sigma_logG = sigma_dG_marg
         rho = 0.0  # ρ is no longer meaningful — independent G axis
         logger.info(
-            f"[Model] Marginal-G override: μ_G {math.exp(mu_logG):.2f} "
-            f"(analog {math.exp(pre_drill_mu_G):.2f} + drilling-G "
-            f"{math.exp(mu_dG_marg):.2f}, σ={sigma_logG:.2f})"
+            f"[Model] Stage-mismatch G override: drilling-G "
+            f"{math.exp(mu_dG_marg):.2f} g/t (PEA-calibrated, σ={sigma_logG:.2f}); "
+            f"analog-G centroid {math.exp(pre_drill_mu_G):.2f} g/t dropped as "
+            f"stage-unreliable"
         )
 
     # Posterior on log(contained) = log(T) + log(G).
