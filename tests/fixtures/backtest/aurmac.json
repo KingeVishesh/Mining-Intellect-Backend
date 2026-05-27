@@ -29,10 +29,10 @@
       "name": "Fort Knox",
       "country": "USA",
       "material": "gold",
-      "tonnage_mt": 380,
-      "grade_value": 0.5,
-      "inferred_tonnage_mt": 20.0,
-      "inferred_grade": 0.45,
+      "tonnage_mt": 251,
+      "grade_value": 0.42,
+      "inferred_tonnage_mt": 101,
+      "inferred_grade": 0.40,
       "deposit_type": "intrusion-related gold system stockwork",
       "deposit_subtype": "irgs_general",
       "tectonic_belt": "yukon_tintina",
@@ -44,16 +44,14 @@
       "similarity_score": 75,
       "source": "library",
       "district": "Fairbanks District",
-      "drilling_evidence": {
-        "total_holes": null,
-        "total_meters_drilled": null,
-        "best_intercepts": [],
-        "weighted_grade_g_t": null,
-        "qa_qc_present": true,
-        "source": "library",
-        "confidence": "high"
-      },
-      "notes": "Kinross Fort Knox — flagship IRGS producer in the Tintina belt. tonnage_mt reflects M&I-equivalent of cumulative resource. Inferred is small residual."
+      "data_source": {
+        "verification_status": "verified",
+        "publisher": "Kinross Gold Corporation",
+        "source_doc": "2024 Annual Mineral Reserve and Resource Statement",
+        "as_of_year": 2024,
+        "user_confirmed": true,
+        "notes": "M&I 251 Mt @ 0.42 g/t. Inferred 101 Mt @ 0.40 g/t. User confirmed Inferred = 101 Mt."
+      }
     },
     {
       "name": "Eagle Gold Project",
@@ -74,7 +72,13 @@
       "similarity_score": 75,
       "source": "library",
       "district": "Mayo Mining District",
-      "notes": "Victoria Gold Eagle deposit, Dublin Gulch area Yukon. Same Mayo district as AurMac. Pre-2024 MRE used: M&I 162 Mt @ 0.69 g/t = ~3.6 Moz; Inferred 14.6 Mt @ 0.65 g/t."
+      "data_source": {
+        "verification_status": "estimated_pending_extraction",
+        "publisher": "Victoria Gold Corp.",
+        "source_doc": "pre-2024 MRE estimate (approximate)",
+        "user_confirmed": false,
+        "notes": "Run scripts/verify_analog_inferred.py --name 'Eagle Gold Project' --material gold --country Canada --region Yukon to replace with verified values."
+      }
     },
     {
       "name": "Brewery Creek",
@@ -82,8 +86,8 @@
       "material": "gold",
       "tonnage_mt": 32,
       "grade_value": 0.94,
-      "inferred_tonnage_mt": 8.0,
-      "inferred_grade": 0.99,
+      "inferred_tonnage_mt": 7.6,
+      "inferred_grade": 0.83,
       "deposit_type": "intrusion-related supergene oxide gold",
       "deposit_subtype": "irgs_general",
       "tectonic_belt": "yukon_tintina",
@@ -95,7 +99,13 @@
       "similarity_score": 70,
       "source": "library",
       "district": "Dawson Mining District",
-      "notes": "Historical Yukon Tintina IRGS oxide-cap project. 2020 MRE: M&I 32.3 Mt @ 1.06 g/t = 1.1 Moz; Inferred 11.8 Mt @ 0.85 g/t."
+      "data_source": {
+        "verification_status": "estimated_pending_extraction",
+        "publisher": "Golden Predator / Sabina Gold & Silver",
+        "source_doc": "2020 MRE (approximate)",
+        "user_confirmed": false,
+        "notes": "Estimated values; run scripts/verify_analog_inferred.py to confirm."
+      }
     },
     {
       "name": "Coffee Gold Project",
@@ -116,7 +126,13 @@
       "similarity_score": 70,
       "source": "library",
       "district": "Dawson Mining District",
-      "notes": "Newmont Coffee Gold (Yukon Tintina). 2017 PEA: M&I 47 Mt @ 1.30 g/t = 2.0 Moz; Inferred 4 Mt @ 1.30 g/t."
+      "data_source": {
+        "verification_status": "estimated_pending_extraction",
+        "publisher": "Newmont (acquired from Goldcorp/Kaminak)",
+        "source_doc": "2017 BFS (approximate)",
+        "user_confirmed": false,
+        "notes": "Estimated values; run scripts/verify_analog_inferred.py to confirm."
+      }
     }
   ],
   "drilling_evidence": {
