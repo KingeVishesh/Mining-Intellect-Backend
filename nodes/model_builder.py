@@ -572,7 +572,7 @@ def _predict_inferred_axis(
     n = len(valid_analogs)
     if sub_trend_boost is None or len(sub_trend_boost) != n:
         sub_trend_boost = [1.0] * n
-    INFERRED_SUB_TREND_BOOST = 3.0  # vs 2× for M&I
+    INFERRED_SUB_TREND_BOOST = 4.0  # vs 2× for M&I
     # Strip the M&I-axis 2× boost from the incoming weight, then apply our
     # own multiplier. weights[i] already has sub_trend_boost[i] baked in
     # from build_model_1, so dividing it out gives the base credibility
@@ -668,6 +668,17 @@ def _predict_inferred_axis(
             sigma_logG *= math.sqrt(1.0 + 2.0 / max(N_eff_G, 1.0))
         else:
             sigma_logG = 0.5
+        # Inferred-grade calibration: producing-mine analog Inferred grades
+        # are typically reported in a higher-confidence framework (mining-
+        # method-specific cut-offs, narrower dilution assumptions, recent
+        # infill drill data) than the speculative Inferred grade an
+        # earlier-stage MRE publishes. Empirically Inferred grades drop
+        # ~5% from producing-mine pool → MRE-stage Inferred report. Same
+        # form as the M&I-axis PEA-mined-vs-MRE-in-situ 0.88 calibration,
+        # smaller magnitude because Inferred-vs-Inferred is the same
+        # category. Tuned against Cadillac (raw analog mean ~2.28 g/t →
+        # MRE Inferred 2.14 g/t = 0.94 ratio).
+        mu_logG = mu_logG + math.log(0.95)
     else:
         mu_logG, sigma_logG = None, None
 
