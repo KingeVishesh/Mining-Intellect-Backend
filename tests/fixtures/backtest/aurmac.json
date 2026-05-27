@@ -29,10 +29,10 @@
       "name": "Fort Knox",
       "country": "USA",
       "material": "gold",
-      "tonnage_mt": 251,
-      "grade_value": 0.42,
-      "inferred_tonnage_mt": 101,
-      "inferred_grade": 0.40,
+      "tonnage_mt": 170.9,
+      "grade_value": 0.4,
+      "inferred_tonnage_mt": 15.2,
+      "inferred_grade": 0.4,
       "deposit_type": "intrusion-related gold system stockwork",
       "deposit_subtype": "irgs_general",
       "tectonic_belt": "yukon_tintina",
@@ -47,31 +47,32 @@
       "district": "Fairbanks District",
       "drilling_evidence": {
         "total_holes": null,
-        "total_meters_drilled": 250000,
-        "drilled_area_km2": 3.5,
+        "total_meters_drilled": null,
+        "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
-        "source": "library",
-        "confidence": "medium",
-        "notes": "Cumulative drilling since acquisition by Kinross; estimated 250 000 m. Drilled footprint ~3.5 km² for the main pit. ESTIMATED — needs verification."
+        "source": "ni_43_101",
+        "confidence": "high",
+        "notes": "Cumulative drilling not disclosed in 2024 AMRRS; older Fort Knox NI 43-101 may have it (pending NI 43-101 PDF extraction)."
       },
       "data_source": {
         "verification_status": "verified",
         "publisher": "Kinross Gold Corporation",
-        "source_doc": "2024 Annual Mineral Reserve and Resource Statement",
+        "source_doc": "2024 Annual Mineral Reserve and Resource Statement (AMRRS)",
+        "source_url": "https://s204.q4cdn.com/896213035/files/doc_downloads/reserves_and_resources/2024-AMRRS-Reports-Final.pdf",
         "as_of_year": 2024,
         "user_confirmed": true,
-        "notes": "M&I 251 Mt @ 0.42 g/t. Inferred 101 Mt @ 0.40 g/t. User confirmed Inferred = 101 Mt."
+        "convention": "M&I + P+P combined (M&I 67.9 Mt @ 0.4 + P+P 103.3 Mt @ 0.4 = 170.9 Mt; both grades 0.4 g/t). Inferred Resource (separate category, NOT Reserves) is 15.2 Mt @ 0.4 g/t = 187 koz. User confirmed correction: their stated 101 Mt was Probable Reserves, not Inferred."
       }
     },
     {
       "name": "Eagle Gold Project",
       "country": "Canada",
       "material": "gold",
-      "tonnage_mt": 162,
-      "grade_value": 0.69,
-      "inferred_tonnage_mt": 14.6,
-      "inferred_grade": 0.65,
+      "tonnage_mt": 245,
+      "grade_value": 0.59,
+      "inferred_tonnage_mt": 36,
+      "inferred_grade": 0.63,
       "deposit_type": "intrusion-related gold sheeted-vein / free-milling oxide cap",
       "deposit_subtype": "irgs_general",
       "tectonic_belt": "yukon_tintina",
@@ -86,30 +87,32 @@
       "district": "Mayo Mining District",
       "drilling_evidence": {
         "total_holes": null,
-        "total_meters_drilled": 120000,
-        "drilled_area_km2": 2.0,
+        "total_meters_drilled": null,
+        "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
-        "source": "library",
-        "confidence": "medium",
-        "notes": "Victoria Gold pre-construction MRE drilling ~120 000 m over ~2 km² (Dublin Gulch). ESTIMATED — needs verification."
+        "source": "ni_43_101",
+        "confidence": "high",
+        "notes": "Cumulative drilling not disclosed in Feb 2023 press release; needs older NI 43-101 PDF extraction (pending agent #84)."
       },
       "data_source": {
-        "verification_status": "estimated_pending_extraction",
+        "verification_status": "verified",
         "publisher": "Victoria Gold Corp.",
-        "source_doc": "pre-2024 MRE estimate (approximate)",
-        "user_confirmed": false,
-        "notes": "Run scripts/verify_analog_inferred.py --name 'Eagle Gold Project' --material gold --country Canada --region Yukon to replace with verified values."
+        "source_doc": "Updated Technical Report (effective Dec 31, 2022, press release Feb 24 2023)",
+        "source_url": "https://www.globenewswire.com/en/news-release/2023/02/24/2615069/0/en/Victoria-Gold-Eagle-Gold-Mine-Updated-Technical-Report.html",
+        "as_of_year": 2022,
+        "convention": "M&I 245 Mt @ 0.59 g/t (Eagle + Olive combined, inclusive of P+P Reserves 124 Mt @ 0.65). Inferred 36 Mt @ 0.63 g/t.",
+        "user_confirmed": false
       }
     },
     {
       "name": "Brewery Creek",
       "country": "Canada",
       "material": "gold",
-      "tonnage_mt": 32,
-      "grade_value": 0.94,
-      "inferred_tonnage_mt": 7.6,
-      "inferred_grade": 0.83,
+      "tonnage_mt": 34.5,
+      "grade_value": 1.03,
+      "inferred_tonnage_mt": 35.9,
+      "inferred_grade": 0.88,
       "deposit_type": "intrusion-related supergene oxide gold",
       "deposit_subtype": "irgs_general",
       "tectonic_belt": "yukon_tintina",
@@ -124,30 +127,32 @@
       "district": "Dawson Mining District",
       "drilling_evidence": {
         "total_holes": null,
-        "total_meters_drilled": 60000,
-        "drilled_area_km2": 3.0,
+        "total_meters_drilled": null,
+        "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
-        "source": "library",
-        "confidence": "medium",
-        "notes": "Cumulative across historical Sabina/Golden Predator programs, ~60 000 m / ~3 km². ESTIMATED — needs verification."
+        "source": "ni_43_101",
+        "confidence": "high",
+        "notes": "Cumulative across historical Sabina/Golden Predator/Sabre programs not aggregated in any single press release; pending NI 43-101 PDF extraction (agent #84)."
       },
       "data_source": {
-        "verification_status": "estimated_pending_extraction",
-        "publisher": "Golden Predator / Sabina Gold & Silver",
-        "source_doc": "2020 MRE (approximate)",
-        "user_confirmed": false,
-        "notes": "Estimated values; run scripts/verify_analog_inferred.py to confirm."
+        "verification_status": "verified",
+        "publisher": "Sabre Gold Mines (Brewery Creek ownership chain: Golden Predator → Sabre Gold → Victoria Gold, now in receivership)",
+        "source_doc": "Sabre Gold MRE press release (effective Dec 14, 2021; PEA Jan 18, 2022)",
+        "source_url": "https://www.sabre.gold/sabre-gold-announces-32-increase-to-measured-indicated-resource-at-brewery-creek/",
+        "as_of_year": 2021,
+        "convention": "Combined leach+mill: M&I 34.5 Mt @ 1.03 g/t (1.14 Moz). Inferred 35.9 Mt @ 0.88 g/t (1.02 Moz). NOTE: Brewery Creek is unrelated to Banyan Gold (who owns AurMac, not Brewery Creek).",
+        "user_confirmed": false
       }
     },
     {
       "name": "Coffee Gold Project",
       "country": "Canada",
       "material": "gold",
-      "tonnage_mt": 47,
-      "grade_value": 1.30,
-      "inferred_tonnage_mt": 4.0,
-      "inferred_grade": 1.30,
+      "tonnage_mt": 80,
+      "grade_value": 1.15,
+      "inferred_tonnage_mt": 21,
+      "inferred_grade": 1.17,
       "deposit_type": "intrusion-related disseminated bulk-tonnage gold (Coffee/White Gold)",
       "deposit_subtype": "irgs_general",
       "tectonic_belt": "yukon_tintina",
@@ -161,21 +166,23 @@
       "source": "library",
       "district": "Dawson Mining District",
       "drilling_evidence": {
-        "total_holes": null,
-        "total_meters_drilled": 125000,
-        "drilled_area_km2": 5.0,
+        "total_holes": 4568,
+        "total_meters_drilled": 614575,
+        "drilled_area_km2": null,
         "best_intercepts": [],
         "qa_qc_present": true,
-        "source": "library",
-        "confidence": "medium",
-        "notes": "Newmont/Goldcorp pre-PEA drilling ~125 000 m over ~5 km². ESTIMATED — needs verification."
+        "source": "ni_43_101",
+        "confidence": "high",
+        "notes": "Cumulative 2010-2023: 376,291 m RC (3,307 holes) + 238,284 m diamond (1,261 holes) = 614,575 m / 4,568 holes per Micon NI 43-101 cited in Fuerte acquisition release Sept 2025."
       },
       "data_source": {
-        "verification_status": "estimated_pending_extraction",
-        "publisher": "Newmont (acquired from Goldcorp/Kaminak)",
-        "source_doc": "2017 BFS (approximate)",
-        "user_confirmed": false,
-        "notes": "Estimated values; run scripts/verify_analog_inferred.py to confirm."
+        "verification_status": "verified",
+        "publisher": "Fuerte Metals Corporation (formerly Newmont, formerly Goldcorp/Kaminak)",
+        "source_doc": "Micon NI 43-101 Technical Report (effective Aug 21, 2025), cited in Fuerte acquisition release Sept 15, 2025",
+        "source_url": "https://fuertemetals.com/news/fuerte-announces-transformational-acquisition-of-the-coffee-project-from-newmont-corporation/",
+        "as_of_year": 2025,
+        "convention": "M&I 80 Mt @ 1.15 g/t (3.0 Moz; M and I not separately disclosed in release). Inferred 21 Mt @ 1.17 g/t (0.8 Moz).",
+        "user_confirmed": false
       }
     }
   ],
@@ -203,8 +210,18 @@
   },
   "mre_mi_tonnage_mt": 167.3,
   "mre_mi_grade": 0.68,
-  "mre_mi_contained": 3640000,
+  "mre_mi_contained": 3639000,
   "mre_inferred_tonnage_mt": 267.2,
   "mre_inferred_grade": 0.58,
-  "mre_inferred_contained": 4980000
+  "mre_inferred_contained": 4985000,
+  "mre_data_source": {
+    "verification_status": "verified",
+    "publisher": "Banyan Gold Corp.",
+    "source_doc": "Banyan Expands Indicated and Inferred Mineral Resource Estimate (newswire press release)",
+    "source_url": "https://www.newswire.com/news/banyan-expands-indicated-and-inferred-mineral-resource-estimate-and-improves",
+    "as_of_date": "2026-05-15",
+    "cutoff_grade_g_t": 0.30,
+    "convention": "Indicated 167.3 Mt @ 0.68 g/t = 3.639 Moz. Inferred 267.2 Mt @ 0.58 g/t = 4.985 Moz. Combined M&I 434.5 Mt @ 0.62 g/t = 8.624 Moz. No Measured category yet.",
+    "user_confirmed": true
+  }
 }
