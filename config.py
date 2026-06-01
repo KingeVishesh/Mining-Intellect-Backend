@@ -15,6 +15,18 @@ class Settings(BaseSettings):
     # Exa
     exa_api_key: Optional[str] = Field(default=None, alias="EXA_API_KEY")
 
+    # Parallel.ai — used by gold_model_builder to outsource M&I / Inferred
+    # estimation to a deep-research agent given full project + analog context.
+    parallel_api_key: Optional[str] = Field(default=None, alias="PARALLEL_API_KEY")
+    parallel_base_url: str = Field(
+        default="https://api.parallel.ai",
+        alias="PARALLEL_BASE_URL",
+    )
+    parallel_processor: str = Field(
+        default="ultra",
+        alias="PARALLEL_PROCESSOR",
+    )
+
     # Supabase
     supabase_url: Optional[str] = Field(default=None, alias="SUPABASE_URL")
     supabase_service_role_key: Optional[str] = Field(default=None, alias="SUPABASE_SERVICE_ROLE_KEY")

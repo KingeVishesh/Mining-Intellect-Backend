@@ -31,6 +31,10 @@
     "model_runner": {
       "path": "./graphs/model_runner.py:graph",
       "description": "Build Model 1 (+ Model 2 if official MRE exists) for a project that already has analogs. Persists each model to model_runs and overwrites the latest resource columns on projects. No PDF, no report row."
+    },
+    "gold_model_builder": {
+      "path": "./graphs/gold_model_builder.py:graph",
+      "description": "Outsource gold-project M&I / Inferred estimation to Parallel.ai's deep-research agent given full project + analog context. Single model, branches internally on use_mre flag (True = anchor on official MRE; False = blind pre-MRE prediction from drilling transformation). Persists to model_runs and updates latest projects.* fields."
     }
   },
   "env": ".env"
