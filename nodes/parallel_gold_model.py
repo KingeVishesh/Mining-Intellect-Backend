@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 # Parallel.ai task lifecycle: queued -> running -> completed / failed.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "expired"}
-_POLL_INTERVAL_S = 8
-_POLL_TIMEOUT_S = 60 * 12  # deep-research runs can take ~5-10 min
+_POLL_INTERVAL_S = 10
+_POLL_TIMEOUT_S = 60 * 35  # ultra deep-research runs can take 20-30+ min
 
 
 # ── Public node entry point ──────────────────────────────────────────────────
@@ -109,23 +109,45 @@ have wildly different drilling intensities — a 100 Mt analog with 50,000 m
 drilled and a 5 Mt analog with 5,000 m drilled cannot be averaged as equals.
 
 Instead you LEARN A TRANSFORMATION from the analog cohort and APPLY it to
-the target project's drilling profile:
+the target project's drilling profile.
 
-  For each analog, compute the conversion ratios it implies:
-      tonnage_per_meter_drilled  =  analog.MRE_tonnage / analog.total_meters
-      grade_preservation         =  analog.MRE_grade   / analog.avg_intercept_grade
-      m_and_i_share_of_total_oz  =  analog.M&I_oz / (analog.M&I_oz + analog.Inferred_oz)
-      envelope_realization       =  analog.MRE_tonnage / (L × W × H × density)
+CRITICAL: M&I and Inferred are predicted INDEPENDENTLY. They are two
+separate volumes drilled at different spacings, not a single budget that
+gets split by a share ratio. JORC/NI 43-101 reports them as two distinct
+statements ("M&I is X Mt @ Y g/t, Inferred is A Mt @ B g/t") — never as a
+total with a percentage split. The model must mirror that.
 
-  Take the cohort median (or a stage-weighted central tendency) of those
-  ratios. Apply to the target:
-      predicted_tonnage = target.total_meters × median(tonnage_per_m)
-                          [scaled by strike-length-tested if available]
-      predicted_grade   = target.avg_intercept_grade × median(grade_preservation)
-      predicted_oz      = predicted_tonnage × predicted_grade × 0.032151
-                          (g/t × Mt → Moz)
-      M&I_oz            = predicted_oz × median(m_and_i_share)
-      Inferred_oz       = predicted_oz × (1 − median(m_and_i_share))
+  For each analog, compute FIVE independent conversion ratios:
+      m_and_i_tonnage_per_m       =  analog.m_and_i_tonnage_mt   / analog.total_meters
+      m_and_i_grade_preservation  =  analog.m_and_i_grade        / analog.avg_intercept_grade
+      inferred_tonnage_per_m      =  analog.inferred_tonnage_mt  / analog.total_meters
+      inferred_grade_preservation =  analog.inferred_grade       / analog.avg_intercept_grade
+      envelope_realization        =  (analog.m_and_i_tonnage_mt + analog.inferred_tonnage_mt)
+                                     / (L × W × H × density)
+
+  If an analog reports M&I but not Inferred (or vice versa), it can still
+  contribute to the ratio it has data for — skip it for the other ratio.
+  Do not invent values to fill gaps. State per-analog ratio coverage in
+  `analogs_used`.
+
+  Take the cohort median (or stage-weighted central tendency) of each
+  ratio. Apply to the target SEPARATELY for M&I and Inferred:
+
+      M&I_tonnage_mt     = target.total_meters × median(m_and_i_tonnage_per_m)
+      M&I_grade_gpt      = target.avg_intercept_grade × median(m_and_i_grade_preservation)
+      M&I_contained_moz  = M&I_tonnage_mt × M&I_grade_gpt × 0.032151
+
+      Inferred_tonnage_mt    = target.total_meters × median(inferred_tonnage_per_m)
+      Inferred_grade_gpt     = target.avg_intercept_grade × median(inferred_grade_preservation)
+      Inferred_contained_moz = Inferred_tonnage_mt × Inferred_grade_gpt × 0.032151
+
+      total_tonnage_mt   = M&I_tonnage_mt + Inferred_tonnage_mt    (DERIVED)
+      total_grade_gpt    = tonnage-weighted average                  (DERIVED)
+      total_contained_moz = M&I_contained_moz + Inferred_contained_moz (DERIVED)
+
+  The total is bookkeeping, NOT a prediction. Never compute total first
+  and split it. If you find yourself wanting an `m_and_i_share` ratio,
+  you are doing it wrong.
 
 GOLD-SPECIFIC ADJUSTMENTS (mandatory)
 - Top-cut intercept grades before averaging. Gold has a strong nugget effect.
@@ -399,13 +421,17 @@ def _output_schema() -> Dict[str, Any]:
                             "type": "object",
                             "additionalProperties": False,
                             "required": [
-                                "tonnage_per_meter", "grade_preservation",
-                                "m_and_i_share", "envelope_realization",
+                                "m_and_i_tonnage_per_meter",
+                                "m_and_i_grade_preservation",
+                                "inferred_tonnage_per_meter",
+                                "inferred_grade_preservation",
+                                "envelope_realization",
                             ],
                             "properties": {
-                                "tonnage_per_meter": num_or_null,
-                                "grade_preservation": num_or_null,
-                                "m_and_i_share": num_or_null,
+                                "m_and_i_tonnage_per_meter": num_or_null,
+                                "m_and_i_grade_preservation": num_or_null,
+                                "inferred_tonnage_per_meter": num_or_null,
+                                "inferred_grade_preservation": num_or_null,
                                 "envelope_realization": num_or_null,
                             },
                         },
