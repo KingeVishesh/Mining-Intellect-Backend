@@ -173,6 +173,52 @@ note that an analog seems weak and assign it a lower internal weight, but
 record the weighting and rationale in `methodology.analog_weights_used`.
 
 ================================================================
+ANALOG ENRICHMENT — MANDATORY, NOT OPTIONAL
+================================================================
+For each analog in the cohort that lacks `total_meters_drilled`,
+`avg_intercept_grade`, M&I breakdown, or Inferred breakdown in the
+context block below, you MUST perform a real web search to find that
+data before declaring the ratio null. This is the single biggest lever
+on model accuracy. Do not skip it.
+
+Where to look (in this order):
+  1. Operator's most recent Annual Information Form (AIF / Form 20-F) —
+     these are filed annually on SEDAR+ and the operator's IR page.
+     Major-producer Resource & Reserve sections include cumulative
+     drilling tables per mine.
+  2. Most recent NI 43-101 technical report on SEDAR+ for the analog
+     (Section 10 "Drilling", Section 14 "Mineral Resource Estimate").
+     Even for producing mines an updated technical report typically
+     exists every 3-5 years.
+  3. JORC competent-person reports (for ASX-listed operators).
+  4. The operator's annual Resource & Reserve Report (Barrick, Newmont,
+     Agnico, AngloGold, Gold Fields, Kinross all publish these as
+     standalone PDFs — drilling stats are in the appendix tables, not
+     the press release).
+  5. Last 3 years of quarterly production reports / operational updates.
+
+CRITICAL: Major operators (Barrick, AngloGold, Newmont, Agnico, Gold
+Fields, Kinross, Equinox, B2Gold) DO publish cumulative drilling at the
+mine scale. It is in their R&R report appendices, not on the first
+page of Google. If your first 1-2 searches return nothing, it means you
+have not yet found the right document — keep going.
+
+Only declare a ratio null AFTER documenting in
+`analogs_used[].rationale` the specific source documents you checked
+and what each one disclosed or didn't disclose. Example acceptable
+rationale when data legitimately unavailable:
+
+  "Checked Barrick 2024 AIF (Section 4, no mine-scale cumulative
+   drilling table for Bulyanhulu), Bulyanhulu 2019 NI 43-101 (Section
+   10 reports 312k m through 2018 but no recent update), and Barrick
+   Q4 2025 production report (no drilling totals). Used 312k m as a
+   conservative lower bound; flagged in conviction.rationale."
+
+Unacceptable rationale: "Data not publicly tabulated" without naming
+which documents were checked. That is laziness, not absence.
+================================================================
+
+================================================================
 TARGET PROJECT — FULL CONTEXT
 ================================================================
 {project_block}
@@ -192,6 +238,13 @@ Hard rules:
   • Every analog you USE in the math must appear in `analogs_used`
     with the per-analog ratios you derived. If you reject an analog
     list it in `analogs_rejected` with a reason.
+  • If any ratio for an analog is null in `analogs_used[].implied_ratios`,
+    the rationale field MUST name the specific source documents you
+    consulted (AIF / NI 43-101 / R&R report / quarterly report — with
+    dates and report names) and what each one disclosed or didn't.
+    "Data not publicly tabulated" or "not disclosed" without naming
+    sources is REJECTED as a non-answer. Enrich aggressively before
+    giving up — most major-operator drilling data is in R&R appendices.
   • `methodology` must state: which branch ran (mre_anchored /
     drill_transformation / analog_only_fallback), the top-cut value,
     the reference cutoff, any stage-weighting applied, and whether
