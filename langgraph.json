@@ -34,7 +34,7 @@
     },
     "gold_model_builder": {
       "path": "./graphs/gold_model_builder.py:graph",
-      "description": "Outsource gold-project M&I / Inferred estimation to Parallel.ai's deep-research agent given full project + analog context. Single model, branches internally on use_mre flag (True = anchor on official MRE; False = blind pre-MRE prediction from drilling transformation). Persists to model_runs and updates latest projects.* fields."
+      "description": "Outsource gold-project M&I / Inferred estimation to the Parallel.ai deep-research agent given full project + analog context. Single model, branches internally on use_mre flag (True = anchor on official MRE; False = blind pre-MRE prediction from drilling transformation). Persists to model_runs and updates latest projects.* fields."
     }
   },
   "env": ".env"
