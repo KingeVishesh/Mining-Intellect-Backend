@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Parallel.ai task lifecycle: queued -> running -> completed / failed.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "expired"}
 _POLL_INTERVAL_S = 15
-_POLL_TIMEOUT_S = 60 * 90  # ultra deep-research with mandatory analog enrichment can take 60-90 min
+_POLL_TIMEOUT_S = 60 * 150  # ultra deep-research with discovery + mandatory enrichment can take 90-120+ min
 
 
 # ── Public node entry point ──────────────────────────────────────────────────
@@ -535,13 +535,17 @@ def _output_schema() -> Dict[str, Any]:
                         "type": "object",
                         "additionalProperties": False,
                         "required": [
-                            "tonnage_per_meter", "grade_preservation",
-                            "m_and_i_share", "envelope_realization",
+                            "m_and_i_tonnage_per_meter",
+                            "m_and_i_grade_preservation",
+                            "inferred_tonnage_per_meter",
+                            "inferred_grade_preservation",
+                            "envelope_realization",
                         ],
                         "properties": {
-                            "tonnage_per_meter": num_or_null,
-                            "grade_preservation": num_or_null,
-                            "m_and_i_share": num_or_null,
+                            "m_and_i_tonnage_per_meter": num_or_null,
+                            "m_and_i_grade_preservation": num_or_null,
+                            "inferred_tonnage_per_meter": num_or_null,
+                            "inferred_grade_preservation": num_or_null,
                             "envelope_realization": num_or_null,
                         },
                     },
