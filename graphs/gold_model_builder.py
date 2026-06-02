@@ -23,6 +23,9 @@ Inputs:
   use_mre               : bool (default True) — when False, Parallel ignores
                           the project's published MRE and produces a blind
                           pre-MRE estimate (for backtesting).
+  find_analogs          : bool (default False) — when True, Parallel discovers
+                          and weights its own analog cohort in the same call.
+                          Skips the no-analogs error gate. ~2-3× runtime/cost.
   fetch_recent_drill_holes : bool — force-refresh cached drilling evidence.
 
 Persistence:
@@ -43,7 +46,6 @@ from nodes import supabase_ops
 from nodes.parallel_gold_model import parallel_gold_model_node
 from graphs.report_generator import load_project_and_analogs_node
 from graphs.model_runner import (
-    check_analogs_present_node,
     fetch_drilling_evidence_node,
     fetch_inferred_evidence_node,
     _round,
@@ -61,6 +63,9 @@ class GoldModelBuilderState(TypedDict, total=False):
     # When False, Parallel pretends the official MRE doesn't exist. Default
     # True — incorporate the published MRE when present (post-MRE estimate).
     use_mre: bool
+    # When True, Parallel discovers + weights its own analog cohort in the
+    # same call. Default False — use the Supabase-stored cohort.
+    find_analogs: bool
     # Forward to fetch_drilling_evidence_node so cached evidence can be
     # bypassed when the caller wants a fresh extraction.
     fetch_recent_drill_holes: bool
@@ -78,6 +83,25 @@ class GoldModelBuilderState(TypedDict, total=False):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def check_analogs_or_skip_node(state: GoldModelBuilderState) -> GoldModelBuilderState:
+    """Block model building when there are no analogs AND we aren't asking
+    Parallel to discover its own. When find_analogs=True, an empty cohort is
+    fine — the Parallel call will populate it.
+    """
+    if state.get("error"):
+        return {}
+    if state.get("find_analogs"):
+        return {}
+    analogs = state.get("analogs") or []
+    if not analogs:
+        return {"error": (
+            "Project has no analogs and find_analogs=False. Either run "
+            "analog_finder first or pass find_analogs=True so Parallel "
+            "discovers its own cohort."
+        )}
+    return {}
+
 
 def _route_after_check(state: GoldModelBuilderState) -> str:
     return END if state.get("error") else "fetch_drilling_evidence"
@@ -215,7 +239,7 @@ def save_model_run_node(
 
 builder = StateGraph(GoldModelBuilderState)
 builder.add_node("load_project_and_analogs", load_project_and_analogs_node)
-builder.add_node("check_analogs_present", check_analogs_present_node)
+builder.add_node("check_analogs_present", check_analogs_or_skip_node)
 builder.add_node("fetch_drilling_evidence", fetch_drilling_evidence_node)
 builder.add_node("fetch_inferred_evidence", fetch_inferred_evidence_node)
 builder.add_node("call_parallel_gold_model", parallel_gold_model_node)

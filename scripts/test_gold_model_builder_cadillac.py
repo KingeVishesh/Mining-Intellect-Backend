@@ -40,16 +40,21 @@ def main():
                     help="Pre-MRE / blind backtest: strip published MRE from the prompt")
     ap.add_argument("--project-id", default=DEFAULT_PROJECT_ID,
                     help="Override target project_id")
+    ap.add_argument("--find-analogs", action="store_true",
+                    help="Let Parallel discover its own analog cohort instead "
+                         "of using the Supabase-stored one")
     args = ap.parse_args()
     use_mre = not args.no_mre
     project_id = args.project_id
+    find_analogs = args.find_analogs
 
     project = supabase_ops.get_project(project_id)
     if not project:
         print(f"Project {project_id} not found"); return 1
     analogs = supabase_ops.get_analogs(project_id)
     print(f"Loaded project '{project.get('name')}' with {len(analogs)} analogs.")
-    print(f"Mode: {'post-MRE (use_mre=True)' if use_mre else 'PRE-MRE BLIND (use_mre=False)'}")
+    print(f"Mode: {'post-MRE (use_mre=True)' if use_mre else 'PRE-MRE BLIND (use_mre=False)'}"
+          f"  |  find_analogs={find_analogs}")
     print(f"  Published MRE: M&I {project.get('mre_mi_tonnage_mt')} Mt @ "
           f"{project.get('mre_mi_grade')} g/t; "
           f"Inferred {project.get('mre_inferred_tonnage_mt')} Mt @ "
@@ -61,6 +66,7 @@ def main():
         "project": project,
         "analogs": analogs,
         "use_mre": use_mre,
+        "find_analogs": find_analogs,
     }
 
     print("\nCalling Parallel.ai deep-research agent (this can take 5-12 min)…")

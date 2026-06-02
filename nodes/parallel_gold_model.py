@@ -31,32 +31,53 @@ logger = logging.getLogger(__name__)
 
 # Parallel.ai task lifecycle: queued -> running -> completed / failed.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "expired"}
-_POLL_INTERVAL_S = 10
-_POLL_TIMEOUT_S = 60 * 35  # ultra deep-research runs can take 20-30+ min
+_POLL_INTERVAL_S = 15
+_POLL_TIMEOUT_S = 60 * 90  # ultra deep-research with mandatory analog enrichment can take 60-90 min
 
 
 # ── Public node entry point ──────────────────────────────────────────────────
 
 def parallel_gold_model_node(state: Dict) -> Dict:
-    """LangGraph node: call Parallel.ai with full context, return its estimate."""
+    """LangGraph node: call Parallel.ai with full context, return its estimate.
+
+    State flags:
+      use_mre       : bool (default True). When False, strip the project's
+                      MRE from the prompt so the agent predicts blind.
+      find_analogs  : bool (default False). When True, instruct Parallel to
+                      discover its own analog cohort instead of using the
+                      one supplied via state["analogs"]. Triples runtime
+                      and cost (analog discovery + enrichment + modeling
+                      in one call) — use sparingly.
+    """
     if state.get("error"):
         return {}
 
     project = state.get("project") or {}
     analogs = state.get("analogs") or []
     use_mre = bool(state.get("use_mre", True))
+    find_analogs = bool(state.get("find_analogs", False))
 
     if not settings.parallel_api_key:
         msg = "PARALLEL_API_KEY not configured — cannot run gold_model_builder"
         logger.error(f"[parallel_gold] {msg}")
         return {"error": msg}
 
-    if not analogs:
-        msg = "No analogs available — Parallel needs the analog cohort to learn ratios"
+    if not analogs and not find_analogs:
+        msg = ("No analogs available and find_analogs=False — "
+               "either provide a cohort or set find_analogs=True to let "
+               "Parallel discover its own.")
         logger.warning(f"[parallel_gold] {msg}")
         return {"error": msg}
 
-    prompt = _build_prompt(project=project, analogs=analogs, use_mre=use_mre)
+    logger.info(
+        f"[parallel_gold] starting run: use_mre={use_mre}, "
+        f"find_analogs={find_analogs}, supplied_analogs={len(analogs)}"
+    )
+
+    prompt = _build_prompt(
+        project=project, analogs=analogs,
+        use_mre=use_mre, find_analogs=find_analogs,
+    )
     schema = _output_schema()
 
     try:
@@ -75,12 +96,22 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         f"{result.get('inferred', {}).get('grade_gpt')} g/t  |  "
         f"anchor={result.get('anchor_used')}  conviction={result.get('conviction')}"
     )
-    return {"parallel_model": result, "use_mre": use_mre}
+    return {
+        "parallel_model": result,
+        "use_mre": use_mre,
+        "find_analogs": find_analogs,
+    }
 
 
 # ── Prompt construction ──────────────────────────────────────────────────────
 
-def _build_prompt(*, project: Dict, analogs: List[Dict], use_mre: bool) -> str:
+def _build_prompt(
+    *,
+    project: Dict,
+    analogs: List[Dict],
+    use_mre: bool,
+    find_analogs: bool = False,
+) -> str:
     """The big prompt. Heavy on philosophy + context, light on prescriptive math.
 
     Everything Parallel needs is included verbatim so it does not spend budget
@@ -88,10 +119,16 @@ def _build_prompt(*, project: Dict, analogs: List[Dict], use_mre: bool) -> str:
     may still hit the web to fill gaps (e.g. a missing analog MRE breakdown,
     a recent press release with new drill intercepts) but the bulk of the
     work is reasoning over the provided context.
+
+    When find_analogs=True, the prompt instructs the agent to discover its
+    own analog cohort instead of using state["analogs"]. The supplied cohort
+    (if any) is shown as "starting candidates the upstream system surfaced —
+    use, expand, or replace as you see fit".
     """
     project_block = _format_project_block(project, use_mre=use_mre)
     analogs_block = _format_analogs_block(analogs)
     mre_directive = _mre_directive(project=project, use_mre=use_mre)
+    analog_directive = _analog_directive(find_analogs=find_analogs, analogs=analogs)
 
     return f"""
 You are a senior gold-mining geologist and JORC / NI 43-101 qualified resource
@@ -166,57 +203,7 @@ GOLD-SPECIFIC ADJUSTMENTS (mandatory)
 
 {mre_directive}
 
-ANALOG-SELECTION DISCIPLINE
-The analogs supplied below have already been vetted for deposit-subtype
-match by an upstream system. Do not silently drop or replace them. You MAY
-note that an analog seems weak and assign it a lower internal weight, but
-record the weighting and rationale in `methodology.analog_weights_used`.
-
-================================================================
-ANALOG ENRICHMENT — MANDATORY, NOT OPTIONAL
-================================================================
-For each analog in the cohort that lacks `total_meters_drilled`,
-`avg_intercept_grade`, M&I breakdown, or Inferred breakdown in the
-context block below, you MUST perform a real web search to find that
-data before declaring the ratio null. This is the single biggest lever
-on model accuracy. Do not skip it.
-
-Where to look (in this order):
-  1. Operator's most recent Annual Information Form (AIF / Form 20-F) —
-     these are filed annually on SEDAR+ and the operator's IR page.
-     Major-producer Resource & Reserve sections include cumulative
-     drilling tables per mine.
-  2. Most recent NI 43-101 technical report on SEDAR+ for the analog
-     (Section 10 "Drilling", Section 14 "Mineral Resource Estimate").
-     Even for producing mines an updated technical report typically
-     exists every 3-5 years.
-  3. JORC competent-person reports (for ASX-listed operators).
-  4. The operator's annual Resource & Reserve Report (Barrick, Newmont,
-     Agnico, AngloGold, Gold Fields, Kinross all publish these as
-     standalone PDFs — drilling stats are in the appendix tables, not
-     the press release).
-  5. Last 3 years of quarterly production reports / operational updates.
-
-CRITICAL: Major operators (Barrick, AngloGold, Newmont, Agnico, Gold
-Fields, Kinross, Equinox, B2Gold) DO publish cumulative drilling at the
-mine scale. It is in their R&R report appendices, not on the first
-page of Google. If your first 1-2 searches return nothing, it means you
-have not yet found the right document — keep going.
-
-Only declare a ratio null AFTER documenting in
-`analogs_used[].rationale` the specific source documents you checked
-and what each one disclosed or didn't disclose. Example acceptable
-rationale when data legitimately unavailable:
-
-  "Checked Barrick 2024 AIF (Section 4, no mine-scale cumulative
-   drilling table for Bulyanhulu), Bulyanhulu 2019 NI 43-101 (Section
-   10 reports 312k m through 2018 but no recent update), and Barrick
-   Q4 2025 production report (no drilling totals). Used 312k m as a
-   conservative lower bound; flagged in conviction.rationale."
-
-Unacceptable rationale: "Data not publicly tabulated" without naming
-which documents were checked. That is laziness, not absence.
-================================================================
+{analog_directive}
 
 ================================================================
 TARGET PROJECT — FULL CONTEXT
@@ -224,7 +211,7 @@ TARGET PROJECT — FULL CONTEXT
 {project_block}
 
 ================================================================
-ANALOG COHORT — FULL CONTEXT
+ANALOG COHORT — STARTING CONTEXT
 ================================================================
 {analogs_block}
 
@@ -252,6 +239,108 @@ Hard rules:
   • `conviction` is one of: very_low / low / medium / high / very_high,
     plus a one-sentence rationale.
 """.strip()
+
+
+def _analog_directive(*, find_analogs: bool, analogs: List[Dict]) -> str:
+    """Build the analog-selection + enrichment block of the prompt.
+
+    Two modes:
+      find_analogs=False (default) — use the supplied cohort, enrich aggressively.
+      find_analogs=True             — discover the cohort from scratch (or expand
+                                      the supplied starting set), then enrich.
+    """
+    enrichment_rules = """\
+ANALOG ENRICHMENT — MANDATORY, NOT OPTIONAL
+For each analog in the cohort that lacks total_meters_drilled,
+avg_intercept_grade, M&I breakdown, or Inferred breakdown, you MUST
+perform a real web search to find that data before declaring the
+ratio null. This is the single biggest lever on model accuracy.
+
+Where to look (in this order):
+  1. Operator's most recent Annual Information Form (AIF / Form 20-F) —
+     filed annually on SEDAR+ and the operator's IR page. Major-
+     producer Resource & Reserve sections include cumulative drilling
+     tables per mine.
+  2. Most recent NI 43-101 technical report on SEDAR+ for the analog
+     (Section 10 "Drilling", Section 14 "Mineral Resource Estimate").
+     Even producing mines typically have an updated TR every 3-5 yrs.
+  3. JORC competent-person reports (for ASX-listed operators).
+  4. The operator's annual Resource & Reserve Report (Barrick, Newmont,
+     Agnico, AngloGold, Gold Fields, Kinross publish these as standalone
+     PDFs — drilling stats live in appendix tables, not the press release).
+  5. Last 3 years of quarterly production reports / operational updates.
+
+CRITICAL: Major operators (Barrick, AngloGold, Newmont, Agnico, Gold
+Fields, Kinross, Equinox, B2Gold) DO publish cumulative drilling at the
+mine scale. It is in R&R appendices, not on the first page of Google.
+If your first 1-2 searches return nothing, you have not yet found the
+right document — keep going.
+
+Only declare a ratio null AFTER documenting in analogs_used[].rationale
+the specific source documents you checked and what each disclosed or
+didn't. Generic phrases like "data not publicly tabulated" without
+naming sources are REJECTED as a non-answer."""
+
+    if not find_analogs:
+        # Existing behaviour — use the supplied cohort as-is, enrich aggressively
+        return f"""\
+ANALOG-SELECTION DISCIPLINE
+The analogs supplied below have already been vetted for deposit-subtype
+match by an upstream system. Do not silently drop or replace them. You MAY
+note that an analog seems weak and assign it a lower internal weight, but
+record the weighting and rationale in `methodology.notes` and
+`analogs_used[].rationale`.
+
+================================================================
+{enrichment_rules}
+================================================================"""
+
+    # find_analogs=True — agent must discover its own cohort
+    starting_size = len(analogs)
+    starting_note = (
+        f"{starting_size} starting candidate(s) are provided in the ANALOG\n"
+        "COHORT block below. Treat them as a seed, not a fixed list. You MUST:"
+        if starting_size > 0
+        else "No starting candidates are provided. You MUST build the cohort\n"
+             "from scratch:"
+    )
+    return f"""\
+ANALOG DISCOVERY — YOU MUST FIND YOUR OWN COHORT
+{starting_note}
+
+  1. Identify 5-10 valid analog gold projects for the target. Hard filters:
+       a. SAME deposit subtype as the target (no mixing — e.g. never use a
+          Carlin analog for an orogenic target, never use a porphyry for
+          an epithermal).
+       b. SAME mineralization style where determinable (disseminated vs
+          vein-hosted vs breccia vs stockwork) — this matters more than
+          subtype alone. Mismatched styles produce ratios off by 10-30×.
+       c. Within ±5× of the target's tonnage band AND ±3× of grade band
+          (use whatever target metadata exists; for blind/pre-MRE runs,
+          infer band from drilling data only).
+       d. Published M&I or M&I+Inferred resource compliant with NI 43-
+          101 / JORC / SAMREC.
+       e. Primary-source URL exists.
+
+  2. Drilling-stage-matched preference: the transformation works best
+     when the cohort's drilling intensity is comparable to the target.
+     Prefer technical-report-stage projects (PEA / PFS / FS) with recent
+     NI 43-101s — they cleanly disclose cumulative drilling meters.
+     Long-producing major-operator mines typically do NOT publish mine-
+     scale cumulative drilling and will return null ratios.
+
+  3. Reject and list in `analogs_rejected` (with reason):
+       - Different deposit subtype or mineralization style
+       - No published resource
+       - Same operator/property as the target (data leakage)
+       - No primary-source URL after a reasonable search
+
+  4. After cohort selection, apply the ENRICHMENT rules below to every
+     analog. Same discipline: name the documents you check.
+
+================================================================
+{enrichment_rules}
+================================================================"""
 
 
 def _mre_directive(*, project: Dict, use_mre: bool) -> str:
