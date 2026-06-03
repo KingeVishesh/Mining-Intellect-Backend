@@ -165,7 +165,7 @@ if exa_ok:
         resp = req.post(
             "https://api.exa.ai/search",
             headers={"x-api-key": settings.exa_api_key, "Content-Type": "application/json"},
-            json={"query": "mining project uranium Canada resource estimate", "type": "deep", "numResults": 1},
+            json={"query": "mining project uranium Canada resource estimate", "type": "deep-reasoning", "numResults": 1},
             timeout=30,
         )
         if resp.status_code == 200:

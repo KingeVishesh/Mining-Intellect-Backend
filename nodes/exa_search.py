@@ -88,7 +88,7 @@ def search_project_data(
     )
     payload = {
         "query": query,
-        "type": "deep",
+        "type": "deep-reasoning",
         "systemPrompt": (
             "Prefer official primary sources: company press releases, NI 43-101 or JORC "
             "technical reports, feasibility or pre-feasibility studies, and investor "
@@ -172,7 +172,7 @@ def search_missing_fields(
     )
     payload = {
         "query": query,
-        "type": "deep",
+        "type": "deep-reasoning",
         "systemPrompt": (
             "Only use official company documents. Report exact numbers as stated. "
             "Do not estimate or infer. If not found, say Not found."
@@ -593,7 +593,7 @@ def search_analog_projects(
 
     payload = {
         "query": query,
-        "type": "deep",
+        "type": "deep-reasoning",
         "systemPrompt": (
             "You are a mining industry geologist. For each project, prioritize describing "
             "the geological characteristics: deposit type AND finer sub-type (e.g. alkalic "
@@ -634,7 +634,7 @@ def discover_new_projects(material: str) -> tuple[str, list[str]]:
     )
     payload = {
         "query": query,
-        "type": "deep",
+        "type": "deep-reasoning",
         "systemPrompt": (
             "Focus on recent NI 43-101 or JORC announcements, press releases, and technical reports. "
             "Prefer newly published or updated resource estimates."
