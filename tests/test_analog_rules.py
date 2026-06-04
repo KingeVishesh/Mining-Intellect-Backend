@@ -18,7 +18,12 @@ import pytest
 
 from schemas.analog_rule import AnalogRule
 from scripts.seed_analog_rules import ANALOG_SELECTION_RULES
-from graphs.analog_finder import _build_profile, _cascading_match, _modellable_resource_issue
+from graphs.analog_finder import (
+    _build_profile,
+    _cascading_match,
+    _derive_rule_inputs,
+    _modellable_resource_issue,
+)
 from tests.fixtures.golden_analogs import GOLDEN_CASES
 
 
@@ -1529,6 +1534,47 @@ def test_gold_porphyry_rule_allows_heap_leach_but_excludes_carlin_and_epithermal
     assert not passes
     assert dropped_at in {"L2", "L3"}
     assert reasons
+
+
+def test_gold_andean_heap_leach_without_type_routes_to_high_sulfidation():
+    project = {
+        "name": "Volcan Gold Project",
+        "material": "Gold",
+        "tectonic_belt": "andean",
+        "district": "Maricunga Gold Belt",
+        "mining_method": "open pit",
+        "processing_method": "heap leach",
+        "mining_method_class": "heap_leach_pad",
+    }
+
+    profile = _build_profile(project)
+    material, deposit_type, deposit_subtype, pattern = _derive_rule_inputs(project)
+
+    assert profile["deposit_subtype"] == "high_sulfidation_epithermal"
+    assert profile["deposit_type_family"] == "epithermal"
+    assert profile["mineralization_pattern"] == "disseminated_bulk"
+    assert material == "Gold"
+    assert deposit_type == "epithermal-HS"
+    assert deposit_subtype == "high_sulfidation_epithermal"
+    assert pattern == "disseminated_bulk"
+
+
+def test_gold_yukon_near_surface_without_subtype_routes_to_irgs():
+    project = {
+        "name": "White Gold Project",
+        "material": "Gold",
+        "deposit_type": "Near-surface gold deposits",
+        "tectonic_belt": "yukon_tintina",
+        "region": "Yukon",
+    }
+
+    profile = _build_profile(project)
+    _material, deposit_type, deposit_subtype, _pattern = _derive_rule_inputs(project)
+
+    assert profile["deposit_subtype"] == "irgs_general"
+    assert profile["deposit_type_family"] == "intrusion_related"
+    assert deposit_type == "intrusion-related gold"
+    assert deposit_subtype == "irgs_general"
 
 
 def test_gold_underground_target_rejects_low_grade_unknown_mining_analog():

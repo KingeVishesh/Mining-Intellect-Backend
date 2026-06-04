@@ -320,6 +320,38 @@ def _build_profile(row: dict) -> dict:
         clean_deposit_type = "orogenic gold"
         row = {**row, "deposit_type": clean_deposit_type}
         explicit_subtype = "orogenic_general"
+    context_blob = " ".join(
+        str(row.get(k) or "")
+        for k in (
+            "tectonic_belt", "district", "region", "location_name",
+            "mining_method", "mining_method_class", "processing_method",
+            "recovery_method",
+        )
+    ).lower()
+    if (
+        not explicit_subtype
+        and material in {"gold", "au"}
+        and "near-surface" in str(clean_deposit_type or "").lower()
+        and (belt == "yukon_tintina" or "yukon" in context_blob or "tintina" in context_blob)
+    ):
+        clean_deposit_type = "intrusion-related gold"
+        row = {**row, "deposit_type": clean_deposit_type}
+        explicit_subtype = "irgs_general"
+    if (
+        not clean_deposit_type
+        and not explicit_subtype
+        and material in {"gold", "au"}
+        and (belt == "andean" or "andean" in context_blob or "maricunga" in context_blob)
+        and (
+            "heap" in context_blob
+            or "open pit" in context_blob
+            or "open-pit" in context_blob
+            or "heap_leach_pad" in context_blob
+        )
+    ):
+        clean_deposit_type = "epithermal-HS"
+        row = {**row, "deposit_type": clean_deposit_type}
+        explicit_subtype = "high_sulfidation_epithermal"
     subtype_family = _deposit_type_family_from_subtype(explicit_subtype)
     deposit_family = _deposit_type_family(row.get("deposit_type") or "")
     if subtype_family == "sediment_hosted" and deposit_family == "intrusion_related":
@@ -334,7 +366,14 @@ def _build_profile(row: dict) -> dict:
     mining_class = (row.get("mining_method_class") or "").strip().lower()
     tonnage = _as_positive_float(row.get("tonnage_mt"))
     grade = _as_positive_float(row.get("grade_value"))
-    if (
+    if explicit_subtype == "high_sulfidation_epithermal" and (
+        "heap" in mining_method
+        or "heap" in mining_class
+        or "open" in mining_method
+        or "open" in mining_class
+    ):
+        pattern = "disseminated_bulk"
+    elif (
         material in {"gold", "au"}
         and ("open" in mining_method or "open" in mining_class)
         and (
@@ -345,6 +384,8 @@ def _build_profile(row: dict) -> dict:
             )
         )
     ):
+        pattern = "disseminated_bulk"
+    elif not pattern and explicit_subtype == "high_sulfidation_epithermal":
         pattern = "disseminated_bulk"
     elif not pattern and explicit_subtype == "orogenic_general":
         pattern = "vein_hosted"
@@ -1011,10 +1052,48 @@ def _derive_rule_inputs(project: Dict) -> tuple:
     ):
         deposit_type = "orogenic gold"
         deposit_subtype = "orogenic_general"
+    context_blob = " ".join(
+        str(project.get(k) or "")
+        for k in (
+            "tectonic_belt", "district", "region", "location_name",
+            "mining_method", "mining_method_class", "processing_method",
+            "recovery_method",
+        )
+    ).lower()
+    if (
+        not deposit_subtype
+        and (material or "").strip().lower() in {"gold", "au"}
+        and "near-surface" in str(deposit_type or "").lower()
+        and (belt == "yukon_tintina" or "yukon" in context_blob or "tintina" in context_blob)
+    ):
+        deposit_type = "intrusion-related gold"
+        deposit_subtype = "irgs_general"
+    if (
+        not deposit_type
+        and not deposit_subtype
+        and (material or "").strip().lower() in {"gold", "au"}
+        and (belt == "andean" or "andean" in context_blob or "maricunga" in context_blob)
+        and (
+            "heap" in context_blob
+            or "open pit" in context_blob
+            or "open-pit" in context_blob
+            or "heap_leach_pad" in context_blob
+        )
+    ):
+        deposit_type = "epithermal-HS"
+        deposit_subtype = "high_sulfidation_epithermal"
     pattern = project.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
         project.get("mineralization_style"), project.get("mining_method"),
         project.get("processing_method"), deposit_type,
     )
+    if deposit_subtype == "high_sulfidation_epithermal" and (
+        not pattern
+        or "heap" in context_blob
+        or "open pit" in context_blob
+        or "open-pit" in context_blob
+        or "heap_leach_pad" in context_blob
+    ):
+        pattern = "disseminated_bulk"
     if deposit_subtype == "orogenic_general":
         mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
         tonnage = _as_positive_float(project.get("tonnage_mt"))

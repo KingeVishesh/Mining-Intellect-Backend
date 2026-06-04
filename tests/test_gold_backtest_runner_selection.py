@@ -136,6 +136,34 @@ def test_gold_library_filters_infer_orogenic_from_archean_gold_belt():
     assert filters["deposit_subtype"] == "orogenic_general"
 
 
+def test_gold_library_filters_infer_high_sulfidation_from_andean_heap_leach():
+    filters = _gold_library_filters({
+        "name": "Volcan Gold Project",
+        "material": "gold",
+        "tectonic_belt": "andean",
+        "district": "Maricunga Gold Belt",
+        "mining_method": "open pit",
+        "processing_method": "heap leach",
+        "mining_method_class": "heap_leach_pad",
+    })
+
+    assert filters["deposit_type"] == "epithermal-HS"
+    assert filters["deposit_subtype"] == "high_sulfidation_epithermal"
+
+
+def test_gold_library_filters_infer_irgs_from_yukon_near_surface_gold():
+    filters = _gold_library_filters({
+        "name": "White Gold Project",
+        "material": "gold",
+        "deposit_type": "Near-surface gold deposits",
+        "tectonic_belt": "yukon_tintina",
+        "region": "Yukon",
+    })
+
+    assert filters["deposit_type"] == "intrusion-related gold"
+    assert filters["deposit_subtype"] == "irgs_general"
+
+
 def test_backfilled_year_only_mre_uses_conservative_blind_cutoff():
     cutoff = _blind_cutoff_from_mre_run({
         "source": "exa_2pass_mre_truth_backfill",

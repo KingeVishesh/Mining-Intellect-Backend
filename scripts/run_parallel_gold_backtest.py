@@ -488,6 +488,14 @@ def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
     deposit_subtype = project.get("deposit_subtype")
     target_belt = project.get("tectonic_belt")
     material_key = str(material or "").strip().lower()
+    blob = " ".join(
+        str(project.get(k) or "")
+        for k in (
+            "tectonic_belt", "district", "region", "location_name",
+            "mining_method", "mining_method_class", "processing_method",
+            "recovery_method",
+        )
+    ).lower()
     if (
         material_key in {"gold", "au"}
         and not deposit_type
@@ -496,6 +504,23 @@ def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
     ):
         deposit_type = "orogenic gold"
         deposit_subtype = "orogenic_general"
+    if (
+        material_key in {"gold", "au"}
+        and not deposit_subtype
+        and "near-surface" in str(deposit_type or "").lower()
+        and (target_belt == "yukon_tintina" or "yukon" in blob or "tintina" in blob)
+    ):
+        deposit_type = "intrusion-related gold"
+        deposit_subtype = "irgs_general"
+    if (
+        material_key in {"gold", "au"}
+        and not deposit_type
+        and not deposit_subtype
+        and (target_belt == "andean" or "andean" in blob or "maricunga" in blob)
+        and ("heap" in blob or "open pit" in blob or "open-pit" in blob or "heap_leach_pad" in blob)
+    ):
+        deposit_type = "epithermal-HS"
+        deposit_subtype = "high_sulfidation_epithermal"
     return {
         "material": material,
         "deposit_type": deposit_type,
@@ -663,14 +688,29 @@ def _run_one(
     project_for_model = _merge_fixture_truth(project, fixture)
     cutoff = _parse_loose_date(project_for_model.get("mre_date") or project_for_model.get("mre_data_source"))
     cached_evidence = project_for_model.get("drilling_evidence")
+    cached_pre_cutoff = cached_evidence if _evidence_is_pre_cutoff(cached_evidence, cutoff) else None
     if refresh_target_evidence or not _evidence_is_pre_cutoff(cached_evidence, cutoff):
         evidence = _extract_pre_mre_target_evidence(project_for_model)
         if evidence:
+            save_evidence = True
+            if cached_pre_cutoff:
+                cached_score = evidence_quality_score(cached_pre_cutoff)
+                fresh_score = evidence_quality_score(evidence)
+                if cached_score > fresh_score:
+                    logging.info(
+                        "[pre-mre-evidence] keeping richer cached evidence for %s "
+                        "(cached_score=%s fresh_score=%s)",
+                        project_for_model.get("name"),
+                        cached_score,
+                        fresh_score,
+                    )
+                    evidence = cached_pre_cutoff
+                    save_evidence = False
             project_for_model = {**project_for_model, "drilling_evidence": evidence}
             for field in ("strike_length_m", "down_dip_extent_m", "avg_true_width_m"):
                 if project_for_model.get(field) is None and evidence.get(field) is not None:
                     project_for_model[field] = evidence.get(field)
-            if save and project.get("id") and _evidence_is_pre_cutoff(evidence, cutoff):
+            if save_evidence and save and project.get("id") and _evidence_is_pre_cutoff(evidence, cutoff):
                 with _SUPABASE_LOCK:
                     supabase_ops.save_project_drilling_evidence(project_id, evidence)
 
