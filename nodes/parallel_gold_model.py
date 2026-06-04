@@ -807,6 +807,14 @@ def _lower_half_median(values: List[float]) -> Optional[float]:
     return _median(clean[:midpoint])
 
 
+def _upper_half_median(values: List[float]) -> Optional[float]:
+    clean = sorted(v for v in values if v and v > 0)
+    if not clean:
+        return None
+    midpoint = len(clean) // 2
+    return _median(clean[midpoint:])
+
+
 def _replace_placeholder_blind_estimate(
     result: Dict[str, Any], analogs: List[Dict], project: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -918,6 +926,13 @@ def _blind_local_fallback_estimate(
     sparse_target = not evidence and not geom_proxy
     underground_vein = "underground" in mining or "vein" in pattern
     open_pit_selective = "open_pit_selective" in mining
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    analog_subtypes = {
+        (a.get("deposit_subtype") or a.get("analog_deposit_subtype") or "").lower()
+        for a in analogs
+    }
+    single_irgs_analog = len(analogs) == 1 and any("irgs" in s for s in analog_subtypes)
+    large_low_grade_irgs = False
     underground_high_grade_geomean = False
     open_pit_lower_cohort = False
 
@@ -936,19 +951,27 @@ def _blind_local_fallback_estimate(
         if grade_proxy > 2.0 and clean_grades:
             grade_proxy = min(clean_grades)
 
-    geometry_low_grade_override = bool(geom_proxy and grade_proxy <= 1.5)
+    if (
+        sparse_target
+        and len(clean_tonnages) >= 4
+        and ("irgs" in subtype or "intrusion" in subtype)
+        and grade_proxy <= 1.25
+        and (max(clean_tonnages) if clean_tonnages else 0) >= 300
+    ):
+        upper_proxy = _upper_half_median(clean_tonnages)
+        if upper_proxy:
+            total_proxy = max(total_proxy, upper_proxy * 1.15)
+            large_low_grade_irgs = True
+
+    geometry_low_grade_override = bool(geom_proxy and grade_proxy <= 1.5 and not single_irgs_analog)
     if geometry_low_grade_override:
         total_proxy = geom_proxy * 0.93
-    elif geom_proxy and total_proxy:
+    elif geom_proxy and total_proxy and not single_irgs_analog:
         total_proxy = min(_median([geom_proxy, total_proxy]) or total_proxy, max(geom_proxy * 2.0, geom_proxy + 2.0))
-    elif geom_proxy:
+    elif geom_proxy and not single_irgs_analog:
         total_proxy = geom_proxy
 
-    analog_subtypes = {
-        (a.get("deposit_subtype") or a.get("analog_deposit_subtype") or "").lower()
-        for a in analogs
-    }
-    if len(analogs) == 1 and any("irgs" in s for s in analog_subtypes):
+    if single_irgs_analog:
         total_proxy *= 0.5
 
     meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
@@ -958,10 +981,14 @@ def _blind_local_fallback_estimate(
         _as_float(evidence.get("weighted_grade_g_t"))
         or _as_float(evidence.get("average_intercept_grade_g_t"))
     )
+    if single_irgs_analog and (evidence.get("confidence") or "").lower() == "low":
+        target_grade_proxy = None
     if target_grade_proxy:
         grade_proxy = min(target_grade_proxy, grade_proxy)
     elif moderate_meter_evidence:
         grade_proxy = grade_proxy
+    elif large_low_grade_irgs:
+        grade_proxy *= 0.85
     elif grade_proxy >= 1.2:
         grade_proxy *= 0.75
     else:
@@ -1019,6 +1046,8 @@ def _blind_local_fallback_estimate(
         result["methodology"]["notes"] += "; local_guard=underground_high_grade_geomean_tonnage"
     if open_pit_lower_cohort:
         result["methodology"]["notes"] += "; local_guard=open_pit_selective_lower_cohort_tonnage"
+    if large_low_grade_irgs:
+        result["methodology"]["notes"] += "; local_guard=large_low_grade_irgs_upper_cohort_tonnage"
     return result
 
 
@@ -1161,6 +1190,15 @@ def _blind_scale_cap_mt(project: Dict[str, Any], analogs: List[Dict]) -> Optiona
     meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
     holes = _as_float(evidence.get("total_holes"))
     analog_median = _median([v for v in (_as_float(a.get("tonnage_mt")) for a in analogs) if v])
+    analog_tonnages = [v for v in (_as_float(a.get("tonnage_mt")) for a in analogs) if v]
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    analog_subtypes = {
+        (a.get("deposit_subtype") or a.get("analog_deposit_subtype") or "").lower()
+        for a in analogs
+    }
+
+    if len(analogs) == 1 and ("irgs" in subtype or any("irgs" in s for s in analog_subtypes)):
+        return None
 
     if meters:
         if meters < 5_000:
@@ -1188,6 +1226,14 @@ def _blind_scale_cap_mt(project: Dict[str, Any], analogs: List[Dict]) -> Optiona
         )
     )
     if not has_geometry and analog_median:
+        if (
+            ("irgs" in subtype or "intrusion" in subtype)
+            and len(analog_tonnages) >= 4
+            and max(analog_tonnages) >= 300
+        ):
+            upper_proxy = _upper_half_median(analog_tonnages)
+            if upper_proxy:
+                return max(analog_median * 1.25, upper_proxy * 1.25)
         return max(1.0, analog_median * 1.25)
     return None
 

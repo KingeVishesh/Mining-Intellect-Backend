@@ -337,8 +337,13 @@ def _build_profile(row: dict) -> dict:
     if (
         material in {"gold", "au"}
         and ("open" in mining_method or "open" in mining_class)
-        and tonnage is not None and tonnage >= 20
-        and grade is not None and grade <= 1.5
+        and (
+            "open_pit_selective" in mining_class
+            or (
+                tonnage is not None and tonnage >= 20
+                and grade is not None and grade <= 1.5
+            )
+        )
     ):
         pattern = "disseminated_bulk"
     elif not pattern and explicit_subtype == "orogenic_general":
@@ -981,13 +986,20 @@ def _derive_rule_inputs(project: Dict) -> tuple:
         project.get("mineralization_style"), project.get("mining_method"),
         project.get("processing_method"), deposit_type,
     )
-    if not pattern and deposit_subtype == "orogenic_general":
+    if deposit_subtype == "orogenic_general":
         mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
         tonnage = _as_positive_float(project.get("tonnage_mt"))
         grade = _as_positive_float(project.get("grade_value"))
-        if "open" in mining and tonnage is not None and tonnage >= 20 and grade is not None and grade <= 1.5:
+        if (
+            "open_pit_selective" in mining
+            or (
+                "open" in mining
+                and tonnage is not None and tonnage >= 20
+                and grade is not None and grade <= 1.5
+            )
+        ):
             pattern = "disseminated_bulk"
-        else:
+        elif not pattern:
             pattern = "vein_hosted"
     return material, deposit_type, deposit_subtype, pattern
 

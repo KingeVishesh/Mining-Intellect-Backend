@@ -34,6 +34,7 @@ load_dotenv(ROOT / ".env")
 
 from nodes.supabase_ops import get_client  # noqa: E402
 from nodes.parallel_gold_model import _blind_result_mentions_mre_anchor  # noqa: E402
+from scripts.gold_backtest_diagnostics import classify_failure, evidence_quality_score, extract_local_guards  # noqa: E402
 
 
 TROY_OZ_PER_TONNE = 32150.7466
@@ -94,12 +95,12 @@ def official_truth(project: Dict[str, Any]) -> Dict[str, Optional[float]]:
     }
 
 
-def select_runs(model_types: Iterable[str], latest_only: bool) -> List[Dict[str, Any]]:
+def select_runs(model_types: Iterable[str], latest_only: bool, run_id: Optional[str] = None) -> List[Dict[str, Any]]:
     client = get_client()
-    res = (
+    query = (
         client.table("model_runs")
         .select(
-            "id,project_id,run_at,model_type,status,"
+            "id,project_id,run_at,run_id,model_type,status,"
             "tonnage_mt,grade_value,total_contained,"
             "mi_tonnage_mt,mi_grade,mi_contained,"
             "inferred_resource_mt,inferred_grade,inferred_contained,"
@@ -107,9 +108,10 @@ def select_runs(model_types: Iterable[str], latest_only: bool) -> List[Dict[str,
         )
         .in_("model_type", list(model_types))
         .eq("status", "complete")
-        .order("run_at", desc=True)
-        .execute()
     )
+    if run_id:
+        query = query.eq("run_id", run_id)
+    res = query.order("run_at", desc=True).execute()
     rows = res.data or []
     if not latest_only:
         return rows
@@ -142,8 +144,8 @@ def fetch_projects(project_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
     return {row["id"]: row for row in (res.data or [])}
 
 
-def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float) -> int:
-    runs = select_runs(model_types, latest_only=latest_only)
+def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float, run_id: Optional[str] = None) -> int:
+    runs = select_runs(model_types, latest_only=latest_only, run_id=run_id)
     projects = fetch_projects(row["project_id"] for row in runs)
 
     evaluated = []
@@ -182,6 +184,19 @@ def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float
                 "signal_contributions_json": row.get("signal_contributions_json"),
             })
         )
+        payload = row.get("model_output_json") or {}
+        signal = row.get("signal_contributions_json") or {}
+        evidence_score = signal.get("evidence_quality") or evidence_quality_score(
+            (payload or {}).get("drilling_evidence")
+        )
+        failure = classify_failure(
+            errors=errors,
+            project=project,
+            model=payload,
+            evidence_score=evidence_score,
+            threshold=threshold,
+            leak_detected=leak_detected,
+        )
         pass_core = (
             not leak_detected
             and all(
@@ -191,16 +206,18 @@ def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float
             for k in ("tonnage", "grade", "contained")
             )
         )
-        evaluated.append((row, project, truth, errors, pass_core, leak_detected))
+        evaluated.append((row, project, truth, errors, pass_core, leak_detected, failure))
 
     print(f"[parallel-backtest] rows evaluated: {len(evaluated)}")
     print(f"[parallel-backtest] rows skipped without MRE truth: {len(skipped)}")
     print(f"[parallel-backtest] threshold: ±{threshold * 100:.0f}%")
+    if run_id:
+        print(f"[parallel-backtest] run_id: {run_id}")
     print()
 
-    for row, project, truth, errors, pass_core, leak_detected in evaluated:
+    for row, project, truth, errors, pass_core, leak_detected, failure in evaluated:
         print("=" * 92)
-        print(f"{project.get('name')}  |  {row['model_type']}  |  {row.get('run_at')}")
+        print(f"{project.get('name')}  |  {row['model_type']}  |  {row.get('run_at')}  |  run_id={row.get('run_id')}")
         print("-" * 92)
         print(f"{'Metric':24s} {'Predicted':>14s} {'Official MRE':>14s} {'Error':>10s}")
         print(f"{'Total tonnage (Mt)':24s} {row.get('tonnage_mt') or 0:14.3f} {truth['total_tonnage_mt'] or 0:14.3f} {fmt_pct(errors['tonnage']):>10s}")
@@ -212,17 +229,23 @@ def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float
         print(f"{'Inferred grade (g/t)':24s} {row.get('inferred_grade') or 0:14.3f} {truth['inferred_grade_gpt'] or 0:14.3f} {fmt_pct(errors['inferred_grade']):>10s}")
         if leak_detected:
             print("Blind leakage: target MRE/resource-anchor language detected")
+        if not pass_core:
+            print(f"Failure class: {failure.get('class')}")
+            print(f"Lesson: {failure.get('lesson')}")
+        guards = extract_local_guards(row.get("model_output_json") or {})
+        if guards:
+            print(f"Local guards: {', '.join(guards)}")
         print(f"Core pass: {'PASS' if pass_core else 'FAIL'}")
 
     if evaluated:
         print()
         print("=" * 92)
-        by_type: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Optional[float]], bool, bool]]] = defaultdict(list)
+        by_type: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Optional[float]], bool, bool, Dict[str, Any]]]] = defaultdict(list)
         for item in evaluated:
             by_type[item[0]["model_type"]].append(item)
         for model_type, items in sorted(by_type.items()):
-            pass_count = sum(1 for *_rest, passed, _leak in items if passed)
-            leak_count = sum(1 for *_rest, _passed, leak in items if leak)
+            pass_count = sum(1 for item in items if item[4])
+            leak_count = sum(1 for item in items if item[5])
             print(f"{model_type}: {pass_count}/{len(items)} pass")
             if leak_count:
                 print(f"  rejected blind leakage: {leak_count}")
@@ -257,10 +280,20 @@ def main() -> int:
         default=0.05,
         help="Core pass threshold as a fraction. Default 0.05.",
     )
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Evaluate only rows from this model_runs.run_id batch.",
+    )
     args = parser.parse_args()
 
     model_types = tuple(args.model_type or DEFAULT_MODEL_TYPES)
-    return run_backtest(model_types, latest_only=not args.all_runs, threshold=args.threshold)
+    return run_backtest(
+        model_types,
+        latest_only=not args.all_runs and not args.run_id,
+        threshold=args.threshold,
+        run_id=args.run_id,
+    )
 
 
 if __name__ == "__main__":

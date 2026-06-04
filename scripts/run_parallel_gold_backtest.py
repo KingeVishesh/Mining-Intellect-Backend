@@ -19,6 +19,7 @@ import logging
 import math
 import re
 import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -38,6 +39,12 @@ from nodes import supabase_ops  # noqa: E402
 from nodes import parallel_gold_model as parallel_gold_model_module  # noqa: E402
 from nodes.parallel_gold_model import parallel_gold_model_node  # noqa: E402
 from scripts.backtest_parallel import official_truth, pct_err, fmt_pct  # noqa: E402
+from scripts.gold_backtest_diagnostics import (  # noqa: E402
+    classify_failure,
+    evidence_quality_score,
+    extract_local_guards,
+    leaderboard_row,
+)
 from config import settings  # noqa: E402
 
 
@@ -256,7 +263,14 @@ def _contained_oz(tonnage_mt: Optional[float], grade_gpt: Optional[float]) -> Op
     return float(tonnage_mt) * float(grade_gpt) * TROY_OZ_PER_TONNE
 
 
-def _fields_from_parallel(project: Dict[str, Any], parallel_out: Dict[str, Any]) -> Dict[str, Any]:
+def _fields_from_parallel(
+    project: Dict[str, Any],
+    parallel_out: Dict[str, Any],
+    *,
+    batch_id: Optional[str] = None,
+    evidence_score: Optional[Dict[str, Any]] = None,
+    failure_class: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     mi = parallel_out.get("m_and_i") or {}
     inf = parallel_out.get("inferred") or {}
 
@@ -319,12 +333,16 @@ def _fields_from_parallel(project: Dict[str, Any], parallel_out: Dict[str, Any])
         "signal_contributions_json": {
             "source": "parallel.ai",
             "runner": "scripts/run_parallel_gold_backtest.py",
+            "batch_id": batch_id,
             "use_mre": False,
             "anchor_used": parallel_out.get("anchor_used"),
             "methodology": parallel_out.get("methodology"),
             "analogs_used": parallel_out.get("analogs_used"),
             "analogs_rejected": parallel_out.get("analogs_rejected"),
             "sources": parallel_out.get("sources"),
+            "evidence_quality": evidence_score,
+            "failure_class": failure_class,
+            "local_guards": extract_local_guards(parallel_out),
         },
     }
 
@@ -407,6 +425,8 @@ def _run_one(
     save: bool,
     find_analogs: bool,
     refresh_target_evidence: bool,
+    batch_id: str,
+    threshold: float,
 ) -> Dict[str, Any]:
     with _SUPABASE_LOCK:
         project = supabase_ops.get_project(project_id)
@@ -440,7 +460,37 @@ def _run_one(
         return {"project_id": project_id, "project_name": project.get("name"), "error": out["error"]}
 
     model = out.get("parallel_model") or {}
-    fields = _fields_from_parallel(project_for_model, model)
+    evidence_score = evidence_quality_score(project_for_model.get("drilling_evidence"))
+    provisional_fields = _fields_from_parallel(
+        project_for_model,
+        model,
+        batch_id=batch_id,
+        evidence_score=evidence_score,
+    )
+    truth = official_truth(project_for_model)
+    provisional_errors = {
+        "tonnage": pct_err(provisional_fields.get("tonnage_mt"), truth["total_tonnage_mt"]),
+        "grade": pct_err(provisional_fields.get("grade_value"), truth["total_grade_gpt"]),
+        "contained": pct_err(provisional_fields.get("total_contained"), truth["total_contained_oz"]),
+        "mi_tonnage": pct_err(provisional_fields.get("mi_tonnage_mt"), truth["mi_tonnage_mt"]),
+        "mi_grade": pct_err(provisional_fields.get("mi_grade"), truth["mi_grade_gpt"]),
+        "inferred_tonnage": pct_err(provisional_fields.get("inferred_resource_mt"), truth["inferred_tonnage_mt"]),
+        "inferred_grade": pct_err(provisional_fields.get("inferred_grade"), truth["inferred_grade_gpt"]),
+    }
+    failure = classify_failure(
+        errors=provisional_errors,
+        project=project_for_model,
+        model=model,
+        evidence_score=evidence_score,
+        threshold=threshold,
+    )
+    fields = _fields_from_parallel(
+        project_for_model,
+        model,
+        batch_id=batch_id,
+        evidence_score=evidence_score,
+        failure_class=failure,
+    )
     if save:
         with _SUPABASE_LOCK:
             supabase_ops.save_model_run(
@@ -448,9 +498,9 @@ def _run_one(
                 model_type="parallel_pre_mre",
                 fields=fields,
                 model_output_json=model,
+                run_id=batch_id,
             )
 
-    truth = official_truth(project_for_model)
     errors = {
         "tonnage": pct_err(fields.get("tonnage_mt"), truth["total_tonnage_mt"]),
         "grade": pct_err(fields.get("grade_value"), truth["total_grade_gpt"]),
@@ -467,6 +517,10 @@ def _run_one(
         "truth": truth,
         "errors": errors,
         "model": model,
+        "batch_id": batch_id,
+        "evidence_quality": evidence_score,
+        "failure_class": failure,
+        "local_guards": extract_local_guards(model),
     }
 
 
@@ -514,6 +568,16 @@ def main() -> int:
         default=None,
         help="Override local Parallel poll timeout in seconds for backtest runs.",
     )
+    parser.add_argument(
+        "--batch-id",
+        default=None,
+        help="Run ID to write to model_runs.run_id. Defaults to a generated gold_blind_<uuid>.",
+    )
+    parser.add_argument(
+        "--leaderboard-json",
+        default=None,
+        help="Optional path to write a machine-readable pass/fail leaderboard with failure lessons.",
+    )
     args = parser.parse_args()
     if args.processor:
         settings.parallel_processor = args.processor
@@ -554,10 +618,11 @@ def main() -> int:
             print(f"{target['project_id']} | {project.get('name') if project else '?'}")
         return 0
 
+    batch_id = args.batch_id or f"gold_blind_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
     print(
         f"[parallel-gold-backtest] launching {len(targets)} blind pre-MRE run(s) "
         f"with workers={args.workers}, save={not args.no_save}, "
-        f"find_analogs={args.find_analogs}"
+        f"find_analogs={args.find_analogs}, batch_id={batch_id}"
     )
 
     results: List[Dict[str, Any]] = []
@@ -570,6 +635,8 @@ def main() -> int:
             save=not args.no_save,
             find_analogs=args.find_analogs,
             refresh_target_evidence=args.refresh_target_evidence,
+            batch_id=batch_id,
+            threshold=args.threshold,
         )
         for target in targets
     ]
@@ -606,12 +673,23 @@ def main() -> int:
     print(f"{'Project':54s} {'Pass':>5s} {'T err':>9s} {'G err':>9s} {'Au err':>9s}")
     print("-" * 86)
     pass_count = 0
+    leaderboard: List[Dict[str, Any]] = []
     for result in sorted(results, key=lambda r: r.get("project_name") or ""):
         if result.get("error"):
             print(f"{(result.get('project_name') or result.get('project_id'))[:54]:54s} {'ERR':>5s}")
             continue
         passed = _core_pass(result["errors"], args.threshold)
         pass_count += int(passed)
+        failure = result.get("failure_class") or {}
+        leaderboard.append(
+            leaderboard_row(
+                project_name=result["project_name"],
+                errors=result["errors"],
+                passed=passed,
+                failure=failure,
+                guards=result.get("local_guards"),
+            )
+        )
         print(
             f"{result['project_name'][:54]:54s} "
             f"{'YES' if passed else 'NO':>5s} "
@@ -619,9 +697,24 @@ def main() -> int:
             f"{fmt_pct(result['errors']['grade']):>9s} "
             f"{fmt_pct(result['errors']['contained']):>9s}"
         )
+        if not passed:
+            print(f"{'':54s} {'':>5s} lesson: {failure.get('class')} — {failure.get('lesson')}")
 
     print("-" * 86)
     print(f"95% core matches: {pass_count}/{sum(1 for r in results if not r.get('error'))}")
+    print(f"batch_id: {batch_id}")
+    if args.leaderboard_json:
+        payload = {
+            "batch_id": batch_id,
+            "threshold": args.threshold,
+            "pass_count": pass_count,
+            "evaluated_count": sum(1 for r in results if not r.get("error")),
+            "leaderboard": leaderboard,
+        }
+        out_path = Path(args.leaderboard_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"leaderboard_json: {out_path}")
     return 0 if pass_count >= 5 else 1
 
 

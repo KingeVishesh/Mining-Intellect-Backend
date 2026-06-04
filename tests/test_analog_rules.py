@@ -81,7 +81,7 @@ def test_sediment_hosted_intrusion_related_uses_intrusion_family():
     assert profile["deposit_type_family"] == "intrusion_related"
 
 
-def test_missing_taxonomy_yilgarn_gold_routes_to_orogenic_vein():
+def test_missing_taxonomy_yilgarn_open_pit_gold_routes_to_bulk_pattern():
     from graphs.analog_finder import _derive_rule_inputs
 
     material, deposit_type, subtype, pattern = _derive_rule_inputs({
@@ -96,7 +96,7 @@ def test_missing_taxonomy_yilgarn_gold_routes_to_orogenic_vein():
     assert material == "Gold"
     assert deposit_type == "orogenic gold"
     assert subtype == "orogenic_general"
-    assert pattern == "vein_hosted"
+    assert pattern == "disseminated_bulk"
 
 
 def test_missing_taxonomy_yilgarn_gold_builds_orogenic_profile():
@@ -111,7 +111,7 @@ def test_missing_taxonomy_yilgarn_gold_builds_orogenic_profile():
 
     assert profile["deposit_type_family"] == "orogenic"
     assert profile["deposit_subtype"] == "orogenic_general"
-    assert profile["mineralization_pattern"] == "vein_hosted"
+    assert profile["mineralization_pattern"] == "disseminated_bulk"
     assert profile["tectonic_belt"] == "yilgarn"
 
 
@@ -1472,6 +1472,25 @@ def test_low_grade_open_pit_gold_uses_bulk_pattern():
     })
 
     assert profile["mineralization_pattern"] == "disseminated_bulk"
+
+
+def test_open_pit_selective_gold_uses_bulk_pattern_without_mre_scale():
+    """Blind analog selection should not need MRE tonnage to avoid UG-vein analogs."""
+    from graphs.analog_finder import _build_profile, _derive_rule_inputs
+
+    project = {
+        "name": "Small Open Pit Gold",
+        "material": "Gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method_class": "open_pit_selective",
+    }
+
+    profile = _build_profile(project)
+    _material, _deposit_type, _subtype, pattern = _derive_rule_inputs(project)
+
+    assert profile["mineralization_pattern"] == "disseminated_bulk"
+    assert pattern == "disseminated_bulk"
 
 
 def test_audit_events_emitted_for_every_candidate():

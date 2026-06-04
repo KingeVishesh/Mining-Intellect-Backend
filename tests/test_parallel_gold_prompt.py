@@ -467,6 +467,56 @@ def test_placeholder_replacement_uses_project_aware_open_pit_fallback():
     assert "open_pit_selective_lower_cohort_tonnage" in replaced["methodology"]["notes"]
 
 
+def test_blind_local_fallback_expands_sparse_large_low_grade_irgs():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Sparse Large IRGS",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "mineralization_pattern": "stockwork",
+        },
+        [
+            {"name": "Fort Knox", "tonnage_mt": 380, "grade_value": 0.5},
+            {"name": "Eagle", "tonnage_mt": 145, "grade_value": 0.65},
+            {"name": "Valley", "tonnage_mt": 267.3, "grade_value": 0.81},
+            {"name": "Coffee", "tonnage_mt": 80, "grade_value": 1.15},
+            {"name": "Donlin", "tonnage_mt": 540, "grade_value": 2.24},
+            {"name": "Fort Knox Mine", "tonnage_mt": 145, "grade_value": 0.45},
+        ],
+        reason="parallel_no_result",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert round(total_mt, 3) == 437.0
+    assert result["m_and_i"]["grade_gpt"] == 0.62
+    assert "large_low_grade_irgs_upper_cohort_tonnage" in result["methodology"]["notes"]
+
+
+def test_single_irgs_analog_not_overridden_by_tiny_geometry():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Single IRGS With Tiny Geometry",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "drilling_evidence": {
+                "strike_length_m": 400,
+                "down_dip_extent_m": 100,
+                "avg_true_width_m": 5,
+                "weighted_grade_g_t": 0.5,
+                "confidence": "low",
+                "source_url": "https://example.com/pre-mre-geometry.pdf",
+            },
+        },
+        [{"name": "Brewery Creek", "tonnage_mt": 31.0, "grade_value": 1.0, "deposit_subtype": "irgs_general"}],
+        reason="parallel_no_result",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert total_mt == 15.5
+    assert result["m_and_i"]["grade_gpt"] == 0.94
+    assert "low_grade_geometry_tonnage_proxy" not in result["methodology"]["notes"]
+
+
 def test_pre_mre_evidence_cutoff_prefers_publication_date():
     from scripts.run_parallel_gold_backtest import _evidence_is_pre_cutoff
 
