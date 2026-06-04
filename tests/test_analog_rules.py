@@ -55,6 +55,152 @@ def _find_rule(rule_id: str) -> dict:
     raise AssertionError(f"Rule {rule_id!r} not found in ANALOG_SELECTION_RULES")
 
 
+def test_self_analog_drops_name_containment():
+    from graphs.analog_finder import _is_self_analog
+
+    assert _is_self_analog(
+        "Cape Ray Shear Zone",
+        "Cape Ray Gold Project",
+    )
+
+
+def test_sediment_hosted_intrusion_related_allowed_in_irgs_rule():
+    rule = _find_rule("analog_sel_gold_irgs")
+
+    assert "sediment_hosted_general" in rule["required_subtypes"]
+
+
+def test_sediment_hosted_intrusion_related_uses_intrusion_family():
+    profile = _build_profile({
+        "name": "Hyland",
+        "material": "gold",
+        "deposit_type": "sediment hosted intrusion related",
+        "deposit_subtype": "sediment_hosted_general",
+    })
+
+    assert profile["deposit_type_family"] == "intrusion_related"
+
+
+def test_missing_taxonomy_yilgarn_gold_routes_to_orogenic_vein():
+    from graphs.analog_finder import _derive_rule_inputs
+
+    material, deposit_type, subtype, pattern = _derive_rule_inputs({
+        "name": "Spargoville",
+        "material": "Gold",
+        "tectonic_belt": "yilgarn",
+        "mining_method_class": "open_pit_selective",
+        "tonnage_mt": 3.0,
+        "grade_value": 1.4,
+    })
+
+    assert material == "Gold"
+    assert deposit_type == "orogenic gold"
+    assert subtype == "orogenic_general"
+    assert pattern == "vein_hosted"
+
+
+def test_missing_taxonomy_yilgarn_gold_builds_orogenic_profile():
+    profile = _build_profile({
+        "name": "Spargoville",
+        "material": "Gold",
+        "tectonic_belt": "yilgarn",
+        "mining_method_class": "open_pit_selective",
+        "tonnage_mt": 3.0,
+        "grade_value": 1.4,
+    })
+
+    assert profile["deposit_type_family"] == "orogenic"
+    assert profile["deposit_subtype"] == "orogenic_general"
+    assert profile["mineralization_pattern"] == "vein_hosted"
+    assert profile["tectonic_belt"] == "yilgarn"
+
+
+def test_irgs_sibling_subtypes_soft_pass_oxidation_variants():
+    rule = _find_rule("analog_sel_gold_irgs")
+    target = _build_profile({
+        "name": "Hyland",
+        "material": "gold",
+        "deposit_type": "sediment hosted intrusion related",
+        "deposit_subtype": "sediment_hosted_general",
+        "mineralization_mode": "supergene_oxide",
+        "mineralization_pattern": "disseminated_bulk",
+        "tectonic_belt": "yukon_tintina",
+        "mining_method_class": "heap_leach_pad",
+        "project_stage_class": "pea",
+        "tonnage_mt": 100.0,
+        "grade_value": 0.65,
+        "grade_unit": "g/t Au",
+    })
+    candidate = _build_profile({
+        "name": "Fort Knox",
+        "material": "gold",
+        "deposit_type": "intrusion-related gold system",
+        "deposit_subtype": "irgs_general",
+        "mineralization_mode": "primary_sulfide",
+        "mineralization_pattern": "stockwork",
+        "tectonic_belt": "yukon_tintina",
+        "mining_method_class": "open_pit_bulk",
+        "project_stage_class": "feasibility",
+        "tonnage_mt": 160.0,
+        "grade_value": 0.45,
+        "grade_unit": "g/t Au",
+    })
+
+    passes, _pts, _matched, _evaluated, reasons, dropped_at = _cascading_match(
+        target, candidate, rule,
+    )
+
+    assert passes, reasons
+    assert dropped_at is None
+    assert any("mode soft-pass" in reason for reason in reasons)
+
+
+def test_irgs_drops_mature_mine_scale_for_mid_scale_target():
+    rule = _find_rule("analog_sel_gold_irgs")
+    target = _build_profile({
+        "name": "Hyland",
+        "material": "gold",
+        "deposit_type": "sediment hosted intrusion related",
+        "deposit_subtype": "sediment_hosted_general",
+        "mineralization_mode": "supergene_oxide",
+        "mineralization_pattern": "disseminated_bulk",
+        "tectonic_belt": "yukon_tintina",
+        "mining_method_class": "heap_leach_pad",
+        "project_stage_class": "pea",
+        "tonnage_mt": 15.2,
+        "grade_value": 0.935,
+        "grade_unit": "g/t Au",
+    })
+    eagle = _build_profile({
+        "name": "Eagle Gold",
+        "material": "gold",
+        "deposit_type": "intrusion-related gold system",
+        "deposit_subtype": "irgs_general",
+        "mineralization_mode": "free_milling_oxide",
+        "mineralization_pattern": "stockwork",
+        "tectonic_belt": "yukon_tintina",
+        "mining_method_class": "open_pit_bulk",
+        "project_stage_class": "feasibility",
+        "tonnage_mt": 145.0,
+        "grade_value": 0.65,
+        "grade_unit": "g/t Au",
+    })
+
+    passes, _pts, _matched, _evaluated, reasons, dropped_at = _cascading_match(
+        target, eagle, rule,
+    )
+
+    assert not passes
+    assert dropped_at == "L5.5"
+    assert any("scale mismatch" in reason for reason in reasons)
+
+
+def test_exa_search_node_can_be_skipped():
+    from graphs.analog_finder import exa_search_node
+
+    assert exa_search_node({"skip_exa": True, "project": {}}) == {"exa_analogs": []}
+
+
 def _apply_rule_then_cascade(
     rule: dict, target_profile: dict, candidate: dict,
 ) -> tuple[bool, str | None, list[str]]:
@@ -1295,6 +1441,37 @@ def test_self_analog_by_project_id():
                              project_id="abc-123", candidate_project_id="abc-123")
     assert not _is_self_analog("Hat Copper", "Mt. Milligan",
                                  project_id="abc-123", candidate_project_id="xyz-789")
+
+
+def test_self_analog_by_distinctive_project_token():
+    """Same-property project variants should not leak into the analog cohort."""
+    from graphs.analog_finder import _is_self_analog
+
+    assert _is_self_analog(
+        "Banyan Gold - AurMac Gold Project",
+        "AurMac Project (Powerline/Airstrip)",
+    )
+    assert not _is_self_analog(
+        "Cadillac Gold Project",
+        "Canadian Malartic - Odyssey UG",
+    )
+
+
+def test_low_grade_open_pit_gold_uses_bulk_pattern():
+    """Large low-grade open-pit gold should not be modeled as narrow vein-hosted."""
+    from graphs.analog_finder import _build_profile
+
+    profile = _build_profile({
+        "name": "Mandilla Gold Project",
+        "material": "Gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method": "Open-pit",
+        "tonnage_mt": 41.5,
+        "grade_value": 1.1,
+    })
+
+    assert profile["mineralization_pattern"] == "disseminated_bulk"
 
 
 def test_audit_events_emitted_for_every_candidate():

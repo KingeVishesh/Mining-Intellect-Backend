@@ -61,6 +61,7 @@ class AnalogState(TypedDict, total=False):
     saved: bool
     error: Optional[str]
     research_attempted: bool            # auto-research loop-guard (set by load_project_and_rule_node)
+    skip_exa: bool                      # test/backfill path: use the vetted library only
 
 
 # ── Scoring helpers ────────────────────────────────────────────────────────────
@@ -152,6 +153,9 @@ def _deposit_type_family(dep: str) -> Optional[str]:
         return None
     d = dep.strip().lower().replace("-", " ").replace("_", " ")
     for keyword, family in (
+        ("intrusion related",      "intrusion_related"),
+        ("irgs",                   "intrusion_related"),
+        ("intrusive related",      "intrusion_related"),
         ("porphyry",               "porphyry"),
         ("epithermal",             "epithermal"),
         ("low sulphidation",       "epithermal"),
@@ -191,6 +195,29 @@ def _deposit_type_family(dep: str) -> Optional[str]:
         ("ug2",                    "pgm_reef"),
     ):
         if keyword in d:
+            return family
+    return None
+
+
+def _deposit_type_family_from_subtype(subtype: str) -> Optional[str]:
+    """Map canonical subtypes to the coarser family used by L2."""
+    if not subtype:
+        return None
+    s = subtype.strip().lower()
+    for token, family in (
+        ("orogenic", "orogenic"),
+        ("irgs", "intrusion_related"),
+        ("intrusion", "intrusion_related"),
+        ("epithermal", "epithermal"),
+        ("carlin", "carlin"),
+        ("porphyry", "porphyry"),
+        ("vms", "vms"),
+        ("vhms", "vms"),
+        ("sediment_hosted", "sediment_hosted"),
+        ("skarn", "skarn"),
+        ("iocg", "iocg"),
+    ):
+        if token in s:
             return family
     return None
 
@@ -276,20 +303,55 @@ def _build_profile(row: dict) -> dict:
     # even if a legacy row has "{Epithermal}" or similar set-literal noise.
     clean_deposit_type = rules_engine.sanitize_deposit_type(row.get("deposit_type"))
     row = {**row, "deposit_type": clean_deposit_type}
+    material = (row.get("material") or "").strip().lower()
+    belt = row.get("tectonic_belt") or geo_taxonomy.detect_belt(
+        row.get("country"), row.get("region"), row.get("district"),
+    )
+    explicit_subtype = row.get("deposit_subtype") or geo_taxonomy.detect_subtype(
+        row.get("deposit_type"), row.get("mineralization_style"),
+        row.get("alteration_signature"), row.get("district") or row.get("location_name"),
+    )
+    if (
+        not clean_deposit_type
+        and not explicit_subtype
+        and material in {"gold", "au"}
+        and belt in geo_taxonomy.BELT_COMPATIBILITY_GROUPS.get("archean_greenstone", frozenset())
+    ):
+        clean_deposit_type = "orogenic gold"
+        row = {**row, "deposit_type": clean_deposit_type}
+        explicit_subtype = "orogenic_general"
+    subtype_family = _deposit_type_family_from_subtype(explicit_subtype)
+    deposit_family = _deposit_type_family(row.get("deposit_type") or "")
+    if subtype_family == "sediment_hosted" and deposit_family == "intrusion_related":
+        family = deposit_family
+    else:
+        family = subtype_family or deposit_family
+    pattern = row.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
+        row.get("mineralization_style"), row.get("mining_method"),
+        row.get("processing_method"), row.get("deposit_type"),
+    )
+    mining_method = (row.get("mining_method") or "").strip().lower()
+    mining_class = (row.get("mining_method_class") or "").strip().lower()
+    tonnage = _as_positive_float(row.get("tonnage_mt"))
+    grade = _as_positive_float(row.get("grade_value"))
+    if (
+        material in {"gold", "au"}
+        and ("open" in mining_method or "open" in mining_class)
+        and tonnage is not None and tonnage >= 20
+        and grade is not None and grade <= 1.5
+    ):
+        pattern = "disseminated_bulk"
+    elif not pattern and explicit_subtype == "orogenic_general":
+        pattern = "vein_hosted"
     return {
-        "material":             (row.get("material") or "").strip().lower(),
-        "deposit_type_family":  _deposit_type_family(row.get("deposit_type") or ""),
-        "deposit_subtype":      row.get("deposit_subtype") or geo_taxonomy.detect_subtype(
-            row.get("deposit_type"), row.get("mineralization_style"),
-            row.get("alteration_signature"), row.get("district") or row.get("location_name"),
-        ),
+        "material":             material,
+        "deposit_type_family":  family,
+        "deposit_subtype":      explicit_subtype,
         "mineralization_mode":  row.get("mineralization_mode") or geo_taxonomy.detect_mode(
             row.get("processing_method"), row.get("mineralization_style"),
             row.get("district") or row.get("location_name"), row.get("deposit_type"),
         ),
-        "tectonic_belt":        row.get("tectonic_belt") or geo_taxonomy.detect_belt(
-            row.get("country"), row.get("region"), row.get("district"),
-        ),
+        "tectonic_belt":        belt,
         "metal_suite":          row.get("metal_suite") or geo_taxonomy.detect_metal_suite(
             row.get("material"), None, row.get("district"), row.get("deposit_type"),
         ),
@@ -301,10 +363,7 @@ def _build_profile(row: dict) -> dict:
             row.get("deposit_type"),
         ),
         # Mineralization pattern (orebody geometry) — L4.5 filter
-        "mineralization_pattern": row.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
-            row.get("mineralization_style"), row.get("mining_method"),
-            row.get("processing_method"), row.get("deposit_type"),
-        ),
+        "mineralization_pattern": pattern,
         # Host rock class — L4.7 filter
         "host_rock_class":      row.get("host_rock_class") or geo_taxonomy.detect_host_class(
             row.get("host_rock"), row.get("deposit_type"),
@@ -524,11 +583,20 @@ def _cascading_match(
     # refractory sulfide) are all the same deposit type at different oxidation
     # states. Soft pass (no rank credit, no hard reject) preserves them in the
     # pool with reduced influence rather than dropping useful scale/grade signal.
-    same_subtype_and_belt = bool(
+    same_subtype_or_rule_sibling = bool(
         target.get("deposit_subtype") and candidate.get("deposit_subtype")
-        and target["deposit_subtype"] == candidate["deposit_subtype"]
+        and (
+            target["deposit_subtype"] == candidate["deposit_subtype"]
+            or (
+                target["deposit_subtype"] in rule_required
+                and candidate["deposit_subtype"] in rule_required
+            )
+        )
+    )
+    same_subtype_and_belt = bool(
+        same_subtype_or_rule_sibling
         and target.get("tectonic_belt") and candidate.get("tectonic_belt")
-        and target["tectonic_belt"] == candidate["tectonic_belt"]
+        and geo_taxonomy.belt_compatible(target["tectonic_belt"], candidate["tectonic_belt"])
     )
     if not geo_taxonomy.mode_compatible(target["mineralization_mode"], candidate["mineralization_mode"]):
         if same_subtype_and_belt:
@@ -842,6 +910,21 @@ def _is_self_analog(
         return False
     overlap = len(p_words & c_words)
     name_overlap = overlap / min(len(p_words), len(c_words))
+    broad_words = {
+        "gold", "silver", "copper", "nickel", "uranium", "iron", "ore",
+        "zone", "trend", "camp", "belt", "shear", "north", "south", "east",
+        "west", "central", "main",
+    }
+    p_core = p_words - broad_words
+    c_core = c_words - broad_words
+    if p_core and c_core and (p_core <= c_core or c_core <= p_core):
+        return True
+    distinctive_overlap = {
+        w for w in (p_words & c_words)
+        if len(w) >= 5 and w not in broad_words
+    }
+    if distinctive_overlap and min(len(p_words), len(c_words)) <= 4:
+        return True
     # Level 2: company match + lower name overlap threshold (≥40%)
     if project_company and candidate_company:
         pc = project_company.strip().lower()
@@ -883,10 +966,29 @@ def _derive_rule_inputs(project: Dict) -> tuple:
         project.get("alteration_signature"),
         project.get("district") or project.get("location_name"),
     )
+    belt = project.get("tectonic_belt") or geo_taxonomy.detect_belt(
+        project.get("country"), project.get("region"), project.get("district"),
+    )
+    if (
+        not deposit_type
+        and not deposit_subtype
+        and (material or "").strip().lower() in {"gold", "au"}
+        and belt in geo_taxonomy.BELT_COMPATIBILITY_GROUPS.get("archean_greenstone", frozenset())
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
     pattern = project.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
         project.get("mineralization_style"), project.get("mining_method"),
         project.get("processing_method"), deposit_type,
     )
+    if not pattern and deposit_subtype == "orogenic_general":
+        mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
+        tonnage = _as_positive_float(project.get("tonnage_mt"))
+        grade = _as_positive_float(project.get("grade_value"))
+        if "open" in mining and tonnage is not None and tonnage >= 20 and grade is not None and grade <= 1.5:
+            pattern = "disseminated_bulk"
+        else:
+            pattern = "vein_hosted"
     return material, deposit_type, deposit_subtype, pattern
 
 
@@ -1054,7 +1156,7 @@ def library_search_node(state: AnalogState) -> AnalogState:
 
 def exa_search_node(state: AnalogState) -> AnalogState:
     """Find comparable projects via Exa using rule-driven targeted query."""
-    if state.get("error"):
+    if state.get("error") or state.get("skip_exa"):
         return {"exa_analogs": []}
 
     project = state["project"]
@@ -1246,6 +1348,41 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     required_stages = set((analog_rule or {}).get("required_stages") or [])
     required_mining_methods = set((analog_rule or {}).get("required_mining_methods") or [])
     required_metal_suites = set((analog_rule or {}).get("required_metal_suites") or [])
+
+    # If target enrichment detects a more specific pattern/mining method than
+    # the rule lookup used, do not let the rule exclude the target's own class.
+    target_pattern = target_profile.get("mineralization_pattern")
+    if target_pattern in excluded_patterns:
+        excluded_patterns.remove(target_pattern)
+        logger.info(
+            f"[cascade] target pattern {target_pattern!r} overrides "
+            f"rule excluded_patterns for {(analog_rule or {}).get('rule_id','none')}"
+        )
+    if target_pattern and required_patterns and target_pattern not in required_patterns:
+        logger.info(
+            f"[cascade] target pattern {target_pattern!r} overrides "
+            f"rule required_patterns={sorted(required_patterns)} for "
+            f"{(analog_rule or {}).get('rule_id','none')}"
+        )
+        required_patterns = {target_pattern}
+    target_mining_method = target_profile.get("mining_method_class")
+    if target_mining_method in excluded_mining_methods:
+        excluded_mining_methods.remove(target_mining_method)
+        logger.info(
+            f"[cascade] target mining method {target_mining_method!r} overrides "
+            f"rule excluded_mining_methods for {(analog_rule or {}).get('rule_id','none')}"
+        )
+    if (
+        target_mining_method
+        and required_mining_methods
+        and target_mining_method not in required_mining_methods
+    ):
+        logger.info(
+            f"[cascade] target mining method {target_mining_method!r} overrides "
+            f"rule required_mining_methods={sorted(required_mining_methods)} for "
+            f"{(analog_rule or {}).get('rule_id','none')}"
+        )
+        required_mining_methods = {target_mining_method}
 
     logger.info(
         f"[cascade] {len(library)} library + {len(exa)} exa = {len(all_candidates)} "
@@ -1531,9 +1668,10 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         f"[cascade] {len(survivors)} survivors | dropped: {dict(dropped_counts) or 'none'}"
     )
 
-    # ── Step D: Rank by total points; HARD CAP at 4 ────────────────────────
-    # Per product requirement: max 4 analogs. Better to have 4 strong matches
-    # than dilute with weaker candidates.
+    # ── Step D: Rank by total points; HARD CAP at 6 ────────────────────────
+    # Gold backtests showed that 1-2 analog cohorts create unstable drill-to-MRE
+    # transformations. Keep the cap tight for UX, but allow enough candidates
+    # for a median transform and mark thinner cohorts low-confidence.
     ranked = sorted(survivors, key=lambda x: -x["_rank_pts"])
 
     # ── Step D.1: Semi-hard sub-trend filter (Buckreef audit, 2026-05-22) ──
@@ -1561,15 +1699,16 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             sub_trend_filtered = cross_trend
             ranked = in_trend
 
-    low_confidence = len(ranked) < 2
+    min_cohort_size = 3 if (project.get("material") or "").strip().lower() in {"gold", "au"} else 2
+    low_confidence = len(ranked) < min_cohort_size
     if low_confidence:
         logger.warning(
             f"[cascade] Only {len(ranked)} candidate(s) passed L1-L5 — "
             f"flagging low_confidence; returning best available without padding"
         )
-        top = ranked[:2]
+        top = ranked[:min_cohort_size]
     else:
-        top = ranked[:4]
+        top = ranked[:6]
 
     # Audit events for cross-sub-trend candidates that the semi-hard
     # filter pushed out of contention. Useful so the user can see WHY a
@@ -1598,7 +1737,7 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     # were squeezed out by the top-4 cap get a NEAR_MISS audit event. Makes
     # the cap auditable: if a strong 5th candidate exists, it's visible in
     # the audit trail rather than silently lost.
-    near_misses = ranked[4:7]  # top-3 just below the cap
+    near_misses = ranked[6:9]  # top-3 just below the cap
     for nm in near_misses:
         audit_events.append({
             "candidate_name": nm.get("name") or "Unknown",

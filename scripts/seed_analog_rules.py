@@ -1030,7 +1030,8 @@ ANALOG_SELECTION_RULES = [
         # SAME-belt case sibling matches are exactly the cohort the
         # user wants.
         "required_subtypes":   ["irgs_general", "orogenic_general",
-                                 "greenstone_orogenic"],
+                                 "greenstone_orogenic",
+                                 "sediment_hosted_general"],
         "required_patterns":   ["stockwork", "vein_hosted", "disseminated_bulk"],
         "required_modes":      ["primary_sulfide", "refractory_sulfide",
                                  "free_milling_oxide"],
@@ -1048,16 +1049,21 @@ ANALOG_SELECTION_RULES = [
         "excluded_patterns":   ["replacement", "reef", "placer",
                                  "massive_sulphide", "blanket"],
         "excluded_recovery":   ["iscr", "hpal"],
-        "required_mining_methods": ["open_pit_bulk", "open_pit_selective", "underground_bulk", "underground_vein"],
+        "required_mining_methods": ["open_pit_bulk", "open_pit_selective", "heap_leach_pad", "underground_bulk", "underground_vein"],
         "excluded_mining_methods": ["iscr_in_situ", "dredging"],
         "rule_priority":       170,
-        "tonnage_match_max_ratio": 10.0,
+        # Tightened 2026-06-04 from 10× → 5× after Hyland blind backtest:
+        # otherwise mid-scale Tintina IRGS targets drew mature 145 Mt mine
+        # analogs (Eagle/Fort Knox) and over-predicted by an order of
+        # magnitude. Keep those as regional context, not scale analogs.
+        "tonnage_match_max_ratio": 5.0,
         "grade_match_max_ratio":   5.0,
         "min_resource_year":   2010,
         "min_profile_strength": 5,
         "applies_lessons":     ["LG1", "LG3", "LG19", "LG136", "LG154", "L_ORO_02"],
         "analog_criteria": [
             "Sheeted-vein or stockwork gold associated with reduced felsic intrusion",
+            "Sediment-hosted intrusion-related gold is accepted when project research uses sediment_hosted_general",
             "Tintina-Cordilleran setting preferred (Yukon, Alaska, BC)",
             "Distinct from porphyry: different alteration and metal suite",
             "Match grade band 0.5–4 g/t Au and bulk-mineable scale",

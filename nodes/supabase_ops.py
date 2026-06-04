@@ -466,8 +466,69 @@ def _persist_analogs_run_and_latest(
         logger.warning(f"[DB] projects.analogs update failed: {e}")
 
 
+def _project_analog_row_to_candidate(row: Dict) -> Dict:
+    return {
+        "name": row.get("analog_name"),
+        "material": row.get("analog_material"),
+        "deposit_type": row.get("analog_deposit_type"),
+        "host_rock": row.get("analog_host_rock"),
+        "mineralization_style": row.get("analog_mineralization_style"),
+        "district": row.get("analog_district"),
+        "country": row.get("analog_country"),
+        "tonnage_mt": row.get("analog_tonnage_mt"),
+        "grade_value": row.get("analog_grade_value"),
+        "grade_unit": row.get("analog_grade_unit"),
+        "source_url": row.get("source_url"),
+        "project_stage": row.get("analog_project_stage"),
+        "deposit_subtype": row.get("analog_deposit_subtype"),
+        "mineralization_mode": row.get("analog_mineralization_mode"),
+        "tectonic_belt": row.get("analog_tectonic_belt"),
+        "metal_suite": row.get("analog_metal_suite"),
+        "alteration_signature": row.get("analog_alteration_signature"),
+        "recovery_method": row.get("analog_recovery_method"),
+        "mineralization_pattern": row.get("analog_mineralization_pattern"),
+        "host_rock_class": row.get("analog_host_rock_class"),
+        "project_stage_class": row.get("analog_project_stage_class"),
+        "mining_method_class": row.get("analog_mining_method_class"),
+        "resource_category_class": row.get("analog_resource_category_class"),
+        "resource_compliance_standard": row.get("analog_resource_compliance_standard"),
+        "resource_vintage_year": row.get("analog_resource_vintage_year"),
+        "similarity_score": row.get("similarity_score"),
+        "source": row.get("source") or "analogs_table",
+    }
+
+
+def _get_project_approved_analogs(project_id: str, limit: int = 10) -> List[Dict]:
+    res = (
+        get_client()
+        .table("analogs")
+        .select(_LIBRARY_SELECT)
+        .eq("project_id", project_id)
+        .eq("status", "approved")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    out: List[Dict] = []
+    seen: set[str] = set()
+    for row in res.data or []:
+        cand = _project_analog_row_to_candidate(row)
+        name = (cand.get("name") or "").strip().lower()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(cand)
+    return out
+
+
 def get_analogs(project_id: str) -> List[Dict]:
-    """Load the most recently saved analogs for a project."""
+    """Load the freshest saved analogs for a project.
+
+    Prefer the latest workflow state for UI continuity, but fall back to the
+    approved analog table when a later low-confidence run saved an empty/thin
+    workflow cohort. This prevents model runs from being starved when the
+    library still has cascade-approved analogs for the same project.
+    """
     res = (
         get_client()
         .table("workflow_states")
@@ -478,9 +539,23 @@ def get_analogs(project_id: str) -> List[Dict]:
         .limit(1)
         .execute()
     )
+    workflow = []
     if res.data:
-        return res.data[0].get("analogs_json") or []
-    return []
+        workflow = res.data[0].get("analogs_json") or []
+    if workflow:
+        return workflow
+    table_analogs = _get_project_approved_analogs(project_id)
+    if not table_analogs:
+        return workflow
+    merged: List[Dict] = []
+    seen: set[str] = set()
+    for analog in list(workflow) + table_analogs:
+        name = (analog.get("name") or analog.get("analog_name") or "").strip().lower()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        merged.append(analog)
+    return merged
 
 
 # ── Compiled Rules ─────────────────────────────────────────────────────────────
