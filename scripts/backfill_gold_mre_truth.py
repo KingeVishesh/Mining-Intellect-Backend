@@ -15,6 +15,8 @@ Examples:
     python3 scripts/backfill_gold_mre_truth.py --fixtures
     python3 scripts/backfill_gold_mre_truth.py --fixtures --apply
     python3 scripts/backfill_gold_mre_truth.py --project-id <uuid> --apply
+    python3 scripts/backfill_gold_mre_truth.py --db-gold --list-candidates
+    python3 scripts/backfill_gold_mre_truth.py --db-gold --limit 20 --apply
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ import argparse
 import json
 import logging
 import math
+import random
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -38,6 +41,19 @@ from nodes import inferred_extractor, supabase_ops  # noqa: E402
 
 TROY_OZ_PER_TONNE = 32150.7466
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "backtest"
+TRUTH_FIELDS = (
+    "mre_mi_tonnage_mt", "mre_mi_grade",
+    "mre_inferred_tonnage_mt", "mre_inferred_grade",
+)
+PROJECT_SELECT = ",".join((
+    "id", "name", "material", "country", "region", "district",
+    "deposit_type", "deposit_subtype", "tonnage_mt",
+    "grade_value", "grade_unit", "total_contained", "resource_category",
+    "resource_compliance_standard", "resource_vintage_year",
+    "mre_mi_tonnage_mt", "mre_mi_grade", "mre_mi_contained",
+    "mre_inferred_tonnage_mt", "mre_inferred_grade",
+    "mre_inferred_contained", "updated_at",
+))
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -63,14 +79,104 @@ def _db_rows(project_ids: Iterable[str]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _has_full_truth(row: Dict[str, Any]) -> bool:
-    return all(
-        row.get(k) is not None
-        for k in (
-            "mre_mi_tonnage_mt", "mre_mi_grade",
-            "mre_inferred_tonnage_mt", "mre_inferred_grade",
+def _fetch_gold_project_rows() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    offset = 0
+    while True:
+        res = (
+            supabase_ops.get_client()
+            .table("projects")
+            .select(PROJECT_SELECT)
+            .ilike("material", "gold")
+            .order("name")
+            .range(offset, offset + 999)
+            .execute()
         )
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    return rows
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_full_truth(row: Dict[str, Any]) -> bool:
+    return all(row.get(k) is not None for k in TRUTH_FIELDS)
+
+
+def _missing_truth_fields(row: Dict[str, Any]) -> List[str]:
+    return [field for field in TRUTH_FIELDS if row.get(field) is None]
+
+
+def _has_valid_known_total(row: Dict[str, Any]) -> bool:
+    tonnage = _as_float(row.get("tonnage_mt"))
+    grade = _as_float(row.get("grade_value"))
+    if tonnage is None or grade is None:
+        return False
+    return 0 < tonnage <= 1000 and 0 < grade <= 50
+
+
+def _candidate_status(
+    row: Dict[str, Any],
+    *,
+    require_known_total: bool = True,
+    include_full_truth: bool = False,
+) -> tuple[bool, str]:
+    material = str(row.get("material") or "").lower()
+    if "gold" not in material:
+        return False, "not a gold row"
+    if _has_full_truth(row) and not include_full_truth:
+        return False, "already has full M&I/Inferred truth"
+    if require_known_total and not _has_valid_known_total(row):
+        return False, "missing or invalid known total tonnage/grade"
+    missing = _missing_truth_fields(row)
+    if missing:
+        return True, f"missing truth fields: {', '.join(missing)}"
+    return True, "full truth included by --force"
+
+
+def _db_gold_rows(
+    *,
+    limit: Optional[int] = None,
+    require_known_total: bool = True,
+    include_full_truth: bool = False,
+    randomize: bool = False,
+    random_seed: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    skipped: Dict[str, int] = {}
+    for row in _fetch_gold_project_rows():
+        ok, reason = _candidate_status(
+            row,
+            require_known_total=require_known_total,
+            include_full_truth=include_full_truth,
+        )
+        if not ok:
+            skipped[reason] = skipped.get(reason, 0) + 1
+            continue
+        candidates.append(row)
+    if randomize:
+        candidates = sorted(candidates, key=lambda row: ((row.get("name") or "").lower(), row["id"]))
+        random.Random(random_seed).shuffle(candidates)
+    if limit:
+        candidates = candidates[:limit]
+    logger.info(
+        "DB gold candidates selected=%s randomize=%s seed=%s skipped=%s",
+        len(candidates),
+        randomize,
+        random_seed,
+        json.dumps(skipped, sort_keys=True),
     )
+    return candidates
 
 
 def _contained(tonnage_mt: Optional[float], grade_gpt: Optional[float]) -> Optional[float]:
@@ -87,6 +193,47 @@ def _weighted_total(mi_t: float, mi_g: float, inf_t: float, inf_g: float) -> Dic
         "total_grade": total_g,
         "total_contained": _contained(total_t, total_g) or 0.0,
     }
+
+
+def _normalise_extracted_tonnage_units(
+    row: Dict[str, Any],
+    extracted: Dict[str, Any],
+) -> tuple[Dict[str, Any], Optional[str]]:
+    """Rescale obvious kt/t tonnage answers before validation.
+
+    Exa sometimes returns table values in kt or tonnes while filling our
+    `*_tonnage_mt` schema. Only correct when both split buckets exist and
+    the combined split is near an exact 1,000x or 1,000,000x multiple of
+    the known project total.
+    """
+    known_t = _as_float(row.get("tonnage_mt"))
+    mi_t = _as_float(extracted.get("mi_tonnage_mt"))
+    inf_t = _as_float(extracted.get("inferred_tonnage_mt"))
+    if known_t is None or known_t <= 0 or mi_t is None or inf_t is None:
+        return extracted, None
+
+    total_t = mi_t + inf_t
+    if total_t <= 0:
+        return extracted, None
+
+    ratio = total_t / known_t
+    for factor, label in ((1000.0, "kt"), (1_000_000.0, "tonnes")):
+        if abs(ratio - factor) / factor > 0.05:
+            continue
+        normalised = dict(extracted)
+        normalised["mi_tonnage_mt"] = mi_t / factor
+        normalised["inferred_tonnage_mt"] = inf_t / factor
+        normalised["unit_normalization"] = {
+            "from": label,
+            "factor_to_mt": factor,
+            "known_total_mt": known_t,
+            "raw_total": total_t,
+        }
+        return (
+            normalised,
+            f"normalised extracted tonnage from {label} to Mt using known total",
+        )
+    return extracted, None
 
 
 def _rel_err(pred: Optional[float], actual: Optional[float]) -> Optional[float]:
@@ -144,7 +291,10 @@ def _build_mre_payload(row: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[s
         extracted["inferred_tonnage_mt"], extracted["inferred_grade"],
     )
     as_of = extracted.get("as_of_year")
-    effective_date = f"{int(as_of)}-12-31" if as_of else None
+    # The extractor often only knows the MRE/report year. Use Jan 1 as the
+    # conservative blind-backtest cutoff so same-year post-MRE disclosures
+    # are not accidentally allowed as "pre-MRE" evidence.
+    effective_date = f"{int(as_of)}-01-01" if as_of else None
     return {
         "total_tonnage_mt": round(totals["total_tonnage_mt"], 4),
         "total_grade": round(totals["total_grade"], 5),
@@ -189,13 +339,44 @@ def main() -> int:
     parser.add_argument("--fixtures", action="store_true", help="Use backtest fixture project IDs.")
     parser.add_argument("--fixture", action="append", default=[], help="Specific fixture stem.")
     parser.add_argument("--project-id", action="append", default=[], help="Specific Supabase project ID.")
+    parser.add_argument(
+        "--db-gold",
+        action="store_true",
+        help="Scan Supabase gold projects missing full M&I/Inferred MRE truth.",
+    )
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--random-candidates",
+        action="store_true",
+        help="Shuffle DB gold extraction candidates with --random-seed before applying --limit.",
+    )
+    parser.add_argument(
+        "--random-seed",
+        default=None,
+        help="Seed for --random-candidates so the same backfill batch can be reproduced.",
+    )
+    parser.add_argument(
+        "--list-candidates",
+        action="store_true",
+        help="Print candidate rows and exit without calling Exa or writing data.",
+    )
     parser.add_argument("--apply", action="store_true", help="Write verified truth to Supabase.")
     parser.add_argument("--force", action="store_true", help="Refetch even when full truth already exists.")
+    parser.add_argument(
+        "--allow-no-known-total",
+        action="store_true",
+        help="Allow DB gold rows without a known total cross-check into extraction candidates.",
+    )
     parser.add_argument(
         "--allow-total-mismatch",
         action="store_true",
         help="Accept sane extracted split truth even when local total fields are stale/conflicting.",
+    )
+    parser.add_argument(
+        "--target-usable",
+        type=int,
+        default=None,
+        help="Stop extraction after this many rows pass validation.",
     )
     parser.add_argument("--json-out", default=None, help="Optional path for extraction audit JSON.")
     args = parser.parse_args()
@@ -204,14 +385,55 @@ def main() -> int:
     if args.fixtures or args.fixture:
         rows.extend(_fixture_rows(args.fixture or None))
     rows.extend(_db_rows(args.project_id))
+    if args.db_gold:
+        rows.extend(
+            _db_gold_rows(
+                limit=args.limit,
+                require_known_total=not args.allow_no_known_total,
+                include_full_truth=args.force,
+                randomize=args.random_candidates,
+                random_seed=args.random_seed,
+            )
+        )
     if not rows:
         rows.extend(_fixture_rows(None))
-    if args.limit:
+    if args.limit and not args.db_gold:
         rows = rows[: args.limit]
+
+    if args.list_candidates:
+        audit = []
+        for row in rows:
+            ok, reason = _candidate_status(
+                row,
+                require_known_total=not args.allow_no_known_total,
+                include_full_truth=args.force,
+            )
+            audit.append({
+                "name": row.get("name") or row.get("_fixture") or row.get("id"),
+                "project_id": row.get("id"),
+                "status": "candidate" if ok else "skipped",
+                "reason": reason,
+                "tonnage_mt": row.get("tonnage_mt"),
+                "grade_value": row.get("grade_value"),
+                "missing_truth_fields": _missing_truth_fields(row),
+            })
+        for item in audit:
+            print(
+                f"{item['status']:9s} | {item['project_id']} | "
+                f"{item['name']} | T={item['tonnage_mt']} G={item['grade_value']} | "
+                f"{item['reason']}"
+            )
+        if args.json_out:
+            out_path = Path(args.json_out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(audit, indent=2, default=str))
+            logger.info("Wrote candidate JSON: %s", out_path)
+        return 0
 
     audit: List[Dict[str, Any]] = []
     applied = 0
     usable = 0
+    checked = 0
     for row in rows:
         name = row.get("name") or row.get("_fixture") or row.get("id")
         project_id = row.get("id")
@@ -219,6 +441,7 @@ def main() -> int:
             logger.info("SKIP already truth-backed: %s", name)
             continue
 
+        checked += 1
         logger.info("EXTRACT %s", name)
         extracted = _extract_one(row)
         if not extracted:
@@ -226,11 +449,14 @@ def main() -> int:
             logger.warning("  failed: no extraction")
             continue
 
+        extracted, unit_note = _normalise_extracted_tonnage_units(row, extracted)
         ok, reason = _validate_against_known_total(
             row,
             extracted,
             allow_total_mismatch=args.allow_total_mismatch,
         )
+        if unit_note:
+            reason = f"{unit_note}; {reason}"
         status = "usable" if ok else "rejected"
         audit.append({
             "name": name,
@@ -251,12 +477,23 @@ def main() -> int:
             supabase_ops.update_project_mre_mirror(project_id, payload)
             applied += 1
             logger.info("  APPLIED truth to %s", project_id)
+        if args.target_usable and usable >= args.target_usable:
+            logger.info("Reached target usable rows: %s", args.target_usable)
+            break
 
     if args.json_out:
-        Path(args.json_out).write_text(json.dumps(audit, indent=2, default=str))
-        logger.info("Wrote audit JSON: %s", args.json_out)
+        out_path = Path(args.json_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(audit, indent=2, default=str))
+        logger.info("Wrote audit JSON: %s", out_path)
 
-    logger.info("Done: usable=%s applied=%s total_checked=%s", usable, applied, len(rows))
+    logger.info(
+        "Done: usable=%s applied=%s total_checked=%s selected_rows=%s",
+        usable,
+        applied,
+        checked,
+        len(rows),
+    )
     return 0
 
 

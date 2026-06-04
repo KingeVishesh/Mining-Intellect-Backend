@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from scripts.backfill_gold_mre_truth import (
+    _candidate_status,
+    _normalise_extracted_tonnage_units,
+    _validate_against_known_total,
+)
+
+
+def _row(**overrides):
+    base = {
+        "id": "p1",
+        "name": "Partial Gold",
+        "material": "Gold",
+        "tonnage_mt": 30.0,
+        "grade_value": 1.5,
+        "mre_mi_tonnage_mt": None,
+        "mre_mi_grade": None,
+        "mre_inferred_tonnage_mt": None,
+        "mre_inferred_grade": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_db_gold_candidate_requires_missing_truth_and_known_total():
+    ok, reason = _candidate_status(_row())
+
+    assert ok is True
+    assert "mre_mi_tonnage_mt" in reason
+
+
+def test_db_gold_candidate_skips_full_truth_unless_forced():
+    full = _row(
+        mre_mi_tonnage_mt=10.0,
+        mre_mi_grade=1.8,
+        mre_inferred_tonnage_mt=20.0,
+        mre_inferred_grade=1.35,
+    )
+
+    ok, reason = _candidate_status(full)
+    forced_ok, forced_reason = _candidate_status(full, include_full_truth=True)
+
+    assert ok is False
+    assert "already" in reason
+    assert forced_ok is True
+    assert forced_reason == "full truth included by --force"
+
+
+def test_db_gold_candidate_skips_rows_without_known_total_by_default():
+    ok, reason = _candidate_status(_row(tonnage_mt=None))
+    relaxed_ok, _ = _candidate_status(_row(tonnage_mt=None), require_known_total=False)
+
+    assert ok is False
+    assert "known total" in reason
+    assert relaxed_ok is True
+
+
+def test_extracted_split_must_reconcile_to_known_total():
+    row = _row(tonnage_mt=30.0, grade_value=1.5)
+    extracted = {
+        "mi_tonnage_mt": 10.0,
+        "mi_grade": 1.8,
+        "inferred_tonnage_mt": 20.0,
+        "inferred_grade": 1.35,
+    }
+
+    ok, reason = _validate_against_known_total(row, extracted)
+
+    assert ok is True
+    assert "cross-check ok" in reason
+
+
+def test_extracted_split_rejects_known_total_mismatch():
+    row = _row(tonnage_mt=30.0, grade_value=1.5)
+    extracted = {
+        "mi_tonnage_mt": 40.0,
+        "mi_grade": 1.8,
+        "inferred_tonnage_mt": 20.0,
+        "inferred_grade": 1.35,
+    }
+
+    ok, reason = _validate_against_known_total(row, extracted)
+
+    assert ok is False
+    assert "tonnage differs" in reason
+
+
+def test_extracted_split_normalises_kt_tonnage_only_when_total_matches():
+    row = _row(tonnage_mt=5.224, grade_value=8.74)
+    extracted = {
+        "mi_tonnage_mt": 1177.0,
+        "mi_grade": 8.2,
+        "inferred_tonnage_mt": 4047.0,
+        "inferred_grade": 8.9,
+    }
+
+    normalised, note = _normalise_extracted_tonnage_units(row, extracted)
+    ok, reason = _validate_against_known_total(row, normalised)
+
+    assert note is not None
+    assert normalised["mi_tonnage_mt"] == 1.177
+    assert normalised["inferred_tonnage_mt"] == 4.047
+    assert ok is True
+    assert "cross-check ok" in reason

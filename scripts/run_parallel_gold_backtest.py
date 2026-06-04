@@ -36,7 +36,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
-from nodes import supabase_ops  # noqa: E402
+from nodes import geo_taxonomy, supabase_ops  # noqa: E402
 from nodes import parallel_gold_model as parallel_gold_model_module  # noqa: E402
 from nodes.parallel_gold_model import parallel_gold_model_node  # noqa: E402
 from scripts.backtest_parallel import official_truth, pct_err, fmt_pct  # noqa: E402
@@ -451,6 +451,172 @@ def _run_project_ids(run_ids: Iterable[str]) -> Set[str]:
     return {row["project_id"] for row in (res.data or []) if row.get("project_id")}
 
 
+def _blind_cutoff_from_mre_run(latest_mre: Dict[str, Any]) -> Optional[str]:
+    effective = latest_mre.get("effective_date")
+    if not effective:
+        return None
+    source = str(latest_mre.get("source") or "")
+    if source == "exa_2pass_mre_truth_backfill":
+        parsed = _parse_loose_date(effective)
+        if parsed and parsed.month == 12 and parsed.day == 31:
+            return f"{parsed.year}-01-01"
+    return effective
+
+
+def _analog_key(analog: Dict[str, Any]) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        str(analog.get("name") or analog.get("analog_name") or "").strip().lower(),
+    )
+
+
+def _positive_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        f = float(value)
+        return f if math.isfinite(f) and f > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    """Infer the same minimal gold routing fields Analog Finder uses."""
+    material = project.get("material") or "gold"
+    deposit_type = project.get("deposit_type")
+    deposit_subtype = project.get("deposit_subtype")
+    target_belt = project.get("tectonic_belt")
+    material_key = str(material or "").strip().lower()
+    if (
+        material_key in {"gold", "au"}
+        and not deposit_type
+        and not deposit_subtype
+        and target_belt in geo_taxonomy.BELT_COMPATIBILITY_GROUPS.get("archean_greenstone", frozenset())
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
+    return {
+        "material": material,
+        "deposit_type": deposit_type,
+        "deposit_subtype": deposit_subtype,
+        "target_tectonic_belt": target_belt,
+    }
+
+
+def _resource_variant_key(analog: Dict[str, Any]) -> Optional[tuple]:
+    tonnage = _positive_float(analog.get("tonnage_mt"))
+    grade = _positive_float(analog.get("grade_value"))
+    if not tonnage or not grade:
+        return None
+    subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+    family = "orogenic" if "orogenic" in subtype else subtype
+    return (family, round(tonnage, 1), round(grade, 1))
+
+
+def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[str, Any]) -> bool:
+    """Production-like guard for approved-library rows used in blind backtests."""
+    material = str(project.get("material") or "").strip().lower()
+    if material not in {"gold", "au"}:
+        return True
+    tonnage = _positive_float(analog.get("tonnage_mt"))
+    grade = _positive_float(analog.get("grade_value"))
+    if not tonnage or not grade:
+        return False
+
+    target_mining = str(
+        project.get("mining_method_class") or project.get("mining_method") or ""
+    ).strip().lower()
+    analog_mining = str(
+        analog.get("mining_method_class") or analog.get("mining_method") or ""
+    ).strip().lower()
+    if target_mining == "underground_vein":
+        if analog_mining and not geo_taxonomy.mining_method_compatible(target_mining, analog_mining):
+            return False
+        if not analog_mining and grade < 2.0:
+            return False
+        if not analog_mining and tonnage >= 50:
+            return False
+    elif target_mining and analog_mining and not geo_taxonomy.mining_method_compatible(target_mining, analog_mining):
+        return False
+    return True
+
+
+def _merge_library_analogs(
+    project: Dict[str, Any],
+    supplied: Sequence[Dict[str, Any]],
+    library: Sequence[Dict[str, Any]],
+    *,
+    max_count: int = 8,
+) -> List[Dict[str, Any]]:
+    cutoff = _parse_loose_date(project.get("mre_date") or project.get("mre_data_source"))
+    cleaned = parallel_gold_model_module._clean_blind_analogs(
+        project,
+        [*supplied, *library],
+        cutoff,
+    )
+    merged: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for analog in cleaned:
+        key = _analog_key(analog)
+        if not key or key in seen:
+            continue
+        if not _blind_library_analog_is_compatible(project, analog):
+            continue
+        variant_key = _resource_variant_key(analog)
+        if variant_key:
+            variant_marker = f"resource::{variant_key!r}"
+            if variant_marker in seen:
+                continue
+            seen.add(variant_marker)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(analog)
+        if len(merged) >= max_count:
+            break
+    return merged
+
+
+def _supplement_with_library_analogs(
+    project: Dict[str, Any],
+    analogs: Sequence[Dict[str, Any]],
+    *,
+    min_count: int = 3,
+    max_count: int = 8,
+) -> List[Dict[str, Any]]:
+    if len(analogs) >= min_count:
+        return list(analogs)
+    filters = _gold_library_filters(project)
+    material = filters["material"] or "gold"
+    deposit_type = filters["deposit_type"]
+    deposit_subtype = filters["deposit_subtype"]
+    if not deposit_type and not deposit_subtype:
+        return list(analogs)
+    try:
+        library = supabase_ops.get_approved_analogs(
+            material=material,
+            deposit_type=deposit_type,
+            deposit_subtype=deposit_subtype,
+            target_tectonic_belt=filters["target_tectonic_belt"],
+            limit=50,
+        )
+    except Exception:
+        logging.exception(
+            "[parallel-gold-backtest] failed loading approved analog library for %s",
+            project.get("name"),
+        )
+        return list(analogs)
+    merged = _merge_library_analogs(project, analogs, library, max_count=max_count)
+    if len(merged) > len(analogs):
+        logging.info(
+            "[parallel-gold-backtest] seeded %s approved-library analog(s) for %s",
+            len(merged) - len(analogs),
+            project.get("name"),
+        )
+    return merged
+
+
 def _merge_fixture_truth(project: Dict[str, Any], fixture: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not fixture:
         merged = dict(project)
@@ -467,13 +633,15 @@ def _merge_fixture_truth(project: Dict[str, Any], fixture: Optional[Dict[str, An
     with _SUPABASE_LOCK:
         latest_mre = supabase_ops.get_latest_mre_run(project["id"])
     if latest_mre:
+        blind_cutoff = _blind_cutoff_from_mre_run(latest_mre)
         merged["mre_data_source"] = {
-            "as_of_date": latest_mre.get("effective_date"),
+            "as_of_date": blind_cutoff,
+            "reported_effective_date": latest_mre.get("effective_date"),
             "source_url": latest_mre.get("source_url"),
             "source_doc": latest_mre.get("source"),
             "notes": latest_mre.get("notes"),
         }
-        merged["mre_date"] = latest_mre.get("effective_date")
+        merged["mre_date"] = blind_cutoff
         merged["mre_source_url"] = latest_mre.get("source_url")
     return merged
 
@@ -508,6 +676,7 @@ def _run_one(
 
     with _SUPABASE_LOCK:
         analogs = supabase_ops.get_analogs(project_id)
+        analogs = _supplement_with_library_analogs(project_for_model, analogs)
     state = {
         "project_id": project_id,
         "project": project_for_model,

@@ -491,7 +491,36 @@ def _modellable_resource_issue(candidate: dict, profile: dict, target: dict) -> 
     if compliance in ("historical", "press_release", "internal"):
         return f"{name} resource standard is non-compliant ({compliance})"
 
+    if _is_gold_like(material):
+        t_mining = (target.get("mining_method_class") or "").strip().lower()
+        c_mining = (profile.get("mining_method_class") or "").strip().lower()
+        if t_mining == "underground_vein":
+            if c_mining and not geo_taxonomy.mining_method_compatible(t_mining, c_mining):
+                return (
+                    f"{name} mining method {c_mining!r} is incompatible with "
+                    "an underground-vein gold target"
+                )
+            if not c_mining and g < 2.0:
+                return (
+                    f"{name} has no mining-method class and low-grade gold "
+                    f"({g:g} g/t); unsafe analog for an underground-vein target"
+                )
+            if not c_mining and t >= 50:
+                return (
+                    f"{name} has no mining-method class and large resource "
+                    f"scale ({t:g} Mt); unsafe analog for an underground-vein target"
+                )
     return None
+
+
+def _resource_variant_key(candidate: dict, profile: dict) -> Optional[tuple]:
+    """Key near-duplicate resource rows so they cannot overweight a cohort."""
+    tonnage = _as_positive_float(candidate.get("tonnage_mt"))
+    grade = _as_positive_float(candidate.get("grade_value"))
+    if tonnage <= 0 or grade <= 0:
+        return None
+    family = profile.get("deposit_type_family") or profile.get("deposit_subtype") or ""
+    return (family, round(tonnage, 1), round(grade, 1))
 
 
 def _cascading_match(
@@ -1473,6 +1502,7 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     # ── Step C: Cascading match per candidate ──────────────────────────────
     survivors: list[dict] = []
     dropped_counts: dict[str, int] = {}
+    seen_resource_variants: set[tuple] = set()
     for c in pre_filtered:
         cand_profile = _build_profile(c)
 
@@ -1634,6 +1664,21 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             dropped_counts[dropped_at or "unknown"] = dropped_counts.get(dropped_at or "unknown", 0) + 1
             _emit("DROP", dropped_at or "unknown", c, cand_profile, reason)
             continue
+
+        variant_key = _resource_variant_key(c, cand_profile)
+        if variant_key and variant_key in seen_resource_variants:
+            reason = (
+                "near-duplicate resource variant already passed "
+                f"(family/tonnage/grade key={variant_key!r})"
+            )
+            logger.info(f"[cascade] DROP duplicate resource variant: {c.get('name')} — {reason}")
+            dropped_counts["duplicate_resource_variant"] = (
+                dropped_counts.get("duplicate_resource_variant", 0) + 1
+            )
+            _emit("DROP", "duplicate_resource_variant", c, cand_profile, reason)
+            continue
+        if variant_key:
+            seen_resource_variants.add(variant_key)
 
         completeness, missing_core = _profile_completeness(cand_profile)
         if missing_core:

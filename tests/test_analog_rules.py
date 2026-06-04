@@ -18,7 +18,7 @@ import pytest
 
 from schemas.analog_rule import AnalogRule
 from scripts.seed_analog_rules import ANALOG_SELECTION_RULES
-from graphs.analog_finder import _build_profile, _cascading_match
+from graphs.analog_finder import _build_profile, _cascading_match, _modellable_resource_issue
 from tests.fixtures.golden_analogs import GOLDEN_CASES
 
 
@@ -1529,6 +1529,98 @@ def test_gold_porphyry_rule_allows_heap_leach_but_excludes_carlin_and_epithermal
     assert not passes
     assert dropped_at in {"L2", "L3"}
     assert reasons
+
+
+def test_gold_underground_target_rejects_low_grade_unknown_mining_analog():
+    target = _build_profile({
+        "name": "Cove-style Target",
+        "material": "gold",
+        "deposit_type": "Carlin-style",
+        "deposit_subtype": "carlin_general",
+        "mining_method_class": "underground_vein",
+    })
+    candidate = {
+        "name": "Pinion",
+        "material": "gold",
+        "deposit_type": "Carlin-style",
+        "deposit_subtype": "carlin_general",
+        "tonnage_mt": 66.6,
+        "grade_value": 0.71,
+        "grade_unit": "g/t Au",
+    }
+    profile = _build_profile(candidate)
+
+    issue = _modellable_resource_issue(candidate, profile, target)
+
+    assert issue is not None
+    assert "underground-vein" in issue
+
+    large_candidate = {
+        **candidate,
+        "name": "Carlin Complex",
+        "tonnage_mt": 230,
+        "grade_value": 3.43,
+    }
+    large_issue = _modellable_resource_issue(
+        large_candidate,
+        _build_profile(large_candidate),
+        target,
+    )
+
+    assert large_issue is not None
+    assert "large resource" in large_issue
+
+
+def test_duplicate_resource_variants_are_audited_and_not_ranked_twice():
+    from graphs.analog_finder import combine_filter_score_node
+
+    rule = _find_rule("analog_sel_gold_orogenic_vein")
+    target = {
+        "id": "cadillac-test",
+        "name": "Cadillac Gold Project",
+        "material": "gold",
+        "country": "Canada",
+        "region": "Quebec",
+        "district": "Abitibi",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "greenstone_orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "mining_method_class": "underground_vein",
+        "tonnage_mt": 39.0,
+        "grade_value": 2.1,
+        "grade_unit": "g/t Au",
+    }
+    chimo_a = {
+        "name": "Chimo Mine",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "tonnage_mt": 7.13,
+        "grade_value": 3.14,
+        "grade_unit": "g/t Au",
+        "country": "Canada",
+        "tectonic_belt": "abitibi",
+    }
+    chimo_b = {
+        **chimo_a,
+        "name": "Chimo Mine and West Nordeau",
+        "deposit_subtype": "greenstone_orogenic",
+        "tonnage_mt": 7.128,
+    }
+
+    result = combine_filter_score_node({
+        "project_id": target["id"],
+        "project": target,
+        "target_profile": _build_profile(target),
+        "analog_rule": rule,
+        "library_analogs": [chimo_a, chimo_b],
+        "exa_analogs": [],
+    })
+
+    names = [row["name"] for row in result["scored_analogs"]]
+    assert names.count("Chimo Mine") == 1
+    assert "Chimo Mine and West Nordeau" not in names
+    assert any(event["level"] == "duplicate_resource_variant" for event in result["audit_events"])
 
 
 def test_audit_events_emitted_for_every_candidate():
