@@ -492,6 +492,103 @@ def test_blind_local_fallback_expands_sparse_large_low_grade_irgs():
     assert "large_low_grade_irgs_upper_cohort_tonnage" in result["methodology"]["notes"]
 
 
+def test_blind_local_fallback_uses_broad_open_pit_pre_mre_geometry():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Broad Low Grade Open Pit",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "mineralization_pattern": "disseminated_bulk",
+            "mining_method_class": "open_pit_selective",
+            "drilling_evidence": {
+                "total_meters_drilled": 80_700,
+                "total_holes": 124,
+                "strike_length_m": 1250,
+                "down_dip_extent_m": 500,
+                "best_intercepts": [
+                    {"interval_m": 143.7, "grade_g_t": 1.02},
+                    {"interval_m": 143.7, "grade_g_t": 1.02},
+                ],
+                "queried_pre_mre_cutoff": "2024-12-31",
+                "source_url": "https://example.com/pre-mre-drilling.pdf",
+            },
+        },
+        [
+            {"name": "Coffee", "tonnage_mt": 80.05, "grade_value": 1.15, "deposit_subtype": "irgs_general"},
+            {"name": "Ikkari", "tonnage_mt": 58.43, "grade_value": 2.18},
+            {"name": "Kittila", "tonnage_mt": 29.0, "grade_value": 4.4},
+            {"name": "Pahtavaara", "tonnage_mt": 4.64, "grade_value": 3.2},
+        ],
+        reason="parallel_no_result",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert 180 <= total_mt <= 195
+    assert result["m_and_i"]["grade_gpt"] == 0.734
+    assert "broad_bulk_open_pit_pre_mre_geometry" in result["methodology"]["notes"]
+
+
+def test_open_pit_selective_overrides_stale_vein_pattern_for_broad_intercepts():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Open Pit Selective With Stale Vein Label",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "mineralization_pattern": "vein_hosted",
+            "mining_method_class": "open_pit_selective",
+            "drilling_evidence": {
+                "strike_length_m": 3100,
+                "down_dip_extent_m": 200,
+                "best_intercepts": [
+                    {"interval_m": 93, "grade_g_t": 0.69},
+                    {"interval_m": 47, "grade_g_t": 1.29},
+                ],
+                "queried_pre_mre_cutoff": "2025-12-31",
+                "source_url": "https://example.com/pre-mre-open-pit.pdf",
+            },
+        },
+        [
+            {"name": "Beattie", "tonnage_mt": 60.9, "grade_value": 1.59},
+            {"name": "Tropicana", "tonnage_mt": 87.93, "grade_value": 1.91},
+            {"name": "Nampala", "tonnage_mt": 25.0, "grade_value": 0.85},
+            {"name": "Fenn-Gib", "tonnage_mt": 181.3, "grade_value": 0.74},
+            {"name": "Fekola", "tonnage_mt": 155.39, "grade_value": 1.22},
+            {"name": "Loulo", "tonnage_mt": 105.0, "grade_value": 4.59},
+        ],
+        reason="parallel_no_result",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert 39 <= total_mt <= 42
+    assert result["m_and_i"]["grade_gpt"] == 1.054
+    assert "broad_bulk_open_pit_pre_mre_geometry" in result["methodology"]["notes"]
+
+
+def test_blind_local_fallback_uses_sparse_heap_leach_porphyry_low_grade_prior():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Sparse Heap Leach Porphyry",
+            "material": "gold",
+            "deposit_type": "porphyry",
+            "deposit_subtype": "calc_alkalic_porphyry",
+            "mineralization_pattern": "stockwork",
+            "mining_method_class": "heap_leach_pad",
+        },
+        [
+            {"name": "Bullfrog", "tonnage_mt": 105.5, "grade_value": 0.53, "deposit_subtype": "low_sulfidation_epithermal"},
+            {"name": "Carlin", "tonnage_mt": 230.0, "grade_value": 3.43, "deposit_subtype": "carlin_general"},
+            {"name": "Jerritt", "tonnage_mt": 10.3, "grade_value": 4.65, "deposit_subtype": "carlin_general"},
+            {"name": "Dingman", "tonnage_mt": 12.6, "grade_value": 0.94},
+        ],
+        reason="parallel_no_result",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert round(total_mt, 3) == 161.942
+    assert result["m_and_i"]["grade_gpt"] == 0.381
+    assert "sparse_heap_leach_porphyry_low_grade_prior" in result["methodology"]["notes"]
+
+
 def test_single_irgs_analog_not_overridden_by_tiny_geometry():
     result = _blind_local_fallback_estimate(
         {

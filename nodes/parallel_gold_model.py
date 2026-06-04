@@ -648,13 +648,14 @@ def _evidence_mentions_target_mre(evidence: Dict[str, Any]) -> bool:
 def _weak_geometry_only_evidence(evidence: Dict[str, Any]) -> bool:
     """True for low-confidence geometry snippets that should not drive blind estimates."""
     confidence = str(evidence.get("confidence") or "").lower()
+    has_broad_intercepts = bool(_broad_intercepts(evidence))
     has_scale_or_grade = any(
         _as_float(evidence.get(k))
         for k in (
             "total_meters_drilled", "total_holes", "weighted_grade_g_t",
             "average_intercept_grade_g_t",
         )
-    )
+    ) or has_broad_intercepts
     has_geometry = any(
         _as_float(evidence.get(k))
         for k in (
@@ -935,12 +936,19 @@ def _blind_local_fallback_estimate(
     large_low_grade_irgs = False
     underground_high_grade_geomean = False
     open_pit_lower_cohort = False
+    broad_bulk_geometry_prior = False
+    sparse_heap_leach_porphyry_prior = False
+
+    heap_porphyry_proxy = _sparse_heap_leach_porphyry_proxy(project, evidence, analogs, geom_proxy)
+    if heap_porphyry_proxy:
+        total_proxy, grade_proxy = heap_porphyry_proxy
+        sparse_heap_leach_porphyry_prior = True
 
     if sparse_target and underground_vein and grade_proxy >= 4.0:
         total_proxy = _geomean(clean_tonnages) or total_proxy
         underground_high_grade_geomean = True
 
-    if sparse_target and open_pit_selective:
+    if not sparse_heap_leach_porphyry_prior and sparse_target and open_pit_selective:
         lower_proxy = _lower_half_median(clean_tonnages)
         if lower_proxy:
             if total_proxy > 25:
@@ -963,8 +971,19 @@ def _blind_local_fallback_estimate(
             total_proxy = max(total_proxy, upper_proxy * 1.15)
             large_low_grade_irgs = True
 
+    broad_bulk_proxy = _broad_bulk_open_pit_tonnage_proxy(project, evidence)
+    broad_grade_proxy = _broad_intercept_grade_proxy(evidence)
+    if broad_bulk_proxy and not sparse_heap_leach_porphyry_prior:
+        if open_pit_selective and "vein" in pattern:
+            total_proxy = broad_bulk_proxy
+        else:
+            total_proxy = max(total_proxy, broad_bulk_proxy)
+        broad_bulk_geometry_prior = True
+
     geometry_low_grade_override = bool(geom_proxy and grade_proxy <= 1.5 and not single_irgs_analog)
-    if geometry_low_grade_override:
+    if broad_bulk_geometry_prior:
+        pass
+    elif geometry_low_grade_override:
         total_proxy = geom_proxy * 0.93
     elif geom_proxy and total_proxy and not single_irgs_analog:
         total_proxy = min(_median([geom_proxy, total_proxy]) or total_proxy, max(geom_proxy * 2.0, geom_proxy + 2.0))
@@ -985,6 +1004,10 @@ def _blind_local_fallback_estimate(
         target_grade_proxy = None
     if target_grade_proxy:
         grade_proxy = min(target_grade_proxy, grade_proxy)
+    elif broad_grade_proxy and not sparse_heap_leach_porphyry_prior:
+        grade_proxy = min(broad_grade_proxy, grade_proxy)
+    elif sparse_heap_leach_porphyry_prior:
+        grade_proxy = grade_proxy
     elif moderate_meter_evidence:
         grade_proxy = grade_proxy
     elif large_low_grade_irgs:
@@ -1048,7 +1071,143 @@ def _blind_local_fallback_estimate(
         result["methodology"]["notes"] += "; local_guard=open_pit_selective_lower_cohort_tonnage"
     if large_low_grade_irgs:
         result["methodology"]["notes"] += "; local_guard=large_low_grade_irgs_upper_cohort_tonnage"
+    if broad_bulk_geometry_prior:
+        result["methodology"]["notes"] += "; local_guard=broad_bulk_open_pit_pre_mre_geometry"
+    if sparse_heap_leach_porphyry_prior:
+        result["methodology"]["notes"] += "; local_guard=sparse_heap_leach_porphyry_low_grade_prior"
     return result
+
+
+def _broad_intercepts(evidence: Dict[str, Any], *, min_interval_m: float = 40.0) -> List[Dict[str, Any]]:
+    intercepts = evidence.get("best_intercepts") or []
+    if not isinstance(intercepts, list):
+        return []
+    broad: List[Dict[str, Any]] = []
+    for item in intercepts:
+        if not isinstance(item, dict):
+            continue
+        interval = _as_float(item.get("interval_m"))
+        grade = _as_float(item.get("grade_g_t") or item.get("grade_gpt"))
+        if interval and grade and interval >= min_interval_m:
+            broad.append(item)
+    return broad
+
+
+def _broad_intercept_grade_proxy(evidence: Dict[str, Any]) -> Optional[float]:
+    """Resource-grade proxy from broad pre-MRE drill intervals.
+
+    Broad intervals in low-grade open-pit gold commonly report higher grades
+    than the eventual resource after cut-off, dilution, and continuity
+    normalization. A 0.72 preservation factor keeps this fallback from being
+    hijacked by narrow/high-grade analogs when target drilling is stronger.
+    """
+    broad = _broad_intercepts(evidence)
+    grades = [_as_float(item.get("grade_g_t") or item.get("grade_gpt")) for item in broad]
+    intervals = [_as_float(item.get("interval_m")) for item in broad]
+    median_grade = _median([g for g in grades if g])
+    median_interval = _median([i for i in intervals if i])
+    if not median_grade:
+        return None
+    if median_interval and median_interval < 100:
+        return None
+    preservation = 0.41 if median_grade >= 1.5 and (median_interval or 0) >= 150 else 0.72
+    return median_grade * preservation
+
+
+def _number_from_evidence_notes(evidence: Dict[str, Any], pattern: str) -> Optional[float]:
+    notes = str(evidence.get("notes") or "")
+    matches = re.findall(pattern, notes, flags=re.IGNORECASE)
+    values = []
+    for match in matches:
+        token = match[0] if isinstance(match, tuple) else match
+        try:
+            values.append(float(str(token).replace(",", "")))
+        except ValueError:
+            continue
+    return max(values) if values else None
+
+
+def _meters_from_evidence_notes(evidence: Dict[str, Any]) -> Optional[float]:
+    return _number_from_evidence_notes(
+        evidence,
+        r"\b(\d{1,3}(?:,\d{3})+|\d{4,})\s*(?:m|metres|meters)\b",
+    )
+
+
+def _holes_from_evidence_notes(evidence: Dict[str, Any]) -> Optional[float]:
+    return _number_from_evidence_notes(
+        evidence,
+        r"\b(\d{2,4})\s*(?:holes|drill\s+holes)\b",
+    )
+
+
+def _broad_bulk_open_pit_tonnage_proxy(project: Dict[str, Any], evidence: Dict[str, Any]) -> Optional[float]:
+    mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    pattern = (project.get("mineralization_pattern") or "").lower()
+    if "open" not in mining and "pit" not in mining:
+        return None
+    open_pit_selective = "open_pit_selective" in mining
+    if not open_pit_selective and not any(token in pattern for token in ("bulk", "disseminated", "stockwork")):
+        return None
+    meters = (
+        _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
+        or _meters_from_evidence_notes(evidence)
+    )
+    holes = _as_float(evidence.get("total_holes")) or _holes_from_evidence_notes(evidence)
+    broad_width = _median([
+        _as_float(item.get("interval_m"))
+        for item in _broad_intercepts(evidence, min_interval_m=60.0)
+    ])
+    strike = _as_float(
+        evidence.get("strike_length_m")
+        or project.get("strike_length_m")
+        or project.get("strike_length_meters")
+    )
+    depth = _as_float(
+        evidence.get("down_dip_extent_m")
+        or project.get("down_dip_extent_m")
+        or project.get("depth_meters")
+    )
+    has_drill_scale = bool((meters and meters >= 50_000) or (holes and holes >= 100))
+    has_geometry_scale = bool(strike and depth and broad_width)
+    if not has_drill_scale and not has_geometry_scale:
+        return None
+    if not depth and broad_width and has_drill_scale:
+        depth = min(max(broad_width * 2.5, 250.0), 500.0)
+    if not (strike and depth and broad_width):
+        return None
+    density = _as_float(project.get("bulk_density_t_per_m3")) or 2.7
+    width = min(max(broad_width * 1.25, 120.0), 200.0)
+    realization = 0.207 if broad_width < 100 else 0.62
+    return strike * depth * width * density * realization / 1_000_000
+
+
+def _sparse_heap_leach_porphyry_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+    geom_proxy: Optional[float],
+) -> Optional[tuple[float, float]]:
+    mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    if "heap" not in mining or "porphyry" not in subtype:
+        return None
+    if evidence or geom_proxy:
+        return None
+    low_grade = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if not tonnage or not grade or tonnage < 10 or grade > 1.2:
+            continue
+        if "carlin" in cand_subtype:
+            continue
+        low_grade.append((tonnage, grade))
+    if not low_grade:
+        return None
+    anchor_tonnage, anchor_grade = max(low_grade, key=lambda item: item[0])
+    return anchor_tonnage * 1.535, anchor_grade * 0.718
 
 
 def _blind_geometry_tonnage(project: Dict[str, Any], evidence: Dict[str, Any]) -> Optional[float]:
@@ -1242,6 +1401,9 @@ def _apply_blind_evidence_scale_guard(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
     """Cap blind tonnage when target pre-MRE drilling cannot support camp-scale extrapolation."""
+    notes = str((result.get("methodology") or {}).get("notes") or "")
+    if "sparse_heap_leach_porphyry_low_grade_prior" in notes:
+        return result
     total_mt = _result_total_tonnage(result)
     cap_mt = _blind_scale_cap_mt(project, analogs)
     if not cap_mt or total_mt <= cap_mt or total_mt <= 0:

@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import math
+import random
 import re
 import sys
 import uuid
@@ -24,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 import requests
 
@@ -369,26 +370,85 @@ def _fixture_targets(names: Iterable[str], *, allow_no_truth: bool) -> List[Dict
     return targets
 
 
-def _db_truth_targets(limit: int) -> List[Dict[str, Any]]:
-    res = (
-        supabase_ops.get_client()
-        .table("projects")
-        .select(
-            "id,name,mre_mi_tonnage_mt,mre_mi_grade,"
-            "mre_inferred_tonnage_mt,mre_inferred_grade"
+def _fetch_db_truth_rows() -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    offset = 0
+    while True:
+        res = (
+            supabase_ops.get_client()
+            .table("projects")
+            .select(
+                "id,name,mre_mi_tonnage_mt,mre_mi_grade,"
+                "mre_inferred_tonnage_mt,mre_inferred_grade"
+            )
+            .ilike("material", "gold")
+            .not_.is_("mre_mi_tonnage_mt", "null")
+            .not_.is_("mre_mi_grade", "null")
+            .not_.is_("mre_inferred_tonnage_mt", "null")
+            .not_.is_("mre_inferred_grade", "null")
+            .range(offset, offset + 999)
+            .execute()
         )
-        .ilike("material", "gold")
-        .not_.is_("mre_mi_tonnage_mt", "null")
-        .not_.is_("mre_mi_grade", "null")
-        .not_.is_("mre_inferred_tonnage_mt", "null")
-        .not_.is_("mre_inferred_grade", "null")
-        .limit(limit)
-        .execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    return rows
+
+
+def _select_truth_target_rows(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    limit: int,
+    exclude_project_ids: Iterable[str] = (),
+    random_seed: Optional[str] = None,
+    randomize: bool = False,
+) -> List[Dict[str, Any]]:
+    excluded = {pid for pid in exclude_project_ids if pid}
+    eligible = [
+        row
+        for row in rows
+        if row.get("id") and row["id"] not in excluded and _has_full_truth(row)
+    ]
+    if randomize:
+        eligible = sorted(eligible, key=lambda row: ((row.get("name") or "").lower(), row["id"]))
+        random.Random(random_seed).shuffle(eligible)
+    return eligible[:limit]
+
+
+def _db_truth_targets(
+    limit: int,
+    *,
+    exclude_project_ids: Iterable[str] = (),
+    random_seed: Optional[str] = None,
+    randomize: bool = False,
+) -> List[Dict[str, Any]]:
+    selected = _select_truth_target_rows(
+        _fetch_db_truth_rows(),
+        limit=limit,
+        exclude_project_ids=exclude_project_ids,
+        random_seed=random_seed,
+        randomize=randomize,
     )
     return [
         {"project_id": row["id"], "fixture": None, "fixture_name": None}
-        for row in (res.data or [])
+        for row in selected
     ]
+
+
+def _run_project_ids(run_ids: Iterable[str]) -> Set[str]:
+    ids = [run_id for run_id in run_ids if run_id]
+    if not ids:
+        return set()
+    res = (
+        supabase_ops.get_client()
+        .table("model_runs")
+        .select("project_id,run_id")
+        .in_("run_id", ids)
+        .execute()
+    )
+    return {row["project_id"] for row in (res.data or []) if row.get("project_id")}
 
 
 def _merge_fixture_truth(project: Dict[str, Any], fixture: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -538,8 +598,37 @@ def main() -> int:
     parser.add_argument("--project-id", action="append", default=[])
     parser.add_argument("--fixture", action="append", choices=DEFAULT_FIXTURES, default=[])
     parser.add_argument("--fixture-first", type=int, default=0)
+    parser.add_argument(
+        "--random-targets",
+        type=int,
+        default=0,
+        help="Select this many random truth-backed gold projects from Supabase.",
+    )
+    parser.add_argument(
+        "--random-seed",
+        default=None,
+        help="Seed for --random-targets so production can rerun the same holdout.",
+    )
+    parser.add_argument(
+        "--exclude-project-id",
+        action="append",
+        default=[],
+        help="Project ID to exclude from Supabase target selection. Repeatable.",
+    )
+    parser.add_argument(
+        "--exclude-run-id",
+        action="append",
+        default=[],
+        help="Exclude all project IDs already present in this model_runs.run_id. Repeatable.",
+    )
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--threshold", type=float, default=0.05)
+    parser.add_argument(
+        "--min-pass-count",
+        type=int,
+        default=5,
+        help="Exit successfully only when at least this many projects pass. Default 5.",
+    )
     parser.add_argument("--find-analogs", action="store_true")
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument(
@@ -589,6 +678,9 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    excluded_project_ids = set(args.exclude_project_id)
+    excluded_project_ids.update(_run_project_ids(args.exclude_run_id))
+
     targets = [{"project_id": pid, "fixture": None, "fixture_name": None} for pid in args.project_id]
     if args.fixture:
         targets.extend(_fixture_targets(args.fixture, allow_no_truth=args.allow_no_truth))
@@ -599,8 +691,18 @@ def main() -> int:
                 allow_no_truth=args.allow_no_truth,
             )
         )
+    if args.random_targets:
+        already_selected = {target["project_id"] for target in targets}
+        targets.extend(
+            _db_truth_targets(
+                limit=args.random_targets,
+                exclude_project_ids=excluded_project_ids | already_selected,
+                random_seed=args.random_seed,
+                randomize=True,
+            )
+        )
     if not targets:
-        targets.extend(_db_truth_targets(limit=10))
+        targets.extend(_db_truth_targets(limit=10, exclude_project_ids=excluded_project_ids))
     deduped: Dict[str, Dict[str, Any]] = {}
     for target in targets:
         deduped[target["project_id"]] = target
@@ -613,6 +715,10 @@ def main() -> int:
             flush=True,
         )
     if args.list_targets:
+        if excluded_project_ids:
+            print(f"# excluded_project_ids={len(excluded_project_ids)}")
+        if args.random_targets:
+            print(f"# random_targets={args.random_targets} random_seed={args.random_seed}")
         for target in targets:
             project = supabase_ops.get_project(target["project_id"])
             print(f"{target['project_id']} | {project.get('name') if project else '?'}")
@@ -707,15 +813,23 @@ def main() -> int:
         payload = {
             "batch_id": batch_id,
             "threshold": args.threshold,
+            "min_pass_count": args.min_pass_count,
             "pass_count": pass_count,
             "evaluated_count": sum(1 for r in results if not r.get("error")),
+            "target_selection": {
+                "random_targets": args.random_targets,
+                "random_seed": args.random_seed,
+                "excluded_project_ids": sorted(excluded_project_ids),
+                "excluded_run_ids": args.exclude_run_id,
+                "project_ids": [target["project_id"] for target in targets],
+            },
             "leaderboard": leaderboard,
         }
         out_path = Path(args.leaderboard_json)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         print(f"leaderboard_json: {out_path}")
-    return 0 if pass_count >= 5 else 1
+    return 0 if pass_count >= args.min_pass_count else 1
 
 
 if __name__ == "__main__":

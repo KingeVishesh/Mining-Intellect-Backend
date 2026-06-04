@@ -1493,6 +1493,44 @@ def test_open_pit_selective_gold_uses_bulk_pattern_without_mre_scale():
     assert pattern == "disseminated_bulk"
 
 
+def test_orogenic_bulk_rule_excludes_irgs_analogs():
+    rule = _find_rule("analog_sel_gold_orogenic_bulk")
+
+    assert "irgs_general" in rule["excluded_subtypes"]
+    assert "sediment_hosted_general" in rule["excluded_subtypes"]
+
+
+def test_gold_porphyry_rule_allows_heap_leach_but_excludes_carlin_and_epithermal():
+    rule = _find_rule("analog_sel_gold_porphyry")
+    target = _build_profile({
+        "name": "P2-style Target",
+        "material": "gold",
+        "deposit_type": "porphyry",
+        "deposit_subtype": "calc_alkalic_porphyry",
+        "mineralization_pattern": "stockwork",
+        "mining_method_class": "heap_leach_pad",
+    })
+    carlin = _build_profile({
+        "name": "Carlin Analog",
+        "material": "gold",
+        "deposit_type": "carlin",
+        "deposit_subtype": "carlin_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "mining_method_class": "open_pit_bulk",
+    })
+
+    passes, _pts, _matched, _evaluated, reasons, dropped_at = _cascading_match(
+        target, carlin, rule,
+    )
+
+    assert "heap_leach" not in rule["excluded_recovery"]
+    assert "carlin_general" in rule["excluded_subtypes"]
+    assert "low_sulfidation_epithermal" in rule["excluded_subtypes"]
+    assert not passes
+    assert dropped_at in {"L2", "L3"}
+    assert reasons
+
+
 def test_audit_events_emitted_for_every_candidate():
     """Every candidate considered must produce one audit event."""
     from graphs.analog_finder import combine_filter_score_node
