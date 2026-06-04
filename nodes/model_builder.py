@@ -42,6 +42,23 @@ def _analog_weight(analog: Dict, stage_map: Dict[str, float], drilling_stage: st
 
     source_bonus = 8.0 if analog.get("source") == "library" else 0.0
 
+    quality_penalty = 0.0
+    if not (analog.get("source_url") or "").strip():
+        quality_penalty -= 8.0
+    if not analog.get("resource_vintage_year"):
+        quality_penalty -= 5.0
+    if not analog.get("resource_compliance_standard"):
+        quality_penalty -= 5.0
+    for key in (
+        "deposit_subtype",
+        "mineralization_pattern",
+        "mineralization_mode",
+        "host_rock_class",
+        "mining_method_class",
+    ):
+        if not analog.get(key):
+            quality_penalty -= 2.0
+
     analog_stage = (analog.get("project_stage") or "").lower().strip()
     stage_bonus = 0.0
     if analog_stage:
@@ -57,7 +74,7 @@ def _analog_weight(analog: Dict, stage_map: Dict[str, float], drilling_stage: st
             and "indicated" not in resource_cat):
         drilling_pen = -10.0
 
-    adjusted = base + source_bonus + stage_bonus + drilling_pen
+    adjusted = base + source_bonus + stage_bonus + drilling_pen + quality_penalty
     return max(1.0, adjusted) ** 2
 
 

@@ -359,6 +359,77 @@ def _build_profile(row: dict) -> dict:
     }
 
 
+def _is_gold_like(material: str) -> bool:
+    m = (material or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return m in {"gold", "au", "gold_silver", "goldandsilver", "gold_and_silver"}
+
+
+_MODELLING_CORE_FIELDS = (
+    "deposit_subtype",
+    "mineralization_pattern",
+    "mineralization_mode",
+    "tectonic_belt",
+    "host_rock_class",
+    "mining_method_class",
+    "resource_compliance_standard",
+    "resource_vintage_year",
+)
+
+
+def _profile_completeness(profile: dict) -> tuple[int, list[str]]:
+    """Return populated count and missing fields for audit / rank damping."""
+    missing = [k for k in _MODELLING_CORE_FIELDS if not profile.get(k)]
+    return len(_MODELLING_CORE_FIELDS) - len(missing), missing
+
+
+def _as_positive_float(value) -> float:
+    try:
+        v = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return v if v > 0 else 0.0
+
+
+def _modellable_resource_issue(candidate: dict, profile: dict, target: dict) -> Optional[str]:
+    """Reject candidates that cannot actually support resource modelling.
+
+    The gold lessons require source-backed analogs with published compliant
+    resources, not just similar geology. This gate is applied before the
+    cascade so every rejection is captured in the analog audit trail and
+    stale library rows are marked REVOKED_LIBRARY.
+    """
+    name = candidate.get("name") or "Unknown"
+    t = _as_positive_float(candidate.get("tonnage_mt"))
+    g = _as_positive_float(candidate.get("grade_value"))
+    if t <= 0 or g <= 0:
+        return (
+            f"{name} lacks modellable tonnage/grade; analogs must have a "
+            "published resource with both tonnage and grade"
+        )
+
+    c_unit = candidate.get("grade_unit") or ""
+    t_unit = target.get("grade_unit") or ""
+    if t_unit and c_unit and not _grade_units_compatible(t_unit, c_unit):
+        return (
+            f"{name} grade unit {c_unit!r} is incompatible with target unit "
+            f"{t_unit!r}"
+        )
+
+    material = target.get("material") or candidate.get("material") or ""
+    source_url = (candidate.get("source_url") or "").strip()
+    if _is_gold_like(material) and candidate.get("source") == "exa" and not source_url:
+        return (
+            f"{name} is Exa-sourced but has no primary source URL; gold "
+            "analog modeling requires source-backed resource numbers"
+        )
+
+    compliance = profile.get("resource_compliance_standard")
+    if compliance in ("historical", "press_release", "internal"):
+        return f"{name} resource standard is non-compliant ({compliance})"
+
+    return None
+
+
 def _cascading_match(
     target: dict,
     candidate: dict,
@@ -1256,6 +1327,13 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
     for c in pre_filtered:
         cand_profile = _build_profile(c)
 
+        resource_issue = _modellable_resource_issue(c, cand_profile, target_profile)
+        if resource_issue:
+            logger.info(f"[cascade] DROP non-modellable resource: {c.get('name')} — {resource_issue}")
+            dropped_counts["non_modellable_resource"] = dropped_counts.get("non_modellable_resource", 0) + 1
+            _emit("DROP", "non_modellable_resource", c, cand_profile, resource_issue)
+            continue
+
         # Rule-driven structured exclusions (Lessons L86/L101 from the rule itself)
         if cand_profile["deposit_subtype"] and cand_profile["deposit_subtype"] in excluded_subtypes:
             reason = f"rule excluded sub-type ({cand_profile['deposit_subtype']})"
@@ -1408,6 +1486,19 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             _emit("DROP", dropped_at or "unknown", c, cand_profile, reason)
             continue
 
+        completeness, missing_core = _profile_completeness(cand_profile)
+        if missing_core:
+            # Do not hard-drop otherwise valid analogs simply because a source
+            # omitted host/recovery/stage metadata, but make the uncertainty
+            # visible and let better-enriched analogs rank ahead. Gold lessons
+            # treat these fields as crucial to the 95% analog standard.
+            penalty = min(20, 3 * len(missing_core))
+            rank_pts = max(0, rank_pts - penalty)
+            reasons.append(
+                f"Profile completeness {completeness}/{len(_MODELLING_CORE_FIELDS)}; "
+                f"missing {', '.join(missing_core)}: -{penalty}"
+            )
+
         # similarity_score = matched / evaluated (as percentage), or None when too few signals
         score = (
             round(matched / evaluated * 100, 1)
@@ -1424,6 +1515,8 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
             "_rank_pts": rank_pts,
             "_dimensions_matched": matched,
             "_dimensions_evaluated": evaluated,
+            "_profile_completeness": completeness,
+            "_missing_core_fields": missing_core,
             # Internal-only; used by the sub-trend semi-hard filter below.
             # The raw candidate dict `c` doesn't carry sub_trend — that's
             # derived in _build_profile.
@@ -1525,6 +1618,8 @@ def combine_filter_score_node(state: AnalogState) -> AnalogState:
         s.pop("_rank_pts", None)
         s.pop("_dimensions_matched", None)
         s.pop("_dimensions_evaluated", None)
+        s.pop("_profile_completeness", None)
+        s.pop("_missing_core_fields", None)
         s.pop("_sub_trend", None)
 
     if top:
