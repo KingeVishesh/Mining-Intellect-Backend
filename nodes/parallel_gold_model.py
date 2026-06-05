@@ -165,6 +165,10 @@ def _build_prompt(
     cutoff = _target_mre_cutoff(project) if not use_mre else None
     analogs_block = _format_analogs_block(analogs, cutoff_date=cutoff)
     mre_directive = _mre_directive(project=project, use_mre=use_mre)
+    target_enrichment_directive = _target_enrichment_directive(
+        blind_mode=not use_mre,
+        find_analogs=find_analogs,
+    )
     analog_directive = _analog_directive(
         find_analogs=find_analogs,
         analogs=analogs,
@@ -280,22 +284,7 @@ GOLD-SPECIFIC ADJUSTMENTS (mandatory)
 
 {chronology_directive}
 
-TARGET ENRICHMENT — MANDATORY BEFORE ANALOG-ONLY FALLBACK
-If the TARGET PROJECT block lacks total_meters_drilled, representative
-top-cut assay grade, strike length, true width, or vertical/depth extent,
-you MUST search for those pre-MRE target disclosures before using
-`analog_only_fallback`. Look first at target press releases, investor
-presentations, technical-report summaries, and exchange filings dated before
-the cutoff. Use only drill facts that were public before the cutoff.
-
-In blind mode, do NOT use target resource pages, MRE announcements, NI 43-101
-MRE technical reports, PEA/PFS/FS reports, database summaries, or any other
-target document dated on or after the cutoff, even if it restates older drill
-facts. Only use a target drilling fact when you can identify the same fact in
-a source published before the cutoff.
-
-Only choose `analog_only_fallback` after documenting the specific pre-cutoff
-target sources checked and which required fields were still missing.
+{target_enrichment_directive}
 
 {analog_directive}
 
@@ -336,6 +325,44 @@ Hard rules:
   • Keep output compact. Put source-document names/URLs inside rationale
     strings when needed; do not add a separate sources table.
 """.strip()
+
+
+def _target_enrichment_directive(*, blind_mode: bool, find_analogs: bool) -> str:
+    if blind_mode and find_analogs:
+        return """\
+TARGET ENRICHMENT — BLIND ANALOG-DISCOVERY MODE
+You may search the web to discover and enrich ANALOGS, but do NOT run open
+web searches on the target project name, operator, property pages, technical
+reports, resource pages, database pages, or SEDAR/filing pages. The target
+evidence available to you is limited to the TARGET PROJECT block and any
+pre-MRE evidence already supplied there by the upstream cutoff-checked
+pipeline.
+
+If the TARGET PROJECT block lacks total_meters_drilled, representative
+top-cut assay grade, strike length, true width, or vertical/depth extent,
+do not try to fill those target fields from web search. Use analog resource
+grade/tonnage proxies, supplied geometry, and conservative stage weighting,
+then document "target_open_web_search=disabled_blind" in `methodology.notes`.
+This is stricter than ordinary research mode because blind backtests must
+avoid post-MRE leakage even at the cost of lower conviction."""
+
+    return """\
+TARGET ENRICHMENT — MANDATORY BEFORE ANALOG-ONLY FALLBACK
+If the TARGET PROJECT block lacks total_meters_drilled, representative
+top-cut assay grade, strike length, true width, or vertical/depth extent,
+you MUST search for those pre-MRE target disclosures before using
+`analog_only_fallback`. Look first at target press releases, investor
+presentations, technical-report summaries, and exchange filings dated before
+the cutoff. Use only drill facts that were public before the cutoff.
+
+In blind mode, do NOT use target resource pages, MRE announcements, NI 43-101
+MRE technical reports, PEA/PFS/FS reports, database summaries, or any other
+target document dated on or after the cutoff, even if it restates older drill
+facts. Only use a target drilling fact when you can identify the same fact in
+a source published before the cutoff.
+
+Only choose `analog_only_fallback` after documenting the specific pre-cutoff
+target sources checked and which required fields were still missing."""
 
 
 def _analog_directive(*, find_analogs: bool, analogs: List[Dict], blind_mode: bool = False) -> str:

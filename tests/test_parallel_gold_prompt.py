@@ -198,7 +198,7 @@ def test_blind_prompt_names_exact_pre_mre_cutoff():
         "mre_data_source": {"as_of_date": "2025-05-15"},
     }
 
-    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=False)
 
     assert "Treat 2025-05-15 as the target MRE cutoff date" in prompt
     assert "use ONLY information published BEFORE 2025-05-15" in prompt
@@ -211,7 +211,7 @@ def test_blind_prompt_silently_discards_target_mre_leaks():
         "mre_data_source": {"as_of_date": "2025-05-15"},
     }
 
-    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=False)
 
     assert "discard that source silently" in prompt
     assert "Do NOT quote" in prompt
@@ -226,7 +226,7 @@ def test_blind_prompt_rejects_post_cutoff_target_technical_reports():
         "mre_data_source": {"as_of_date": "2025-05-15"},
     }
 
-    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=False)
 
     assert "do NOT use target resource pages" in prompt
     assert "NI 43-101" in prompt
@@ -269,11 +269,27 @@ def test_blind_prompt_requires_target_enrichment_before_analog_only():
         "mre_data_source": {"as_of_date": "2025-05-15"},
     }
 
-    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=False)
 
     assert "TARGET ENRICHMENT" in prompt
     assert "MUST search for those pre-MRE target disclosures" in prompt
     assert "Only choose `analog_only_fallback` after documenting" in prompt
+
+
+def test_blind_find_analogs_prompt_disables_target_open_web_search():
+    project = {
+        "name": "Blind Gold",
+        "material": "gold",
+        "mre_data_source": {"as_of_date": "2025-05-15"},
+    }
+
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+
+    assert "TARGET ENRICHMENT — BLIND ANALOG-DISCOVERY MODE" in prompt
+    assert "do NOT run open" in prompt
+    assert "web searches on the target project name" in prompt
+    assert "target_open_web_search=disabled_blind" in prompt
+    assert "MUST search for those pre-MRE target disclosures" not in prompt
 
 
 def test_blind_schema_forces_numeric_estimate_and_excludes_mre_anchor():
