@@ -437,13 +437,37 @@ def test_pre_mre_evidence_uses_latest_intercept_date_when_top_source_missing():
     )
 
 
-def test_supplement_uses_broad_subtype_library_only_after_empty_exact_belt(monkeypatch):
+def test_supplement_uses_local_orogenic_fallback_for_newfoundland_irgs(monkeypatch):
     calls = []
 
     def fake_get_approved_analogs(**kwargs):
         calls.append(kwargs)
-        if kwargs.get("target_tectonic_belt") == "newfoundland_appalachian":
+        if kwargs.get("target_tectonic_belt") == "newfoundland_appalachian" and kwargs.get("deposit_subtype") == "irgs_general":
             return []
+        if kwargs.get("target_tectonic_belt") == "newfoundland_appalachian" and kwargs.get("deposit_subtype") == "orogenic_general":
+            return [
+                {
+                    "name": "Queensway Project",
+                    "tonnage_mt": 17.267,
+                    "grade_value": 2.25,
+                    "deposit_subtype": "orogenic_general",
+                    "tectonic_belt": "newfoundland_appalachian",
+                },
+                {
+                    "name": "Valentine Gold Project",
+                    "tonnage_mt": 64.62,
+                    "grade_value": 1.9,
+                    "deposit_subtype": "orogenic_general",
+                    "tectonic_belt": "newfoundland_appalachian",
+                },
+                {
+                    "name": "Cape Ray Gold Project",
+                    "tonnage_mt": 9.7,
+                    "grade_value": 1.96,
+                    "deposit_subtype": "orogenic_general",
+                    "tectonic_belt": "newfoundland_appalachian",
+                },
+            ]
         return [
             {
                 "name": "Coffee Gold Project",
@@ -471,9 +495,53 @@ def test_supplement_uses_broad_subtype_library_only_after_empty_exact_belt(monke
 
     assert [call.get("target_tectonic_belt") for call in calls] == [
         "newfoundland_appalachian",
-        None,
+        "newfoundland_appalachian",
     ]
-    assert [analog["name"] for analog in analogs] == ["Coffee Gold Project"]
+    assert [analog["name"] for analog in analogs] == [
+        "Queensway Project",
+        "Valentine Gold Project",
+        "Cape Ray Gold Project",
+    ]
+
+
+def test_supplement_prioritizes_small_yukon_near_surface_vein_peers(monkeypatch):
+    def fake_get_approved_analogs(**_kwargs):
+        return [
+            {"name": "Fort Knox", "tonnage_mt": 380, "grade_value": 0.5, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Donlin Creek", "tonnage_mt": 540, "grade_value": 2.24, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Coffee Gold Project", "tonnage_mt": 80, "grade_value": 1.15, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "RC Gold", "tonnage_mt": 39.96, "grade_value": 1.1, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Brewery Creek", "tonnage_mt": 31, "grade_value": 1.0, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "RC Gold Blackjack", "tonnage_mt": 34.6, "grade_value": 0.94, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Pogo Mine", "tonnage_mt": 30, "grade_value": 11, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+        ]
+
+    monkeypatch.setattr(
+        "scripts.run_parallel_gold_backtest.supabase_ops.get_approved_analogs",
+        fake_get_approved_analogs,
+    )
+
+    analogs = _supplement_with_library_analogs(
+        {
+            "name": "White Gold Project",
+            "material": "gold",
+            "deposit_type": "Near-surface gold deposits",
+            "deposit_subtype": None,
+            "tectonic_belt": "yukon_tintina",
+            "mineralization_pattern": "vein_hosted",
+        },
+        [],
+    )
+
+    names = [analog["name"] for analog in analogs]
+    assert names[:4] == [
+        "Coffee Gold Project",
+        "RC Gold",
+        "RC Gold Blackjack",
+        "Brewery Creek",
+    ]
+    assert "Donlin Creek" not in names
+    assert "Pogo Mine" not in names
 
 
 def test_backfilled_year_only_mre_uses_conservative_blind_cutoff():

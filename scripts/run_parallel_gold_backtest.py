@@ -615,6 +615,19 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
     analog_subtype = str(
         analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or ""
     ).lower()
+    near_surface_yukon_vein_target = (
+        target_belt == "yukon_tintina"
+        and not str(project.get("deposit_subtype") or "").strip()
+        and (
+            "near-surface" in target_subtype
+            or "vein" in target_pattern
+        )
+    )
+    if near_surface_yukon_vein_target:
+        if tonnage > 160:
+            return False
+        if grade > 6.0:
+            return False
     bulk_porphyry_target = "porphyry" in target_subtype and "stockwork" in target_pattern
     if bulk_porphyry_target:
         if "porphyry" not in analog_subtype:
@@ -700,6 +713,23 @@ def _blind_library_fit_sort_key(project: Dict[str, Any], analog: Dict[str, Any])
     subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
     pattern = str(project.get("mineralization_pattern") or "").lower()
     belt = str(project.get("tectonic_belt") or "").lower()
+    analog_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+    if (
+        belt == "yukon_tintina"
+        and not str(project.get("deposit_subtype") or "").strip()
+        and ("near-surface" in subtype or "vein" in pattern)
+    ):
+        preferred = (
+            analog_belt == "yukon_tintina"
+            and 20 <= tonnage <= 120
+            and 0.8 <= grade <= 1.5
+        )
+        secondary = analog_belt == "yukon_tintina" and tonnage <= 160 and grade <= 1.5
+        return (
+            0 if preferred else 1 if secondary else 2,
+            abs(tonnage - 70),
+            abs(grade - 1.15),
+        )
     if "porphyry" in subtype and "stockwork" in pattern:
         return (0 if tonnage >= 100 and grade <= 1.25 else 1, -tonnage, grade)
     if belt in {"abitibi", "superior", "yilgarn"} and any(
@@ -786,6 +816,34 @@ def _supplement_with_library_analogs(
         )
         return list(clean_analogs)
     merged = _merge_library_analogs(project, clean_analogs, library, max_count=max_count)
+    if (
+        len(merged) < min_count
+        and filters["target_tectonic_belt"] == "newfoundland_appalachian"
+        and str(deposit_subtype or "").lower() == "irgs_general"
+    ):
+        try:
+            local_orogenic_library = supabase_ops.get_approved_analogs(
+                material=material,
+                deposit_type="orogenic gold",
+                deposit_subtype="orogenic_general",
+                target_tectonic_belt=filters["target_tectonic_belt"],
+                limit=50,
+            )
+        except Exception:
+            logging.exception(
+                "[parallel-gold-backtest] failed loading local orogenic fallback analogs for %s",
+                project.get("name"),
+            )
+        else:
+            merged = _merge_library_analogs(project, merged, local_orogenic_library, max_count=max_count)
+        if len(merged) >= min_count:
+            if len(merged) > len(clean_analogs):
+                logging.info(
+                    "[parallel-gold-backtest] seeded %s approved-library analog(s) for %s",
+                    len(merged) - len(clean_analogs),
+                    project.get("name"),
+                )
+            return merged
     if len(merged) < min_count and filters["target_tectonic_belt"]:
         try:
             broad_library = supabase_ops.get_approved_analogs(
