@@ -16,9 +16,12 @@ from nodes.parallel_gold_model import (
     _apply_blind_carlin_heap_grade_tonnage_window,
     _apply_blind_guiana_orogenic_open_pit_window,
     _apply_blind_open_pit_orogenic_proxy_window,
+    _apply_blind_abitibi_greenstone_district_window,
+    _apply_blind_bc_porphyry_stockwork_grade_window,
     _apply_blind_porphyry_bulk_no_geometry_window,
     _apply_blind_large_andean_heap_window,
     _apply_blind_mature_high_sulfidation_window,
+    _apply_blind_sparse_yilgarn_metamorphic_underground_window,
     _apply_blind_small_underground_vein_window,
     _apply_blind_underground_orogenic_no_evidence_window,
     _apply_blind_yukon_irgs_near_surface_window,
@@ -896,6 +899,218 @@ def test_open_pit_orogenic_window_replaces_inflated_remote_grade():
     assert scaled["m_and_i"]["grade_gpt"] == 1.0
     assert scaled["inferred"]["grade_gpt"] == 1.0
     assert "open_pit_orogenic_scale_window" in scaled["methodology"]["notes"]
+
+
+def test_abitibi_greenstone_district_window_lifts_low_tonnage_high_grade_result():
+    result = {
+        "m_and_i": {"tonnage_mt": 14.822, "grade_gpt": 3.81, "contained_moz": 1.817},
+        "inferred": {"tonnage_mt": 8.014, "grade_gpt": 3.81, "contained_moz": 0.982},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_abitibi_greenstone_district_window(
+        result,
+        {
+            "name": "Tower Gold Project",
+            "material": "gold",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "abitibi",
+            "mining_method_class": "underground_vein",
+        },
+        [
+            {"name": "Nelligan", "tonnage_mt": 103, "grade_value": 0.95, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Beattie", "tonnage_mt": 60.9, "grade_value": 1.59, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Canadian Malartic - Odyssey UG", "tonnage_mt": 110, "grade_value": 2.5, "deposit_subtype": "greenstone_orogenic"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 338 <= total_mt <= 341
+    assert 1.09 <= scaled["m_and_i"]["grade_gpt"] <= 1.12
+    assert "abitibi_greenstone_district_window" in scaled["methodology"]["notes"]
+
+
+def test_bc_porphyry_stockwork_grade_window_lifts_undergraded_bulk_result():
+    result = {
+        "m_and_i": {"tonnage_mt": 822.902, "grade_gpt": 0.52, "contained_moz": 13.756},
+        "inferred": {"tonnage_mt": 213.973, "grade_gpt": 0.36, "contained_moz": 2.476},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_bc_porphyry_stockwork_grade_window(
+        result,
+        {
+            "name": "Treaty Creek",
+            "material": "gold",
+            "deposit_subtype": "calc_alkalic_porphyry",
+            "mineralization_pattern": "stockwork",
+            "tectonic_belt": "bc_quesnel_stikine",
+        },
+        [
+            {"name": "KSM", "tonnage_mt": 5400, "grade_value": 0.51, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Cascabel", "tonnage_mt": 2050, "grade_value": 0.29, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Schaft Creek", "tonnage_mt": 1346, "grade_value": 0.16, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Caspiche", "tonnage_mt": 1091, "grade_value": 0.55, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "La Fortuna", "tonnage_mt": 488.6, "grade_value": 0.52, "deposit_subtype": "calc_alkalic_porphyry"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 1035 <= total_mt <= 1038
+    assert 0.88 <= scaled["m_and_i"]["grade_gpt"] <= 0.89
+    assert "bc_porphyry_stockwork_grade_window" in scaled["methodology"]["notes"]
+
+
+def test_sparse_heap_porphyry_fallback_uses_lower_size_cohort():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "P2 Gold Project",
+            "material": "gold",
+            "deposit_subtype": "calc_alkalic_porphyry",
+            "tectonic_belt": "great_basin_carlin",
+            "mining_method_class": "heap_leach_pad",
+            "mineralization_pattern": "stockwork",
+        },
+        [
+            {"name": "KSM", "tonnage_mt": 5400, "grade_value": 0.51, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Cascabel", "tonnage_mt": 2050, "grade_value": 0.29, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Schaft Creek", "tonnage_mt": 1346, "grade_value": 0.16, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Caspiche", "tonnage_mt": 1091, "grade_value": 0.55, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Ajax", "tonnage_mt": 568, "grade_value": 0.18, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "La Fortuna", "tonnage_mt": 488.6, "grade_value": 0.52, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Kliyul KMZ", "tonnage_mt": 345, "grade_value": 0.26, "deposit_subtype": "calc_alkalic_porphyry"},
+            {"name": "Kliyul Main", "tonnage_mt": 334.1, "grade_value": 0.26, "deposit_subtype": "calc_alkalic_porphyry"},
+        ],
+        reason="test",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert 162 <= total_mt <= 163
+    assert 0.36 <= result["m_and_i"]["grade_gpt"] <= 0.38
+    assert "sparse_heap_leach_porphyry_low_grade_prior" in result["methodology"]["notes"]
+
+
+def test_sparse_yilgarn_open_pit_fallback_uses_lower_cohort_for_mandilla_scale():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Mandilla Gold Project",
+            "material": "gold",
+            "deposit_type": "orogenic gold",
+            "deposit_subtype": "orogenic_general",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "open_pit_selective",
+            "mineralization_pattern": "vein_hosted",
+            "drilling_evidence": {
+                "confidence": "low",
+                "strike_length_m": 3100,
+                "down_dip_extent_m": 200,
+                "best_intercepts": [
+                    {"interval_m": 93, "grade_g_t": 0.69},
+                    {"interval_m": 47, "grade_g_t": 1.29},
+                ],
+            },
+        },
+        [
+            {"name": "Beattie", "tonnage_mt": 60.9, "grade_value": 1.59, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Tropicana", "tonnage_mt": 87.93, "grade_value": 1.91, "deposit_subtype": "orogenic_general"},
+            {"name": "Nampala", "tonnage_mt": 25, "grade_value": 0.85, "deposit_subtype": "orogenic_general"},
+            {"name": "Fenn-Gib", "tonnage_mt": 181.3, "grade_value": 0.74, "deposit_subtype": "orogenic_general"},
+            {"name": "Fekola", "tonnage_mt": 155.39, "grade_value": 1.22, "deposit_subtype": "orogenic_general"},
+            {"name": "Loulo-Gounkoto", "tonnage_mt": 105, "grade_value": 4.59, "deposit_subtype": "orogenic_general"},
+        ],
+        reason="test",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert 41 <= total_mt <= 42
+    assert 1.09 <= result["m_and_i"]["grade_gpt"] <= 1.11
+    assert "open_pit_orogenic_bulk_scale_prior" in result["methodology"]["notes"]
+
+
+def test_sparse_yilgarn_open_pit_fallback_keeps_tiny_feysville_scale():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Feysville Gold Project",
+            "material": "gold",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "open_pit_selective",
+        },
+        [
+            {"name": "Riverina Underground", "tonnage_mt": 7, "grade_value": 2.6, "deposit_subtype": "orogenic_general"},
+            {"name": "Davyhurst", "tonnage_mt": 26.8, "grade_value": 2.4, "deposit_subtype": "orogenic_general"},
+            {"name": "Anglo Saxon", "tonnage_mt": 2.24, "grade_value": 4.06, "deposit_subtype": "orogenic_general"},
+            {"name": "Bullabulling", "tonnage_mt": 130, "grade_value": 1.0, "deposit_subtype": "orogenic_general"},
+            {"name": "King of the Hills", "tonnage_mt": 96.5, "grade_value": 1.4, "deposit_subtype": "orogenic_general"},
+            {"name": "Mt York", "tonnage_mt": 61.7, "grade_value": 1.05, "deposit_subtype": "orogenic_general"},
+            {"name": "Fortnum", "tonnage_mt": 2.85, "grade_value": 3.62, "deposit_subtype": "orogenic_general"},
+            {"name": "Paulsens", "tonnage_mt": 1.334, "grade_value": 9.5, "deposit_subtype": "orogenic_general"},
+        ],
+        reason="test",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert 5.0 <= total_mt <= 5.2
+    assert 1.20 <= result["m_and_i"]["grade_gpt"] <= 1.24
+    assert "open_pit_orogenic_bulk_scale_prior" in result["methodology"]["notes"]
+
+
+def test_sparse_tiny_yilgarn_vein_fallback_uses_smallest_high_grade_analog_scale():
+    result = _blind_local_fallback_estimate(
+        {
+            "name": "Mt Egerton Gold Project",
+            "material": "gold",
+            "tectonic_belt": "yilgarn",
+            "mineralization_pattern": "vein_hosted",
+        },
+        [
+            {"name": "Paulsens", "tonnage_mt": 1.334, "grade_value": 9.5, "deposit_subtype": "orogenic_general"},
+            {"name": "Triumph", "tonnage_mt": 1.8, "grade_value": 2.0, "deposit_subtype": "irgs_general"},
+            {"name": "Windfall", "tonnage_mt": 2.38, "grade_value": 7.85, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "True North", "tonnage_mt": 3.52, "grade_value": 4.41},
+        ],
+        reason="test",
+    )
+
+    total_mt = result["m_and_i"]["tonnage_mt"] + result["inferred"]["tonnage_mt"]
+    assert 0.26 <= total_mt <= 0.28
+    assert 3.19 <= result["m_and_i"]["grade_gpt"] <= 3.21
+    assert "sparse_tiny_yilgarn_vein_prior" in result["methodology"]["notes"]
+
+
+def test_sparse_yilgarn_metamorphic_underground_window_lifts_underfit_tonnage():
+    result = {
+        "m_and_i": {"tonnage_mt": 5.4, "grade_gpt": 0.99, "contained_moz": 0.172},
+        "inferred": {"tonnage_mt": 3.6, "grade_gpt": 0.99, "contained_moz": 0.115},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_sparse_yilgarn_metamorphic_underground_window(
+        result,
+        {
+            "name": "Glenburgh Gold Project",
+            "material": "gold",
+            "deposit_type": "Metamorphic hosted",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "underground_vein",
+        },
+        [
+            {"name": "BAM East", "tonnage_mt": 7.41, "grade_value": 1.37},
+            {"name": "Gilar", "tonnage_mt": 6.1, "grade_value": 1.3},
+            {"name": "Hirsikangas", "tonnage_mt": 7.29, "grade_value": 1.13},
+            {"name": "Tropicana", "tonnage_mt": 87.93, "grade_value": 1.91, "deposit_subtype": "orogenic_general"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 16.2 <= total_mt <= 16.4
+    assert 0.98 <= scaled["m_and_i"]["grade_gpt"] <= 1.00
+    assert "sparse_yilgarn_metamorphic_underground_prior" in scaled["methodology"]["notes"]
 
 
 def test_yukon_irgs_window_rescales_underfit_remote_result():
