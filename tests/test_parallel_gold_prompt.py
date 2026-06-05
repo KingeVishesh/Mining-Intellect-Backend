@@ -204,6 +204,36 @@ def test_blind_prompt_names_exact_pre_mre_cutoff():
     assert "use ONLY information published BEFORE 2025-05-15" in prompt
 
 
+def test_blind_prompt_silently_discards_target_mre_leaks():
+    project = {
+        "name": "Blind Gold",
+        "material": "gold",
+        "mre_data_source": {"as_of_date": "2025-05-15"},
+    }
+
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+
+    assert "discard that source silently" in prompt
+    assert "Do NOT quote" in prompt
+    assert "anywhere in the JSON output" in prompt
+    assert "say so in `methodology.notes`" not in prompt
+
+
+def test_blind_prompt_rejects_post_cutoff_target_technical_reports():
+    project = {
+        "name": "Blind Gold",
+        "material": "gold",
+        "mre_data_source": {"as_of_date": "2025-05-15"},
+    }
+
+    prompt = _build_prompt(project=project, analogs=[], use_mre=False, find_analogs=True)
+
+    assert "do NOT use target resource pages" in prompt
+    assert "NI 43-101" in prompt
+    assert "dated on or after the cutoff" in prompt
+    assert "even if it restates older drill" in prompt
+
+
 def test_blind_prompt_requires_grade_proxy_fallback():
     project = {
         "name": "Blind Gold",

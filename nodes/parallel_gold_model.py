@@ -286,9 +286,13 @@ top-cut assay grade, strike length, true width, or vertical/depth extent,
 you MUST search for those pre-MRE target disclosures before using
 `analog_only_fallback`. Look first at target press releases, investor
 presentations, technical-report summaries, and exchange filings dated before
-the cutoff. Use only drill facts that were public before the cutoff. If a
-later technical report restates historical drilling, do not use it unless you
-can identify the same drilling facts in a pre-cutoff public source.
+the cutoff. Use only drill facts that were public before the cutoff.
+
+In blind mode, do NOT use target resource pages, MRE announcements, NI 43-101
+MRE technical reports, PEA/PFS/FS reports, database summaries, or any other
+target document dated on or after the cutoff, even if it restates older drill
+facts. Only use a target drilling fact when you can identify the same fact in
+a source published before the cutoff.
 
 Only choose `analog_only_fallback` after documenting the specific pre-cutoff
 target sources checked and which required fields were still missing.
@@ -688,9 +692,12 @@ def _chronology_directive(cutoff: Optional[date]) -> str:
             "CHRONOLOGY DISCIPLINE\n"
             "Blind mode is enabled, but the target MRE publication date is not "
             "available in the supplied context. Do not use the target's official "
-            "resource estimate or any source that states it. When researching "
-            "the target, prefer drill assays, presentations, and technical "
-            "documents published before the first MRE."
+            "resource estimate or any source that states it. If target resource "
+            "or MRE numbers appear in search results, discard that source "
+            "silently: do not quote, paraphrase, summarize, or mention those "
+            "numbers anywhere in the JSON output. When researching the target, "
+            "prefer drill assays, presentations, and technical documents "
+            "published before the first MRE."
         )
     cutoff_s = cutoff.isoformat()
     return f"""\
@@ -699,7 +706,12 @@ Blind mode is enabled. Treat {cutoff_s} as the target MRE cutoff date.
 For the TARGET PROJECT, use ONLY information published BEFORE {cutoff_s}.
 Reject target press releases, technical reports, presentations, web pages,
 and database summaries dated on or after {cutoff_s}. If search results expose
-the MRE numbers, ignore them completely and say so in `methodology.notes`.
+target resource or MRE numbers, discard that source silently. Do NOT quote,
+paraphrase, summarize, cite, or mention those target resource/MRE numbers
+anywhere in the JSON output, including `methodology`, `analogs_used`,
+`analogs_rejected`, rationale strings, or source notes. It is acceptable to
+write only "post-cutoff target resource source discarded without use" with no
+numbers, source title, source URL, or resource category details.
 
 For ANALOGS, use only analog resource/drilling documents published before
 {cutoff_s}. Post-cutoff analog sources are hidden from the supplied context
