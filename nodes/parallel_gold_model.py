@@ -2060,7 +2060,9 @@ def _guiana_orogenic_open_pit_proxy(
     for analog in analogs:
         tonnage = _as_float(analog.get("tonnage_mt"))
         grade = _as_float(analog.get("grade_value"))
-        analog_belt = str(analog.get("tectonic_belt") or "").strip().lower()
+        analog_belt = str(
+            analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or ""
+        ).strip().lower()
         analog_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
         if tonnage and grade and analog_belt == "guiana_shield" and "orogenic" in analog_subtype:
             exact.append((tonnage, grade))
@@ -2801,7 +2803,6 @@ def _apply_blind_large_andean_heap_window(
     if not proxy:
         return result
     total, grade = proxy
-    grade = min(grade, _result_total_grade(result) or grade)
     return _proxy_result_window(
         result,
         total,

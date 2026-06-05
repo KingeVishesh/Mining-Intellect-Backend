@@ -1730,8 +1730,8 @@ def test_guiana_orogenic_open_pit_window_prioritizes_exact_belt_peers():
             "mining_method_class": "open_pit_selective",
         },
         [
-            {"name": "Aurora Gold Project", "tonnage_mt": 40.6, "grade_value": 3.07, "deposit_subtype": "orogenic_general", "tectonic_belt": "guiana_shield"},
-            {"name": "Toroparu Project", "tonnage_mt": 126.9, "grade_value": 1.3, "deposit_subtype": "orogenic_general", "tectonic_belt": "guiana_shield"},
+            {"name": "Aurora Gold Project", "tonnage_mt": 40.6, "grade_value": 3.07, "deposit_subtype": "orogenic_general", "analog_tectonic_belt": "guiana_shield"},
+            {"name": "Toroparu Project", "tonnage_mt": 126.9, "grade_value": 1.3, "deposit_subtype": "orogenic_general", "analog_tectonic_belt": "guiana_shield"},
             {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general", "tectonic_belt": None},
             {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general", "tectonic_belt": None},
         ],
@@ -1750,6 +1750,47 @@ def test_large_andean_heap_window_replaces_remote_scale_cap():
         "anchor_used": "analog_only_fallback",
         "methodology": {"branch": "analog_only_fallback", "notes": ""},
         "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_large_andean_heap_window(
+        result,
+        {
+            "name": "Volcan Gold Project",
+            "material": "gold",
+            "tectonic_belt": "andean",
+            "district": "Maricunga Gold Belt",
+            "mining_method_class": "heap_leach_pad",
+            "drilling_evidence": {
+                "total_meters_drilled": 150000,
+                "strike_length_m": 6000,
+                "queried_pre_mre_cutoff": "2022-01-01",
+                "source_url": "https://example.com/pre-mre-volcan-overview/",
+            },
+        },
+        [
+            {"name": "Cerro Quema", "tonnage_mt": 24.6, "grade_value": 0.71, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean"},
+            {"name": "Taguas Project", "tonnage_mt": 133.6, "grade_value": 0.60, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+            {"name": "Alturas", "tonnage_mt": 180.0, "grade_value": 1.00, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean"},
+            {"name": "Lagunas Norte", "tonnage_mt": 250.0, "grade_value": 0.92, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean"},
+            {"name": "Choquelimpie", "tonnage_mt": 89.27, "grade_value": 0.76, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+            {"name": "Fenix Gold", "tonnage_mt": 270.0, "grade_value": 0.45, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+            {"name": "La Arena (Phase I)", "tonnage_mt": 133.6, "grade_value": 0.35, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 535 <= total_mt <= 545
+    assert 0.62 <= scaled["m_and_i"]["grade_gpt"] <= 0.65
+    assert "large_andean_heap_leach_window" in scaled["methodology"]["notes"]
+
+
+def test_large_andean_heap_window_raises_understated_remote_grade():
+    result = {
+        "m_and_i": {"tonnage_mt": 394.307, "grade_gpt": 0.532, "contained_moz": 6.742},
+        "inferred": {"tonnage_mt": 145.693, "grade_gpt": 0.532, "contained_moz": 2.493},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
     }
 
     scaled = _apply_blind_large_andean_heap_window(
