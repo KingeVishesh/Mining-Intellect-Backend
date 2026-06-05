@@ -398,6 +398,27 @@ def test_blind_node_uses_local_fallback_when_parallel_returns_no_result(monkeypa
     assert "parallel_no_result" in model["methodology"]["notes"]
 
 
+def test_blind_node_does_not_fallback_when_parallel_times_out(monkeypatch):
+    from config import settings
+
+    monkeypatch.setattr(settings, "parallel_api_key", "test-key")
+
+    def _timeout(**_kwargs):
+        raise RuntimeError("Parallel task did not complete within 900s")
+
+    monkeypatch.setattr("nodes.parallel_gold_model._run_parallel_task", _timeout)
+
+    out = parallel_gold_model_node({
+        "project": {"name": "Slow Target", "material": "gold"},
+        "analogs": [{"name": "Analog A", "tonnage_mt": 4.589, "grade_value": 3.0}],
+        "use_mre": False,
+        "find_analogs": False,
+    })
+
+    assert "Parallel task did not complete" in out["error"]
+    assert "parallel_model" not in out
+
+
 def test_blind_local_fallback_trusts_low_grade_target_geometry():
     result = _blind_local_fallback_estimate(
         {

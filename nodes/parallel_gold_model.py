@@ -2664,8 +2664,12 @@ def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optiona
         logger.debug(f"[parallel_gold] run_id={run_id} status={status}")
 
     if status != "completed":
-        logger.error(f"[parallel_gold] task terminated with status={status} run_id={run_id}")
-        return None
+        msg = (
+            f"Parallel task did not complete within {_POLL_TIMEOUT_S}s "
+            f"(status={status or 'unknown'}, run_id={run_id})"
+        )
+        logger.error(f"[parallel_gold] {msg}")
+        raise RuntimeError(msg)
 
     # 3) Fetch result
     res = requests.get(f"{base}/v1/tasks/runs/{run_id}/result", headers=headers, timeout=60)
