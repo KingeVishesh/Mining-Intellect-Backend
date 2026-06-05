@@ -1956,15 +1956,18 @@ def _blind_result_mentions_mre_anchor(result: Dict[str, Any]) -> bool:
     ).lower()
     target_anchor_regexes = (
         re.compile(
-            r"\btarget\b.{0,80}\b(mre|mineral resource|resource estimate)\b",
+            r"\btarget(?:'s)?\s+(?:official\s+)?"
+            r"(mre|mineral resource estimate|resource estimate)\b",
             re.IGNORECASE | re.DOTALL,
         ),
         re.compile(
-            r"\b(mre|mineral resource|resource estimate)\b.{0,80}\btarget\b",
+            r"\bused\b.{0,40}\btarget\b.{0,40}"
+            r"\b(mre|mineral resource estimate|resource estimate)\b",
             re.IGNORECASE | re.DOTALL,
         ),
         re.compile(
-            r"\bcompany\s+mre\b.{0,80}\btarget\b",
+            r"\b(anchor|anchored|derived|based)\b.{0,40}\btarget\b.{0,40}"
+            r"\b(mre|mineral resource estimate|resource estimate)\b",
             re.IGNORECASE | re.DOTALL,
         ),
     )
