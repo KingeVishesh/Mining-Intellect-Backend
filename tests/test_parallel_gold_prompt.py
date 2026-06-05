@@ -361,6 +361,36 @@ def test_blind_leak_detector_flags_dated_mre_basis():
     })
 
 
+def test_blind_leak_detector_allows_analog_resource_documents():
+    assert not _blind_result_mentions_mre_anchor({
+        "anchor_used": "analog_only_fallback",
+        "methodology": {
+            "branch": "analog_only_fallback",
+            "notes": "target_open_web_search=disabled_blind; grade_proxy=analog_resource_grade",
+        },
+        "conviction": {"level": "very_low", "rationale": "analog proxy only"},
+        "analogs_used": [
+            "Valentine Gold Project | NI 43-101 FS effective Nov 30, 2022; "
+            "Marathon Gold Jul 2022 MRE news release checked for analog split.",
+        ],
+        "analogs_rejected": [
+            "Tower Gold | Total resource 386 Mt far exceeds target tonnage band; rejected.",
+        ],
+    })
+
+
+def test_blind_leak_detector_flags_target_resource_anchor_in_analog_text():
+    assert _blind_result_mentions_mre_anchor({
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": "mixed sources"},
+        "analogs_used": [
+            "Used the target mineral resource estimate as an anchor before analog scaling.",
+        ],
+        "analogs_rejected": [],
+    })
+
+
 def test_blind_node_does_not_auto_enable_web_discovery_for_thin_cohort(monkeypatch):
     from config import settings
 

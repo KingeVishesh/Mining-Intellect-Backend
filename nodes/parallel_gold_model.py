@@ -1938,14 +1938,37 @@ _BLIND_MRE_LEAK_REGEXES = (
 
 
 def _blind_result_mentions_mre_anchor(result: Dict[str, Any]) -> bool:
-    text_parts: list[str] = []
-    for key in ("anchor_used", "methodology", "conviction", "analogs_used", "analogs_rejected"):
-        text_parts.append(str(result.get(key) or ""))
-    text = " ".join(text_parts).lower()
-    return (
-        any(pattern in text for pattern in _BLIND_MRE_LEAK_PATTERNS)
-        or any(regex.search(text) for regex in _BLIND_MRE_LEAK_REGEXES)
+    core_text = " ".join(
+        str(result.get(key) or "")
+        for key in ("anchor_used", "methodology", "conviction")
+    ).lower()
+    if (
+        any(pattern in core_text for pattern in _BLIND_MRE_LEAK_PATTERNS)
+        or any(regex.search(core_text) for regex in _BLIND_MRE_LEAK_REGEXES)
+    ):
+        return True
+
+    # Analog MREs are legitimate source documents. Only treat analog text as
+    # a blind leak when it explicitly says the target/resource anchor was used.
+    analog_text = " ".join(
+        str(result.get(key) or "")
+        for key in ("analogs_used", "analogs_rejected")
+    ).lower()
+    target_anchor_regexes = (
+        re.compile(
+            r"\btarget\b.{0,80}\b(mre|mineral resource|resource estimate)\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            r"\b(mre|mineral resource|resource estimate)\b.{0,80}\btarget\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            r"\bcompany\s+mre\b.{0,80}\btarget\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
     )
+    return any(regex.search(analog_text) for regex in target_anchor_regexes)
 
 
 def _replace_blind_mre_leak_estimate(result: Dict[str, Any], analogs: List[Dict]) -> Dict[str, Any]:
