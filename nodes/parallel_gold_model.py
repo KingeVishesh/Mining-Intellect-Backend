@@ -1500,6 +1500,8 @@ def _sparse_yilgarn_metamorphic_underground_proxy(
     pattern = (project.get("mineralization_pattern") or "").lower()
     if evidence or belt != "yilgarn":
         return None
+    if "open" in mining:
+        return None
     if "underground" not in mining and "vein" not in mining and "vein" not in pattern:
         return None
     if not any(token in subtype for token in ("metamorphic", "orogenic", "greenstone", "vein")):
@@ -1581,7 +1583,8 @@ def _open_pit_orogenic_bulk_proxy(
     if belt == "yilgarn" and open_pit_selective and not meters and strike and confidence == "low":
         low_mid_grades = [g for g in grades if g <= 2.0]
         grade_proxy = (_median(low_mid_grades) or _median(grades) or 1.0) * 0.90
-        return (_median(tonnages) or max(tonnages)) * 0.91, grade_proxy
+        total_proxy = (_lower_half_median(tonnages) or _median(tonnages) or max(tonnages)) * 0.68
+        return total_proxy, grade_proxy
     if not evidence and len(low_grade) >= 3:
         low_t = [t for t, _g in low_grade]
         low_g = [g for _t, g in low_grade]
@@ -2801,6 +2804,10 @@ def _apply_blind_moderate_drilling_fallback_calibration(
     tonnage_scale = 1.2
     if cap_mt:
         tonnage_scale = min(tonnage_scale, cap_mt / total_mt)
+    analog_median = _median([v for v in (_as_float(a.get("tonnage_mt")) for a in analogs) if v])
+    result_grade = _result_total_grade(result) or 0.0
+    if analog_median and result_grade >= 2.0:
+        tonnage_scale = min(tonnage_scale, (analog_median * 1.20) / total_mt)
     if tonnage_scale <= 0:
         return result
 

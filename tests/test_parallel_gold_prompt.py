@@ -901,6 +901,47 @@ def test_open_pit_orogenic_window_replaces_inflated_remote_grade():
     assert "open_pit_orogenic_scale_window" in scaled["methodology"]["notes"]
 
 
+def test_yilgarn_open_pit_window_uses_lower_cohort_with_low_confidence_geometry():
+    result = {
+        "m_and_i": {"tonnage_mt": 57.983, "grade_gpt": 0.903, "contained_moz": 1.71},
+        "inferred": {"tonnage_mt": 46.386, "grade_gpt": 0.903, "contained_moz": 1.367},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_open_pit_orogenic_proxy_window(
+        result,
+        {
+            "name": "Mandilla Gold Project",
+            "material": "gold",
+            "deposit_type": "orogenic gold",
+            "deposit_subtype": "orogenic_general",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "open_pit_selective",
+            "mineralization_pattern": "vein_hosted",
+            "drilling_evidence": {
+                "confidence": "low",
+                "strike_length_m": 3100,
+                "down_dip_extent_m": 200,
+            },
+        },
+        [
+            {"name": "Beattie", "tonnage_mt": 60.9, "grade_value": 1.59, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Tropicana", "tonnage_mt": 87.93, "grade_value": 1.91, "deposit_subtype": "orogenic_general"},
+            {"name": "Nampala", "tonnage_mt": 25, "grade_value": 0.85, "deposit_subtype": "orogenic_general"},
+            {"name": "Fenn-Gib", "tonnage_mt": 181.3, "grade_value": 0.74, "deposit_subtype": "orogenic_general"},
+            {"name": "Fekola", "tonnage_mt": 155.39, "grade_value": 1.22, "deposit_subtype": "orogenic_general"},
+            {"name": "Loulo-Gounkoto", "tonnage_mt": 105, "grade_value": 4.59, "deposit_subtype": "orogenic_general"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 41 <= total_mt <= 42
+    assert 1.09 <= scaled["m_and_i"]["grade_gpt"] <= 1.11
+    assert "open_pit_orogenic_scale_window" in scaled["methodology"]["notes"]
+
+
 def test_abitibi_greenstone_district_window_lifts_low_tonnage_high_grade_result():
     result = {
         "m_and_i": {"tonnage_mt": 14.822, "grade_gpt": 3.81, "contained_moz": 1.817},
@@ -1640,5 +1681,39 @@ def test_moderate_drilling_fallback_calibrates_high_grade_analog_median():
 
     assert calibrated["m_and_i"]["tonnage_mt"] == 3.304
     assert calibrated["inferred"]["tonnage_mt"] == 2.203
+    assert calibrated["m_and_i"]["grade_gpt"] == 2.4
+    assert "moderate_drilling_analog_fallback_calibration" in calibrated["methodology"]["notes"]
+
+
+def test_moderate_drilling_fallback_caps_high_grade_small_project_to_analog_scale():
+    result = {
+        "m_and_i": {"tonnage_mt": 5.448, "grade_gpt": 3.0, "contained_moz": 0.525},
+        "inferred": {"tonnage_mt": 4.152, "grade_gpt": 3.0, "contained_moz": 0.4},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+    project = {
+        "drilling_evidence": {
+            "total_meters_drilled": 8460,
+            "weighted_grade_g_t": 3.3,
+            "queried_pre_mre_cutoff": "2026-12-31",
+            "source_url": "https://example.com/pre-mre-drilling.pdf",
+        }
+    }
+
+    calibrated = _apply_blind_moderate_drilling_fallback_calibration(
+        result,
+        project,
+        [
+            {"tonnage_mt": 12.6, "grade_value": 0.94},
+            {"tonnage_mt": 3.52, "grade_value": 4.41},
+            {"tonnage_mt": 4.64, "grade_value": 3.2},
+            {"tonnage_mt": 4.538, "grade_value": 2.8},
+        ],
+    )
+
+    total_mt = calibrated["m_and_i"]["tonnage_mt"] + calibrated["inferred"]["tonnage_mt"]
+    assert 5.4 <= total_mt <= 5.6
     assert calibrated["m_and_i"]["grade_gpt"] == 2.4
     assert "moderate_drilling_analog_fallback_calibration" in calibrated["methodology"]["notes"]
