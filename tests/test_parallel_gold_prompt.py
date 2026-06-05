@@ -27,6 +27,8 @@ from nodes.parallel_gold_model import (
     _apply_blind_yilgarn_small_open_pit_window,
     _apply_blind_high_grade_vms_scout_window,
     _apply_blind_abitibi_greenstone_district_window,
+    _apply_blind_large_abitibi_open_pit_bulk_window,
+    _apply_blind_abitibi_moderate_underground_window,
     _apply_blind_bc_porphyry_stockwork_grade_window,
     _apply_blind_porphyry_bulk_no_geometry_window,
     _apply_blind_large_andean_heap_window,
@@ -49,6 +51,7 @@ from nodes.parallel_gold_model import (
     _output_schema,
     _blind_local_fallback_estimate,
     _replace_placeholder_blind_estimate,
+    _target_evidence_for_scale,
     parallel_gold_model_node,
 )
 
@@ -988,6 +991,174 @@ def test_abitibi_greenstone_district_window_lifts_low_tonnage_high_grade_result(
     assert 338 <= total_mt <= 341
     assert 1.09 <= scaled["m_and_i"]["grade_gpt"] <= 1.12
     assert "abitibi_greenstone_district_window" in scaled["methodology"]["notes"]
+
+
+def test_target_evidence_for_scale_rejects_post_cutoff_source_date_even_when_queried():
+    evidence = _target_evidence_for_scale({
+        "name": "Cadillac Gold Project",
+        "mre_date": "2022-08-22",
+        "drilling_evidence": {
+            "confidence": "medium",
+            "source_url": "https://example.com/pre-mre-query-result",
+            "source_date": "2023-08-03",
+            "total_meters_drilled": 25_000,
+            "queried_pre_mre_cutoff": "2022-08-22",
+        },
+    })
+
+    assert evidence == {}
+
+
+def test_target_evidence_for_scale_uses_pre_cutoff_intercept_dates_when_top_source_missing():
+    project = {
+        "name": "Hammerdown Gold Project",
+        "mre_date": "2026-01-01",
+        "drilling_evidence": {
+            "confidence": "low",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/1840616/000106299325016976/exhibit99-1.htm",
+            "source_date": None,
+            "report_cutoff_date": "2026-12-31",
+            "queried_pre_mre_cutoff": "2026-12-31",
+            "total_meters_drilled": 8460,
+            "weighted_grade_g_t": 3.3,
+            "best_intercepts": [
+                {"source_date": "2025-03-04", "interval_m": 28, "grade_g_t": 12},
+                {"source_date": "2025-04-17", "interval_m": 29.8, "grade_g_t": 5.5},
+            ],
+        },
+    }
+
+    evidence = _target_evidence_for_scale(project)
+    rendered = _format_project_block(project, use_mre=False)
+
+    assert evidence["total_meters_drilled"] == 8460
+    assert '"total_meters_drilled": 8460' in rendered
+
+
+def test_abitibi_moderate_underground_window_expands_sparse_cadillac_style_pool():
+    result = {
+        "m_and_i": {"tonnage_mt": 10.266, "grade_gpt": 3.923, "contained_moz": 1.294},
+        "inferred": {"tonnage_mt": 6.844, "grade_gpt": 3.923, "contained_moz": 0.863},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {
+            "branch": "analog_only_fallback",
+            "notes": "local_guard=underground_orogenic_no_evidence_scale_prior",
+        },
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_abitibi_moderate_underground_window(
+        result,
+        {
+            "name": "Cadillac Gold Project",
+            "material": "gold",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "abitibi",
+            "mining_method": "Underground",
+            "mining_method_class": "underground_vein",
+            "mre_date": "2022-08-22",
+        },
+        [
+            {"name": "Nelligan", "tonnage_mt": 103, "grade_value": 0.95, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Beattie", "tonnage_mt": 60.9, "grade_value": 1.59, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Flordin", "tonnage_mt": 1.758, "grade_value": 2.38, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Young-Davidson", "tonnage_mt": 12.825, "grade_value": 2.87, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Chimo", "tonnage_mt": 7.13, "grade_value": 3.14, "deposit_subtype": "orogenic_general"},
+            {"name": "O'Brien", "tonnage_mt": 13.84, "grade_value": 5.23, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Beaufor", "tonnage_mt": 1.28, "grade_value": 5.3, "deposit_subtype": "greenstone_orogenic"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 44.8 <= total_mt <= 45.0
+    assert 2.16 <= scaled["m_and_i"]["grade_gpt"] <= 2.19
+    assert "abitibi_moderate_underground_window" in scaled["methodology"]["notes"]
+
+
+def test_abitibi_moderate_underground_window_caps_hybrid_wawa_high_grade_pool():
+    result = {
+        "m_and_i": {"tonnage_mt": 29.7, "grade_gpt": 4.5, "contained_moz": 4.296},
+        "inferred": {"tonnage_mt": 19.8, "grade_gpt": 4.5, "contained_moz": 2.864},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {
+            "branch": "analog_only_fallback",
+            "notes": "local_guard=underground_orogenic_no_evidence_scale_prior",
+        },
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_abitibi_moderate_underground_window(
+        result,
+        {
+            "name": "Wawa Gold Project",
+            "material": "gold",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "abitibi",
+            "mining_method": "open pit and underground",
+            "mining_method_class": "underground_vein",
+            "mre_date": "2026-01-01",
+        },
+        [
+            {"name": "Red Lake", "tonnage_mt": 8, "grade_value": 13, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Casa Berardi", "tonnage_mt": 30, "grade_value": 4.5, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Odyssey UG", "tonnage_mt": 110, "grade_value": 2.5, "deposit_subtype": "greenstone_orogenic"},
+            {"name": "Lamaque", "tonnage_mt": 30, "grade_value": 6, "deposit_subtype": "greenstone_orogenic"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 32.8 <= total_mt <= 33.0
+    assert 1.63 <= scaled["m_and_i"]["grade_gpt"] <= 1.66
+    assert "abitibi_moderate_underground_window" in scaled["methodology"]["notes"]
+
+
+def test_large_abitibi_open_pit_bulk_window_restores_springpole_scale():
+    result = {
+        "m_and_i": {"tonnage_mt": 5.079, "grade_gpt": 0.994, "contained_moz": 0.162},
+        "inferred": {"tonnage_mt": 2.921, "grade_gpt": 0.994, "contained_moz": 0.093},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+    project = {
+        "name": "Springpole Gold Project",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "tectonic_belt": "abitibi",
+        "mining_method_class": "open_pit_bulk",
+        "mineralization_pattern": "disseminated_bulk",
+        "mre_date": "2025-01-01",
+        "drilling_evidence": {
+            "confidence": "low",
+            "source_date": "2024-01-01",
+            "total_meters_drilled": 1_000,
+            "queried_pre_mre_cutoff": "2025-01-01",
+        },
+    }
+    analogs = [
+        {"name": "Doropo", "tonnage_mt": 114.19, "grade_value": 1.19, "deposit_subtype": "orogenic_general"},
+        {"name": "Hemlo", "tonnage_mt": 130, "grade_value": 1.2, "deposit_subtype": "orogenic_general"},
+        {"name": "Magino", "tonnage_mt": 162, "grade_value": 0.95, "deposit_subtype": "orogenic_general"},
+        {"name": "Nelligan", "tonnage_mt": 103, "grade_value": 0.95, "deposit_subtype": "orogenic_general"},
+        {"name": "Hardrock", "tonnage_mt": 141.5, "grade_value": 1.27, "deposit_subtype": "orogenic_general"},
+        {"name": "Greenstone", "tonnage_mt": 141.4, "grade_value": 1.27, "deposit_subtype": "orogenic_general"},
+        {"name": "Cote", "tonnage_mt": 365, "grade_value": 0.91, "deposit_subtype": "orogenic_general", "mining_method_class": "open_pit_bulk"},
+        {"name": "Detour Lake", "tonnage_mt": 950, "grade_value": 0.83, "deposit_subtype": "orogenic_general", "mining_method_class": "open_pit_bulk"},
+    ]
+
+    scaled = _apply_blind_large_abitibi_open_pit_bulk_window(
+        result,
+        project,
+        analogs,
+    )
+    preserved = _apply_blind_broad_bulk_geometry_window(scaled, project, analogs)
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    preserved_total_mt = preserved["m_and_i"]["tonnage_mt"] + preserved["inferred"]["tonnage_mt"]
+    assert 255.5 <= total_mt <= 255.7
+    assert preserved_total_mt == total_mt
+    assert 0.67 <= scaled["m_and_i"]["grade_gpt"] <= 0.69
+    assert "large_abitibi_open_pit_bulk_window" in scaled["methodology"]["notes"]
 
 
 def test_bc_porphyry_stockwork_grade_window_lifts_undergraded_bulk_result():

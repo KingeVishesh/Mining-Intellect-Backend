@@ -88,14 +88,17 @@ def _evidence_is_pre_cutoff(evidence: Optional[Dict[str, Any]], cutoff: Optional
         return bool(evidence)
     if _evidence_mentions_target_mre(evidence):
         return False
-    if evidence.get("queried_pre_mre_cutoff") == cutoff.isoformat():
-        return True
     # Prefer the publication/source date over report_cutoff_date. The latter
     # is often our synthetic "search before this MRE cutoff" marker, not the
     # date the evidence itself became public.
-    source_date = _parse_loose_date(evidence.get("source_date") or evidence.get("source_url"))
+    source_date = (
+        _parse_loose_date(evidence.get("source_date") or evidence.get("source_url"))
+        or _latest_intercept_source_date(evidence)
+    )
     if source_date:
         return source_date < cutoff
+    if evidence.get("queried_pre_mre_cutoff") == cutoff.isoformat():
+        return True
     source_date = _parse_loose_date(evidence.get("report_cutoff_date") or evidence.get("extracted_at"))
     return bool(source_date and source_date < cutoff)
 
@@ -130,6 +133,20 @@ def _evidence_mentions_target_mre(evidence: Dict[str, Any]) -> bool:
     ).lower()
     text = re.sub(r"[_\\/-]+", " ", text)
     return any(marker in text for marker in _EVIDENCE_MRE_MARKERS)
+
+
+def _latest_intercept_source_date(evidence: Dict[str, Any]) -> Optional[date]:
+    intercepts = evidence.get("best_intercepts") or []
+    if not isinstance(intercepts, list):
+        return None
+    dates = []
+    for item in intercepts:
+        if not isinstance(item, dict):
+            continue
+        parsed = _parse_loose_date(item.get("source_date") or item.get("source_url"))
+        if parsed:
+            dates.append(parsed)
+    return max(dates) if dates else None
 
 
 def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -737,14 +754,23 @@ def _supplement_with_library_analogs(
     min_count: int = 3,
     max_count: int = 8,
 ) -> List[Dict[str, Any]]:
-    if len(analogs) >= min_count and not _blind_gold_needs_library_expansion(project, analogs):
-        return list(analogs)
+    cutoff = _parse_loose_date(project.get("mre_date") or project.get("mre_data_source"))
+    clean_analogs = parallel_gold_model_module._clean_blind_analogs(
+        project,
+        list(analogs),
+        cutoff,
+    )
+    if (
+        len(clean_analogs) >= min_count
+        and not _blind_gold_needs_library_expansion(project, clean_analogs)
+    ):
+        return list(clean_analogs)
     filters = _gold_library_filters(project)
     material = filters["material"] or "gold"
     deposit_type = filters["deposit_type"]
     deposit_subtype = filters["deposit_subtype"]
     if not deposit_type and not deposit_subtype:
-        return list(analogs)
+        return list(clean_analogs)
     try:
         library = supabase_ops.get_approved_analogs(
             material=material,
@@ -758,8 +784,8 @@ def _supplement_with_library_analogs(
             "[parallel-gold-backtest] failed loading approved analog library for %s",
             project.get("name"),
         )
-        return list(analogs)
-    merged = _merge_library_analogs(project, analogs, library, max_count=max_count)
+        return list(clean_analogs)
+    merged = _merge_library_analogs(project, clean_analogs, library, max_count=max_count)
     if len(merged) < min_count and filters["target_tectonic_belt"]:
         try:
             broad_library = supabase_ops.get_approved_analogs(
@@ -776,10 +802,10 @@ def _supplement_with_library_analogs(
             )
         else:
             merged = _merge_library_analogs(project, merged, broad_library, max_count=max_count)
-    if len(merged) > len(analogs):
+    if len(merged) > len(clean_analogs):
         logging.info(
             "[parallel-gold-backtest] seeded %s approved-library analog(s) for %s",
-            len(merged) - len(analogs),
+            len(merged) - len(clean_analogs),
             project.get("name"),
         )
     return merged

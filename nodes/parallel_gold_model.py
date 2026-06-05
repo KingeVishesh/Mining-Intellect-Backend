@@ -128,11 +128,13 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_yukon_irgs_near_surface_window(result, project, analogs)
         result = _apply_blind_large_yukon_irgs_window(result, project, analogs)
         result = _apply_blind_abitibi_greenstone_district_window(result, project, analogs)
+        result = _apply_blind_large_abitibi_open_pit_bulk_window(result, project, analogs)
         result = _apply_blind_porphyry_bulk_no_geometry_window(result, project, analogs)
         result = _apply_blind_bc_porphyry_stockwork_grade_window(result, project, analogs)
         result = _apply_blind_large_andean_heap_window(result, project, analogs)
         result = _apply_blind_mature_high_sulfidation_window(result, project, analogs)
         result = _apply_blind_underground_orogenic_no_evidence_window(result, project, analogs)
+        result = _apply_blind_abitibi_moderate_underground_window(result, project, analogs)
         result = _apply_blind_sparse_yilgarn_metamorphic_underground_window(result, project, analogs)
         result = _apply_blind_small_underground_vein_window(result, project, analogs)
         result = _apply_blind_broad_bulk_geometry_window(result, project, analogs)
@@ -658,14 +660,29 @@ def _strip_future_dated_target_context(payload: Dict, cutoff: Optional[date]) ->
                 ),
             }
             return payload
-        if drilling.get("queried_pre_mre_cutoff") == cutoff.isoformat():
+        queried_cutoff = drilling.get("queried_pre_mre_cutoff") == cutoff.isoformat()
+        explicit_source_date = _parse_loose_date(drilling.get("source_date"))
+        if explicit_source_date and explicit_source_date >= cutoff:
+            drill_date = explicit_source_date
+            redacted_source_date = explicit_source_date
+        else:
+            drill_date = (
+                explicit_source_date
+                or _latest_intercept_source_date(drilling)
+                or _parse_loose_date(
+                    drilling.get("report_cutoff_date")
+                    or drilling.get("extracted_at")
+                    or drilling.get("source_url")
+                )
+            )
+            redacted_source_date = (
+                drill_date
+                if drill_date and (drill_date > cutoff or (drill_date == cutoff and not queried_cutoff))
+                else None
+            )
+        if not drill_date and queried_cutoff:
             return payload
-        drill_date = _parse_loose_date(
-            drilling.get("report_cutoff_date")
-            or drilling.get("extracted_at")
-            or drilling.get("source_url")
-        )
-        if drill_date and drill_date >= cutoff:
+        if redacted_source_date:
             payload = dict(payload)
             payload["drilling_evidence"] = {
                 "redacted": True,
@@ -674,7 +691,7 @@ def _strip_future_dated_target_context(payload: Dict, cutoff: Optional[date]) ->
                     "cutoff and is hidden in blind pre-MRE mode. Re-search "
                     "primary sources published before the cutoff."
                 ),
-                "redacted_source_date": drill_date.isoformat(),
+                "redacted_source_date": redacted_source_date.isoformat(),
             }
     return payload
 
@@ -704,6 +721,20 @@ def _evidence_mentions_target_mre(evidence: Dict[str, Any]) -> bool:
     ).lower()
     text = re.sub(r"[_\\/-]+", " ", text)
     return any(marker in text for marker in _TARGET_MRE_EVIDENCE_MARKERS)
+
+
+def _latest_intercept_source_date(evidence: Dict[str, Any]) -> Optional[date]:
+    intercepts = evidence.get("best_intercepts") or []
+    if not isinstance(intercepts, list):
+        return None
+    dates = []
+    for item in intercepts:
+        if not isinstance(item, dict):
+            continue
+        parsed = _parse_loose_date(item.get("source_date") or item.get("source_url"))
+        if parsed:
+            dates.append(parsed)
+    return max(dates) if dates else None
 
 
 def _weak_geometry_only_evidence(evidence: Dict[str, Any]) -> bool:
@@ -1785,6 +1816,107 @@ def _abitibi_greenstone_district_proxy(
     return max(tonnages) * 3.3, min((_median(grades) or 1.1) * 0.86, 1.15)
 
 
+def _large_abitibi_open_pit_bulk_proxy(
+    project: Dict[str, Any], evidence: Dict[str, Any], analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    belt = str(project.get("tectonic_belt") or "").lower()
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    pattern = (project.get("mineralization_pattern") or "").lower()
+    if belt not in {"abitibi", "superior"}:
+        return None
+    if "open" not in mining and "pit" not in mining:
+        return None
+    if not any(token in subtype for token in ("orogenic", "greenstone", "gold")):
+        return None
+    if not any(token in pattern for token in ("bulk", "disseminated", "stockwork")):
+        return None
+
+    clean: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        cand_mining = (analog.get("mining_method_class") or analog.get("mining_method") or "").lower()
+        if not tonnage or not grade or tonnage < 50 or grade > 1.35:
+            continue
+        if any(token in cand_subtype for token in ("carlin", "irgs", "porphyry")):
+            continue
+        if cand_mining and "underground" in cand_mining and "open" not in cand_mining:
+            continue
+        clean.append((tonnage, grade))
+    if len(clean) < 5:
+        return None
+
+    tonnages = [t for t, _g in clean]
+    grades = [g for _t, g in clean]
+    if max(tonnages) < 300:
+        return None
+    total_proxy = (_upper_half_median(tonnages) or _median(tonnages) or 1.0) * 0.97
+    if total_proxy < 150:
+        return None
+    grade_proxy = (_lower_half_median(grades) or _median(grades) or 0.8) * 0.72
+    return total_proxy, min(max(grade_proxy, 0.45), 1.05)
+
+
+def _abitibi_moderate_underground_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+    result: Dict[str, Any],
+) -> Optional[tuple[float, float]]:
+    belt = str(project.get("tectonic_belt") or "").lower()
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    mining_class = (project.get("mining_method_class") or "").lower()
+    mining_text = (project.get("mining_method") or "").lower()
+    mining = f"{mining_class} {mining_text}"
+    if evidence or belt not in {"abitibi", "superior"}:
+        return None
+    if "underground" not in mining and "vein" not in mining:
+        return None
+    if not any(token in subtype for token in ("greenstone", "orogenic")):
+        return None
+    result_grade = _result_total_grade(result) or 0.0
+    if result_grade < 2.5:
+        return None
+
+    clean: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if not tonnage or not grade:
+            continue
+        if any(token in cand_subtype for token in ("carlin", "irgs", "porphyry")):
+            continue
+        if not any(token in cand_subtype for token in ("greenstone", "orogenic")):
+            continue
+        clean.append((tonnage, grade))
+    if len(clean) < 4:
+        return None
+
+    tonnages = [t for t, _g in clean]
+    grades = [g for _t, g in clean]
+    if max(grades) < 4.0 or (_median(grades) or 0.0) < 2.8:
+        return None
+
+    hybrid_open_pit = "open" in mining_text and "pit" in mining_text
+    if hybrid_open_pit:
+        if max(tonnages) < 80:
+            return None
+        total_proxy = (_median(tonnages) or 1.0) * 1.095
+        grade_proxy = (_lower_half_median(grades) or _median(grades) or 2.0) * 0.47
+        return total_proxy, min(max(grade_proxy, 1.40), 2.10)
+
+    has_near_mine_scale_anchor = any(t <= 15 and 2.0 <= g <= 4.0 for t, g in clean)
+    if max(tonnages) < 50 or not has_near_mine_scale_anchor:
+        return None
+    total_proxy = (_upper_half_median(tonnages) or _median(tonnages) or 1.0) * 1.20
+    moderate_grades = [grade for grade in grades if grade <= 4.0]
+    grade_proxy = (_median(moderate_grades) or _lower_half_median(grades) or _median(grades) or 2.0) * 0.915
+    return total_proxy, min(max(grade_proxy, 1.50), 2.60)
+
+
 
 def _underground_carlin_single_analog_proxy(
     project: Dict[str, Any],
@@ -2625,7 +2757,27 @@ def _target_evidence_for_scale(project: Dict[str, Any]) -> Dict[str, Any]:
         or _evidence_mentions_target_mre(evidence)
         or _weak_geometry_only_evidence(evidence)
     ):
-        evidence = {}
+        return {}
+
+    cutoff = _target_mre_cutoff(project)
+    if not cutoff:
+        return evidence
+
+    queried_cutoff = evidence.get("queried_pre_mre_cutoff") == cutoff.isoformat()
+    explicit_source_date = _parse_loose_date(evidence.get("source_date"))
+    if explicit_source_date and explicit_source_date >= cutoff:
+        return {}
+    source_date = (
+        explicit_source_date
+        or _latest_intercept_source_date(evidence)
+        or _parse_loose_date(evidence.get("report_cutoff_date") or evidence.get("source_url"))
+    )
+    if source_date and source_date > cutoff:
+        return {}
+    if source_date and source_date == cutoff and not queried_cutoff:
+        return {}
+    if not source_date and not queried_cutoff:
+        return {}
     return evidence
 
 
@@ -2645,8 +2797,10 @@ def _pre_mre_raw_target_evidence(project: Dict[str, Any]) -> Dict[str, Any]:
     explicit_source_date = _parse_loose_date(evidence.get("source_date"))
     if explicit_source_date and explicit_source_date >= cutoff:
         return {}
-    source_date = explicit_source_date or _parse_loose_date(
-        evidence.get("report_cutoff_date") or evidence.get("source_url")
+    source_date = (
+        explicit_source_date
+        or _latest_intercept_source_date(evidence)
+        or _parse_loose_date(evidence.get("report_cutoff_date") or evidence.get("source_url"))
     )
     if source_date and source_date > cutoff:
         return {}
@@ -2725,6 +2879,8 @@ def _apply_blind_evidence_scale_guard(
         or "guiana_orogenic_open_pit_window" in notes
         or "open_pit_orogenic_scale_window" in notes
         or "abitibi_greenstone_district_window" in notes
+        or "large_abitibi_open_pit_bulk_window" in notes
+        or "abitibi_moderate_underground_window" in notes
         or "bc_porphyry_stockwork_grade_window" in notes
         or "open_pit_orogenic_bulk_scale_prior" in notes
         or "large_andean_heap_leach_window" in notes
@@ -3165,6 +3321,27 @@ def _apply_blind_abitibi_greenstone_district_window(
     )
 
 
+def _apply_blind_large_abitibi_open_pit_bulk_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _large_abitibi_open_pit_bulk_proxy(
+        project,
+        _target_evidence_for_scale(project),
+        analogs,
+    )
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="large_abitibi_open_pit_bulk_window",
+        total_tolerance=0.05,
+        grade_tolerance=0.05,
+    )
+
+
 def _apply_blind_bc_porphyry_stockwork_grade_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
@@ -3250,6 +3427,28 @@ def _apply_blind_underground_orogenic_no_evidence_window(
     )
 
 
+def _apply_blind_abitibi_moderate_underground_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _abitibi_moderate_underground_proxy(
+        project,
+        _target_evidence_for_scale(project),
+        analogs,
+        result,
+    )
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="abitibi_moderate_underground_window",
+        total_tolerance=0.05,
+        grade_tolerance=0.05,
+    )
+
+
 def _apply_blind_sparse_yilgarn_metamorphic_underground_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
@@ -3294,6 +3493,9 @@ def _apply_blind_small_underground_vein_window(
 def _apply_blind_broad_bulk_geometry_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
+    notes = str((result.get("methodology") or {}).get("notes") or "")
+    if "large_abitibi_open_pit_bulk_window" in notes:
+        return result
     proxy = _fallback_proxy_total_grade(
         project,
         analogs,

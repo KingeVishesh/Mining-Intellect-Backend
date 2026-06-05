@@ -274,6 +274,77 @@ def test_supplement_expands_narrow_abitibi_greenstone_cohort(monkeypatch):
     ]
 
 
+def test_supplement_decides_from_cutoff_cleaned_abitibi_pool(monkeypatch):
+    calls = []
+
+    def fake_get_approved_analogs(**kwargs):
+        calls.append(kwargs)
+        return [
+            {
+                "name": "Nelligan Gold Project",
+                "tonnage_mt": 103,
+                "grade_value": 0.95,
+                "deposit_subtype": "greenstone_orogenic",
+                "tectonic_belt": "abitibi",
+            },
+            {
+                "name": "Beattie Gold Deposit",
+                "tonnage_mt": 60.9,
+                "grade_value": 1.59,
+                "deposit_subtype": "greenstone_orogenic",
+                "tectonic_belt": "abitibi",
+            },
+        ]
+
+    monkeypatch.setattr(
+        "scripts.run_parallel_gold_backtest.supabase_ops.get_approved_analogs",
+        fake_get_approved_analogs,
+    )
+
+    analogs = _supplement_with_library_analogs(
+        {
+            "name": "Cadillac Gold Project",
+            "material": "gold",
+            "deposit_type": "Gold-bearing structures",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "abitibi",
+            "mining_method_class": "underground_vein",
+            "mre_date": "2022-08-22",
+        },
+        [
+            {
+                "name": "Canadian Malartic - Odyssey UG",
+                "tonnage_mt": 110,
+                "grade_value": 2.5,
+                "deposit_subtype": "greenstone_orogenic",
+                "tectonic_belt": "abitibi",
+                "data_source": "resource table 2023",
+            },
+            {
+                "name": "Lamaque Complex",
+                "tonnage_mt": 30,
+                "grade_value": 6,
+                "deposit_subtype": "greenstone_orogenic",
+                "tectonic_belt": "abitibi",
+                "data_source": "resource table 2023",
+            },
+            {"name": "Chimo Mine", "tonnage_mt": 7.13, "grade_value": 3.14, "deposit_subtype": "orogenic_general"},
+            {
+                "name": "Chimo Mine and West Nordeau",
+                "tonnage_mt": 7.128,
+                "grade_value": 3.14,
+                "deposit_subtype": "greenstone_orogenic",
+            },
+        ],
+    )
+
+    names = [analog["name"] for analog in analogs]
+    assert calls
+    assert "Canadian Malartic - Odyssey UG" not in names
+    assert "Lamaque Complex" not in names
+    assert names[:2] == ["Nelligan Gold Project", "Beattie Gold Deposit"]
+
+
 def test_gold_library_filters_infer_orogenic_from_archean_gold_belt():
     filters = _gold_library_filters({
         "name": "Moss",
@@ -345,6 +416,22 @@ def test_mineral_resource_evidence_url_is_not_pre_mre_clean():
             "source_url": "https://example.com/company-announces-mineral-resource-for-wawa-gold-project",
             "source_date": "2024-08-28",
             "queried_pre_mre_cutoff": "2026-01-01",
+        },
+        _parse_loose_date("2026-01-01"),
+    )
+
+
+def test_pre_mre_evidence_uses_latest_intercept_date_when_top_source_missing():
+    assert _evidence_is_pre_cutoff(
+        {
+            "source_url": "https://www.sec.gov/Archives/edgar/data/1840616/000106299325016976/exhibit99-1.htm",
+            "source_date": None,
+            "report_cutoff_date": "2026-12-31",
+            "queried_pre_mre_cutoff": "2026-12-31",
+            "best_intercepts": [
+                {"source_date": "2025-03-04", "interval_m": 28, "grade_g_t": 12},
+                {"source_date": "2025-04-17", "interval_m": 29.8, "grade_g_t": 5.5},
+            ],
         },
         _parse_loose_date("2026-01-01"),
     )
