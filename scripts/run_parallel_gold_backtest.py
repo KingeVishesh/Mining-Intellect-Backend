@@ -444,6 +444,17 @@ def _db_truth_targets(
     ]
 
 
+def _db_truth_pool_summary(exclude_project_ids: Iterable[str] = ()) -> Dict[str, int]:
+    rows = _fetch_db_truth_rows()
+    full_truth_ids = {row["id"] for row in rows if row.get("id") and _has_full_truth(row)}
+    excluded_ids = {pid for pid in exclude_project_ids if pid}
+    return {
+        "full_split_truth_total": len(full_truth_ids),
+        "excluded_full_split_truth": len(full_truth_ids & excluded_ids),
+        "remaining_full_split_truth": len(full_truth_ids - excluded_ids),
+    }
+
+
 def _run_project_ids(run_ids: Iterable[str]) -> Set[str]:
     ids = [run_id for run_id in run_ids if run_id]
     if not ids:
@@ -949,10 +960,21 @@ def main() -> int:
         deduped[target["project_id"]] = target
     targets = list(deduped.values())
     if len(targets) < 10:
+        pool_note = ""
+        try:
+            pool = _db_truth_pool_summary(excluded_project_ids)
+            pool_note = (
+                f" full_split_truth_total={pool['full_split_truth_total']}, "
+                f"excluded_full_split_truth={pool['excluded_full_split_truth']}, "
+                f"remaining_full_split_truth={pool['remaining_full_split_truth']}."
+            )
+        except Exception:
+            logging.exception("[parallel-gold-backtest] failed to summarize truth-backed DB pool")
         print(
             f"[parallel-gold-backtest] warning: only {len(targets)} "
             "truth-backed target(s) selected; cannot prove 5/10 95% matches "
-            "until more projects have full MRE truth fields.",
+            "until more projects have full MRE truth fields or prior holdouts "
+            f"are not excluded.{pool_note}",
             flush=True,
         )
     if args.list_targets:

@@ -12,8 +12,13 @@ from nodes.parallel_gold_model import (
     _apply_blind_broad_bulk_scale_floor,
     _apply_blind_single_irgs_scale_floor,
     _apply_blind_underground_carlin_single_window,
+    _apply_blind_open_pit_carlin_geometry_window,
+    _apply_blind_carlin_heap_grade_tonnage_window,
+    _apply_blind_guiana_orogenic_open_pit_window,
     _apply_blind_open_pit_orogenic_proxy_window,
     _apply_blind_porphyry_bulk_no_geometry_window,
+    _apply_blind_large_andean_heap_window,
+    _apply_blind_mature_high_sulfidation_window,
     _apply_blind_small_underground_vein_window,
     _apply_blind_underground_orogenic_no_evidence_window,
     _apply_blind_yukon_irgs_near_surface_window,
@@ -1022,6 +1027,75 @@ def test_carlin_single_window_replaces_remote_stage_weighting():
     assert "underground_carlin_single_analog_prior" in scaled["methodology"]["notes"]
 
 
+def test_open_pit_carlin_geometry_window_uses_target_envelope():
+    result = {
+        "m_and_i": {"tonnage_mt": 53.877, "grade_gpt": 0.968, "contained_moz": 1.678},
+        "inferred": {"tonnage_mt": 35.918, "grade_gpt": 0.968, "contained_moz": 1.117},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_open_pit_carlin_geometry_window(
+        result,
+        {
+            "name": "Granite Creek-style Target",
+            "material": "gold",
+            "deposit_subtype": "carlin_general",
+            "mining_method_class": "open_pit_selective",
+            "drilling_evidence": {
+                "confidence": "medium",
+                "strike_length_m": 600,
+                "down_dip_extent_m": 250,
+                "source_url": "https://example.com/pre-mre-carlin-drilling/",
+            },
+        },
+        [
+            {"name": "Crossroads", "tonnage_mt": 113, "grade_value": 1.03, "deposit_subtype": "carlin_general"},
+            {"name": "Cortez Hills", "tonnage_mt": 62.53, "grade_value": 2.33, "deposit_subtype": "carlin_general"},
+            {"name": "Pinion", "tonnage_mt": 66.6, "grade_value": 0.71, "deposit_subtype": "carlin_general"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 39 <= total_mt <= 41
+    assert scaled["m_and_i"]["grade_gpt"] == 1.174
+    assert "open_pit_carlin_geometry_window" in scaled["methodology"]["notes"]
+
+
+def test_carlin_heap_grade_tonnage_window_preserves_metal_and_resets_low_grade_split():
+    result = {
+        "m_and_i": {"tonnage_mt": 32.282, "grade_gpt": 0.632},
+        "inferred": {"tonnage_mt": 32.283, "grade_gpt": 0.632},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_carlin_heap_grade_tonnage_window(
+        result,
+        {
+            "name": "Mercur-style Target",
+            "material": "gold",
+            "deposit_subtype": "carlin_general",
+            "mining_method_class": "heap_leach_pad",
+        },
+        [
+            {"name": "Gold Strike", "grade_value": 0.35, "deposit_subtype": "carlin_general"},
+            {"name": "Brewery Creek", "grade_value": 0.48, "deposit_subtype": "carlin_general"},
+            {"name": "Gold Bar", "grade_value": 0.51, "deposit_subtype": "carlin_general"},
+            {"name": "Black Pine", "grade_value": 0.60, "deposit_subtype": "carlin_general"},
+            {"name": "Pan", "grade_value": 0.65, "deposit_subtype": "carlin_general"},
+            {"name": "Pinion", "grade_value": 0.71, "deposit_subtype": "carlin_general"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 67 <= total_mt <= 70
+    assert scaled["m_and_i"]["grade_gpt"] == 0.599
+    assert "carlin_heap_grade_tonnage_decomposition" in scaled["methodology"]["notes"]
+
+
 def test_blind_broad_bulk_scale_floor_uses_avg_true_width_geometry():
     result = {
         "m_and_i": {"tonnage_mt": 28.62, "grade_gpt": 1.01, "contained_moz": 0.929},
@@ -1056,6 +1130,120 @@ def test_blind_broad_bulk_scale_floor_uses_avg_true_width_geometry():
     assert 77 <= total_mt <= 78
     assert scaled["m_and_i"]["grade_gpt"] == 1.111
     assert "broad_bulk_open_pit_scale_floor" in scaled["methodology"]["notes"]
+
+
+def test_guiana_orogenic_open_pit_window_prioritizes_exact_belt_peers():
+    result = {
+        "m_and_i": {"tonnage_mt": 113.048, "grade_gpt": 1.0, "contained_moz": 3.635},
+        "inferred": {"tonnage_mt": 75.365, "grade_gpt": 1.0, "contained_moz": 2.423},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_guiana_orogenic_open_pit_window(
+        result,
+        {
+            "name": "Guiana Shield Shear Target",
+            "material": "Gold",
+            "tectonic_belt": "guiana_shield",
+            "deposit_type": "Shear-hosted and Intrusive-hosted",
+            "mining_method_class": "open_pit_selective",
+        },
+        [
+            {"name": "Aurora Gold Project", "tonnage_mt": 40.6, "grade_value": 3.07, "deposit_subtype": "orogenic_general", "tectonic_belt": "guiana_shield"},
+            {"name": "Toroparu Project", "tonnage_mt": 126.9, "grade_value": 1.3, "deposit_subtype": "orogenic_general", "tectonic_belt": "guiana_shield"},
+            {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general", "tectonic_belt": None},
+            {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general", "tectonic_belt": None},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 144 <= total_mt <= 146
+    assert scaled["m_and_i"]["grade_gpt"] == 1.704
+    assert "guiana_orogenic_open_pit_window" in scaled["methodology"]["notes"]
+
+
+def test_large_andean_heap_window_replaces_remote_scale_cap():
+    result = {
+        "m_and_i": {"tonnage_mt": 153.846, "grade_gpt": 0.84, "contained_moz": 4.154},
+        "inferred": {"tonnage_mt": 46.154, "grade_gpt": 0.84, "contained_moz": 1.246},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_large_andean_heap_window(
+        result,
+        {
+            "name": "Volcan Gold Project",
+            "material": "gold",
+            "tectonic_belt": "andean",
+            "district": "Maricunga Gold Belt",
+            "mining_method_class": "heap_leach_pad",
+            "drilling_evidence": {
+                "total_meters_drilled": 150000,
+                "strike_length_m": 6000,
+                "queried_pre_mre_cutoff": "2022-01-01",
+                "source_url": "https://example.com/pre-mre-volcan-overview/",
+            },
+        },
+        [
+            {"name": "Cerro Quema", "tonnage_mt": 24.6, "grade_value": 0.71, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean"},
+            {"name": "Taguas Project", "tonnage_mt": 133.6, "grade_value": 0.60, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+            {"name": "Alturas", "tonnage_mt": 180.0, "grade_value": 1.00, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean"},
+            {"name": "Lagunas Norte", "tonnage_mt": 250.0, "grade_value": 0.92, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean"},
+            {"name": "Choquelimpie", "tonnage_mt": 89.27, "grade_value": 0.76, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+            {"name": "Fenix Gold", "tonnage_mt": 270.0, "grade_value": 0.45, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+            {"name": "La Arena (Phase I)", "tonnage_mt": 133.6, "grade_value": 0.35, "deposit_subtype": "high_sulfidation_epithermal", "tectonic_belt": "andean", "recovery_method": "heap_leach"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 535 <= total_mt <= 545
+    assert 0.62 <= scaled["m_and_i"]["grade_gpt"] <= 0.65
+    assert "large_andean_heap_leach_window" in scaled["methodology"]["notes"]
+
+
+def test_mature_high_sulfidation_window_downscales_mature_cohort():
+    result = {
+        "m_and_i": {"tonnage_mt": 86.24, "grade_gpt": 0.815, "contained_moz": 2.259},
+        "inferred": {"tonnage_mt": 70.56, "grade_gpt": 0.815, "contained_moz": 1.849},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_mature_high_sulfidation_window(
+        result,
+        {
+            "name": "Choquelimpie-style Target",
+            "material": "gold",
+            "deposit_subtype": "high_sulfidation_epithermal",
+            "tectonic_belt": "andean",
+            "drilling_evidence": {
+                "total_meters_drilled": 123000,
+                "total_holes": 1700,
+                "down_dip_extent_m": 300,
+                "source_url": "https://example.com/pre-mre-historical-drilling/",
+            },
+        },
+        [
+            {"name": "Pueblo Viejo", "tonnage_mt": 410, "grade_value": 1.89, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "Cerro Quema", "tonnage_mt": 24.6, "grade_value": 0.71, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "Taguas Project", "tonnage_mt": 133.6, "grade_value": 0.60, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "Alturas", "tonnage_mt": 180, "grade_value": 1.0, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "Lagunas Norte", "tonnage_mt": 250, "grade_value": 0.92, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "Salares Norte", "tonnage_mt": 2.89, "grade_value": 2.3, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "Fenix Gold", "tonnage_mt": 270, "grade_value": 0.45, "deposit_subtype": "high_sulfidation_epithermal"},
+            {"name": "La Arena (Phase I)", "tonnage_mt": 133.6, "grade_value": 0.35, "deposit_subtype": "high_sulfidation_epithermal"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 105 <= total_mt <= 108
+    assert scaled["m_and_i"]["grade_gpt"] == 0.815
+    assert "mature_high_sulfidation_window" in scaled["methodology"]["notes"]
 
 
 def test_single_irgs_analog_not_overridden_by_tiny_geometry():

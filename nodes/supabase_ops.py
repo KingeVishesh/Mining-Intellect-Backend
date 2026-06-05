@@ -110,11 +110,12 @@ def get_approved_analogs(
          stripped of qualifiers like "-style", "-type", "sediment-hosted".
 
     When `target_tectonic_belt` is supplied, the row budget is spent
-    intelligently using a two-pass query:
-      Pass 1 — target-belt rows + null-belt rows (always relevant, never
-               truncated).  Null-belt candidates pass L2.5 through, so
+    intelligently using a three-pass query:
+      Pass 1 — exact target-belt rows.  These are the highest-signal analogs
+               and must not be pushed out by generic null-belt rows.
+      Pass 2 — null-belt rows.  Null-belt candidates pass L2.5 through, so
                keeping them honors the cascade's contract.
-      Pass 2 — sibling belts in the same compatibility group fill the
+      Pass 3 — sibling belts in the same compatibility group fill the
                remaining slots.  Out-of-group belts (Lachlan, Guiana,
                Newfoundland-Appalachian, Brazilian Shield, etc. for an
                archean_greenstone target) are never fetched — the cascade
@@ -160,28 +161,40 @@ def get_approved_analogs(
     compatible = geo_taxonomy.compatible_belts(target_tectonic_belt) if target_tectonic_belt else []
 
     if compatible:
-        # Pass 1: target belt + null-belt rows. The PostgREST `or_` filter
-        # accepts a CSV of predicates joined by OR.
+        # Pass 1: exact target-belt rows. Gold backtests showed that combining
+        # exact + null in one OR query can let generic rows consume the cap
+        # before district/belt peers are considered.
         pass1 = (
             _base_query()
-            .or_(f"analog_tectonic_belt.eq.{target_tectonic_belt},analog_tectonic_belt.is.null")
+            .eq("analog_tectonic_belt", target_tectonic_belt)
             .limit(limit)
             .execute()
         )
         rows = list(pass1.data or [])
 
-        # Pass 2: sibling belts in the same compatibility group, filling
+        # Pass 2: null-belt rows.
+        remaining = limit - len(rows)
+        if remaining > 0:
+            pass2 = (
+                _base_query()
+                .is_("analog_tectonic_belt", "null")
+                .limit(remaining)
+                .execute()
+            )
+            rows.extend(pass2.data or [])
+
+        # Pass 3: sibling belts in the same compatibility group, filling
         # whatever budget Pass 1 didn't consume.
         remaining = limit - len(rows)
         siblings = [b for b in compatible if b != target_tectonic_belt]
         if remaining > 0 and siblings:
-            pass2 = (
+            pass3 = (
                 _base_query()
                 .in_("analog_tectonic_belt", siblings)
                 .limit(remaining)
                 .execute()
             )
-            rows.extend(pass2.data or [])
+            rows.extend(pass3.data or [])
     else:
         # No belt info on the target (or belt not in any compatibility group)
         # → fall back to the original single-query approach.

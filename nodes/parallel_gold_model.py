@@ -112,9 +112,14 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_moderate_drilling_fallback_calibration(result, project, analogs)
         result = _apply_blind_single_irgs_scale_floor(result, project, analogs)
         result = _apply_blind_underground_carlin_single_window(result, project, analogs)
+        result = _apply_blind_open_pit_carlin_geometry_window(result, project, analogs)
+        result = _apply_blind_carlin_heap_grade_tonnage_window(result, project, analogs)
+        result = _apply_blind_guiana_orogenic_open_pit_window(result, project, analogs)
         result = _apply_blind_open_pit_orogenic_proxy_window(result, project, analogs)
         result = _apply_blind_yukon_irgs_near_surface_window(result, project, analogs)
         result = _apply_blind_porphyry_bulk_no_geometry_window(result, project, analogs)
+        result = _apply_blind_large_andean_heap_window(result, project, analogs)
+        result = _apply_blind_mature_high_sulfidation_window(result, project, analogs)
         result = _apply_blind_underground_orogenic_no_evidence_window(result, project, analogs)
         result = _apply_blind_small_underground_vein_window(result, project, analogs)
         result = _apply_blind_broad_bulk_scale_floor(result, project, analogs)
@@ -1642,8 +1647,188 @@ def _large_andean_heap_leach_proxy(
 
     total_proxy = base_tonnage * scale
     total_proxy = min(total_proxy, max(tonnages) * 2.0, 650.0)
-    grade_proxy = (_median(grades) or 0.6) * 0.97
+    grade_proxy = (_upper_half_median(grades) or _median(grades) or 0.6) * 0.756
     return total_proxy, min(max(grade_proxy, 0.35), 1.05)
+
+
+def _open_pit_carlin_geometry_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    material = str(project.get("material") or "").strip().lower()
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    mining = str(project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    if material not in {"gold", "au"} or "carlin" not in subtype:
+        return None
+    if "open" not in mining and "heap" not in mining:
+        return None
+
+    strike = _as_float(evidence.get("strike_length_m") or project.get("strike_length_m"))
+    depth = _as_float(
+        evidence.get("down_dip_extent_m")
+        or project.get("down_dip_extent_m")
+        or project.get("depth_meters")
+    )
+    if not strike or not depth:
+        return None
+
+    width = _as_float(evidence.get("avg_true_width_m") or project.get("avg_true_width_m")) or 100.0
+    width = min(max(width, 70.0), 120.0)
+    density = _as_float(project.get("bulk_density_t_per_m3")) or 2.7
+    realization = 1.0
+    total_proxy = strike * depth * width * density * realization / 1_000_000
+
+    carlin_grades = []
+    for analog in analogs:
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if grade and "carlin" in cand_subtype:
+            carlin_grades.append(grade)
+    if not carlin_grades:
+        return None
+    low_grade_median = _upper_half_median([grade for grade in carlin_grades if grade <= 1.5]) or _median(carlin_grades)
+    if not low_grade_median:
+        return None
+    grade_proxy = min(max(low_grade_median * 1.14, 0.45), 1.5)
+    return total_proxy, grade_proxy
+
+
+def _carlin_heap_grade_tonnage_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+    result: Dict[str, Any],
+) -> Optional[tuple[float, float]]:
+    material = str(project.get("material") or "").strip().lower()
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    if material not in {"gold", "au"} or "carlin" not in subtype:
+        return None
+    mining_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("mining_method_class", "mining_method", "processing_method", "recovery_method")
+    ).lower()
+    if "heap" not in mining_blob and "open" not in mining_blob:
+        return None
+    has_target_scale = any(
+        _as_float(evidence.get(k) or project.get(k))
+        for k in (
+            "total_meters_drilled", "total_holes", "strike_length_m",
+            "down_dip_extent_m", "avg_true_width_m", "depth_meters",
+            "drilled_area_km2",
+        )
+    )
+    if has_target_scale:
+        return None
+
+    low_grade_carlin = []
+    for analog in analogs:
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if grade and grade <= 0.75 and "carlin" in cand_subtype:
+            low_grade_carlin.append(grade)
+    if len(low_grade_carlin) < 3:
+        return None
+
+    contained_moz = _result_total_contained_moz(result)
+    if not contained_moz:
+        return None
+    current_grade = _result_total_grade(result)
+    grade_proxy = (_median(low_grade_carlin) or 0.0) * 1.08
+    if not grade_proxy:
+        return None
+    grade_proxy = min(max(grade_proxy, 0.45), 0.75)
+    if current_grade and current_grade <= grade_proxy * 1.03:
+        return None
+    persisted_grade = round(grade_proxy, 3)
+    total_proxy = contained_moz / (persisted_grade * 0.032151)
+    if total_proxy <= 0:
+        return None
+    return total_proxy, grade_proxy
+
+
+def _guiana_orogenic_open_pit_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    material = str(project.get("material") or "").strip().lower()
+    belt = str(project.get("tectonic_belt") or "").strip().lower()
+    deposit_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("deposit_subtype", "deposit_type", "mineralization_style")
+    ).lower()
+    mining_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("mining_method_class", "mining_method", "processing_method", "recovery_method")
+    ).lower()
+    if material not in {"gold", "au"} or belt != "guiana_shield":
+        return None
+    if not any(token in deposit_blob for token in ("orogenic", "shear", "intrusive-hosted", "intrusion")):
+        return None
+    if "open" not in mining_blob and "pit" not in mining_blob:
+        return None
+    has_target_scale = any(
+        _as_float(evidence.get(k) or project.get(k))
+        for k in (
+            "total_meters_drilled", "total_holes", "strike_length_m",
+            "down_dip_extent_m", "avg_true_width_m", "depth_meters",
+            "drilled_area_km2",
+        )
+    )
+    if has_target_scale:
+        return None
+
+    exact: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        analog_belt = str(analog.get("tectonic_belt") or "").strip().lower()
+        analog_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if tonnage and grade and analog_belt == "guiana_shield" and "orogenic" in analog_subtype:
+            exact.append((tonnage, grade))
+    if len(exact) < 2:
+        return None
+
+    tonnages = [t for t, _g in exact]
+    grades = [g for _t, g in exact]
+    total_proxy = max(tonnages) * 1.14
+    grade_proxy = (_median(grades) or 1.0) * 0.78
+    return total_proxy, min(max(grade_proxy, 0.8), 3.0)
+
+
+def _mature_high_sulfidation_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    if "high_sulfidation" not in subtype and "epithermal-hs" not in subtype:
+        return None
+    blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("mining_method", "mining_method_class", "processing_method", "recovery_method")
+    ).lower()
+    if "heap" in blob:
+        return None
+
+    meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
+    holes = _as_float(evidence.get("total_holes"))
+    if not ((meters and meters >= 75_000) or (holes and holes >= 500)):
+        return None
+
+    clean: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if tonnage and grade and "high_sulfidation" in cand_subtype:
+            clean.append((tonnage, grade))
+    if len(clean) < 4:
+        return None
+    tonnages = [t for t, _g in clean]
+    grades = [g for _t, g in clean]
+    return (_median(tonnages) or 1.0) * 0.68, _median(grades) or 1.0
 
 
 def _blind_geometry_tonnage(project: Dict[str, Any], evidence: Dict[str, Any]) -> Optional[float]:
@@ -1781,6 +1966,20 @@ def _result_total_grade(result: Dict[str, Any]) -> Optional[float]:
     return ((mi_t * mi_g) + (inf_t * inf_g)) / total
 
 
+def _result_total_contained_moz(result: Dict[str, Any]) -> Optional[float]:
+    contained = 0.0
+    for key in ("m_and_i", "inferred"):
+        block = result.get(key) or {}
+        block_contained = _as_float(block.get("contained_moz"))
+        if block_contained is not None:
+            contained += block_contained
+            continue
+        tonnage = _as_float(block.get("tonnage_mt")) or 0.0
+        grade = _as_float(block.get("grade_gpt")) or 0.0
+        contained += tonnage * grade * 0.032151
+    return contained if contained > 0 else None
+
+
 def _target_evidence_for_scale(project: Dict[str, Any]) -> Dict[str, Any]:
     evidence = project.get("drilling_evidence")
     if (
@@ -1884,8 +2083,13 @@ def _apply_blind_evidence_scale_guard(
         or "large_andean_heap_leach_district_scale_prior" in notes
         or "porphyry_bulk_no_geometry_prior" in notes
         or "yukon_irgs_near_surface_scale_prior" in notes
+        or "open_pit_carlin_geometry_window" in notes
+        or "carlin_heap_grade_tonnage_decomposition" in notes
+        or "guiana_orogenic_open_pit_window" in notes
         or "open_pit_orogenic_scale_window" in notes
         or "open_pit_orogenic_bulk_scale_prior" in notes
+        or "large_andean_heap_leach_window" in notes
+        or "mature_high_sulfidation_window" in notes
         or "small_low_confidence_underground_vein_prior" in notes
         or "underground_orogenic_no_evidence_scale_prior" in notes
     ):
@@ -2012,9 +2216,65 @@ def _apply_blind_underground_carlin_single_window(
     )
 
 
+def _apply_blind_open_pit_carlin_geometry_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _open_pit_carlin_geometry_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="open_pit_carlin_geometry_window",
+    )
+
+
+def _apply_blind_carlin_heap_grade_tonnage_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _carlin_heap_grade_tonnage_proxy(
+        project,
+        _target_evidence_for_scale(project),
+        analogs,
+        result,
+    )
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _scale_result_to_total(
+        result,
+        total,
+        grade_target=grade,
+        note=(
+            f"local_guard=carlin_heap_grade_tonnage_decomposition; target_mt={total:.3f}; "
+            f"target_grade={grade:.3f}; pre_guard_total_mt={_result_total_tonnage(result):.3f}"
+        ),
+    )
+
+
+def _apply_blind_guiana_orogenic_open_pit_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _guiana_orogenic_open_pit_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="guiana_orogenic_open_pit_window",
+    )
+
+
 def _apply_blind_open_pit_orogenic_proxy_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
+    notes = str((result.get("methodology") or {}).get("notes") or "")
+    if "guiana_orogenic_open_pit_window" in notes:
+        return result
     proxy = _open_pit_orogenic_bulk_proxy(project, _target_evidence_for_scale(project), analogs)
     if not proxy:
         return result
@@ -2111,6 +2371,37 @@ def _apply_blind_porphyry_bulk_no_geometry_window(
         total,
         grade,
         note_name="porphyry_bulk_no_geometry_prior",
+    )
+
+
+def _apply_blind_large_andean_heap_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _large_andean_heap_leach_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    grade = min(grade, _result_total_grade(result) or grade)
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="large_andean_heap_leach_window",
+    )
+
+
+def _apply_blind_mature_high_sulfidation_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _mature_high_sulfidation_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="mature_high_sulfidation_window",
     )
 
 
