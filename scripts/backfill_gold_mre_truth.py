@@ -218,7 +218,10 @@ def _normalise_extracted_tonnage_units(
 
     ratio = total_t / known_t
     for factor, label in ((1000.0, "kt"), (1_000_000.0, "tonnes")):
-        if abs(ratio - factor) / factor > 0.05:
+        scaled_total = total_t / factor
+        ratio_matches_known_total = abs(ratio - factor) / factor <= 0.05
+        obvious_raw_unit = ratio > (factor * 0.10) and 0 < scaled_total <= 1000
+        if not (ratio_matches_known_total or obvious_raw_unit):
             continue
         normalised = dict(extracted)
         normalised["mi_tonnage_mt"] = mi_t / factor
@@ -231,7 +234,7 @@ def _normalise_extracted_tonnage_units(
         }
         return (
             normalised,
-            f"normalised extracted tonnage from {label} to Mt using known total",
+            f"normalised extracted tonnage from {label} to Mt",
         )
     return extracted, None
 

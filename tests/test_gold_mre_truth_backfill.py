@@ -103,3 +103,29 @@ def test_extracted_split_normalises_kt_tonnage_only_when_total_matches():
     assert normalised["inferred_tonnage_mt"] == 4.047
     assert ok is True
     assert "cross-check ok" in reason
+
+
+def test_extracted_split_normalises_obvious_tonnes_even_when_local_total_is_stale():
+    row = _row(tonnage_mt=428.6952, grade_value=1.222)
+    extracted = {
+        "mi_tonnage_mt": 431949000.0,
+        "mi_grade": 1.24,
+        "inferred_tonnage_mt": 357614000.0,
+        "inferred_grade": 1.04,
+    }
+
+    normalised, note = _normalise_extracted_tonnage_units(row, extracted)
+    strict_ok, strict_reason = _validate_against_known_total(row, normalised)
+    relaxed_ok, relaxed_reason = _validate_against_known_total(
+        row,
+        normalised,
+        allow_total_mismatch=True,
+    )
+
+    assert note == "normalised extracted tonnage from tonnes to Mt"
+    assert normalised["mi_tonnage_mt"] == 431.949
+    assert normalised["inferred_tonnage_mt"] == 357.614
+    assert strict_ok is False
+    assert "tonnage differs" in strict_reason
+    assert relaxed_ok is True
+    assert "accepted despite local total mismatch" in relaxed_reason
