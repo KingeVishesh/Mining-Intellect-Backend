@@ -630,7 +630,10 @@ def _strip_future_dated_target_context(payload: Dict, cutoff: Optional[date]) ->
 
 
 _TARGET_MRE_EVIDENCE_MARKERS = (
+    "maiden resource",
+    "mineral resource",
     "mineral resource estimate",
+    "resource update",
     "resource estimate",
     "updated resource",
     "updated mre",
@@ -739,7 +742,7 @@ def _format_analogs_block(analogs: List[Dict], *, cutoff_date: Optional[date] = 
 def _norm_project_name(name: str) -> set[str]:
     cleaned = re.sub(r"[^\w\s]", " ", (name or "").lower())
     stops = {
-        "project", "mine", "mining", "deposit", "property", "corp", "inc",
+        "project", "mine", "mines", "mining", "deposit", "property", "corp", "inc",
         "ltd", "limited", "metals", "resources", "mineral", "minerals",
         "the", "a", "gold", "silver", "zone", "trend", "shear", "north",
         "south", "east", "west", "central", "main",

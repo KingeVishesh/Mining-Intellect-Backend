@@ -320,6 +320,14 @@ def _build_profile(row: dict) -> dict:
         clean_deposit_type = "orogenic gold"
         row = {**row, "deposit_type": clean_deposit_type}
         explicit_subtype = "orogenic_general"
+    if (
+        not explicit_subtype
+        and material in {"gold", "au"}
+        and (belt == "guiana_shield" or "shear" in str(clean_deposit_type or "").lower())
+    ):
+        clean_deposit_type = "orogenic gold"
+        row = {**row, "deposit_type": clean_deposit_type}
+        explicit_subtype = "orogenic_general"
     context_blob = " ".join(
         str(row.get(k) or "")
         for k in (
@@ -352,6 +360,8 @@ def _build_profile(row: dict) -> dict:
         clean_deposit_type = "epithermal-HS"
         row = {**row, "deposit_type": clean_deposit_type}
         explicit_subtype = "high_sulfidation_epithermal"
+    if material in {"gold", "au"} and explicit_subtype == "carlin_general":
+        belt = "great_basin_carlin"
     subtype_family = _deposit_type_family_from_subtype(explicit_subtype)
     deposit_family = _deposit_type_family(row.get("deposit_type") or "")
     if subtype_family == "sediment_hosted" and deposit_family == "intrusion_related":
@@ -950,7 +960,7 @@ def _cascading_match(
 def _norm_name(name: str) -> str:
     """Normalize a project name: lowercase, remove punctuation and stop words."""
     cleaned = re.sub(r"[^\w\s]", " ", name.lower())
-    stops = {"project", "mine", "mining", "deposit", "property", "corp", "inc",
+    stops = {"project", "mine", "mines", "mining", "deposit", "property", "corp", "inc",
              "ltd", "limited", "metals", "resources", "mineral", "minerals", "the", "a"}
     words = [w for w in cleaned.split() if w not in stops and len(w) > 1]
     return " ".join(sorted(words))
@@ -1052,6 +1062,13 @@ def _derive_rule_inputs(project: Dict) -> tuple:
     ):
         deposit_type = "orogenic gold"
         deposit_subtype = "orogenic_general"
+    if (
+        not deposit_subtype
+        and (material or "").strip().lower() in {"gold", "au"}
+        and (belt == "guiana_shield" or "shear" in str(deposit_type or "").lower())
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
     context_blob = " ".join(
         str(project.get(k) or "")
         for k in (
@@ -1082,6 +1099,8 @@ def _derive_rule_inputs(project: Dict) -> tuple:
     ):
         deposit_type = "epithermal-HS"
         deposit_subtype = "high_sulfidation_epithermal"
+    if (material or "").strip().lower() in {"gold", "au"} and deposit_subtype == "carlin_general":
+        belt = "great_basin_carlin"
     pattern = project.get("mineralization_pattern") or geo_taxonomy.detect_pattern(
         project.get("mineralization_style"), project.get("mining_method"),
         project.get("processing_method"), deposit_type,

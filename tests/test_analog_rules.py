@@ -22,6 +22,7 @@ from graphs.analog_finder import (
     _build_profile,
     _cascading_match,
     _derive_rule_inputs,
+    _is_self_analog,
     _modellable_resource_issue,
 )
 from tests.fixtures.golden_analogs import GOLDEN_CASES
@@ -1575,6 +1576,46 @@ def test_gold_yukon_near_surface_without_subtype_routes_to_irgs():
     assert profile["deposit_type_family"] == "intrusion_related"
     assert deposit_type == "intrusion-related gold"
     assert deposit_subtype == "irgs_general"
+
+
+def test_gold_carlin_target_routes_to_great_basin_carlin_pool():
+    project = {
+        "name": "Mercur Gold Project",
+        "material": "Gold",
+        "deposit_type": "Carlin-type",
+        "deposit_subtype": "carlin_general",
+        "tectonic_belt": "laramide_southwest",
+        "region": "Utah",
+        "district": "Camp Floyd and Ophir Mining District",
+    }
+
+    profile = _build_profile(project)
+
+    assert profile["deposit_subtype"] == "carlin_general"
+    assert profile["tectonic_belt"] == "great_basin_carlin"
+
+
+def test_gold_guiana_shear_hosted_routes_to_orogenic():
+    project = {
+        "name": "Omai gold project",
+        "material": "Gold",
+        "deposit_type": "Shear-hosted and Intrusive-hosted",
+        "tectonic_belt": "guiana_shield",
+    }
+
+    profile = _build_profile(project)
+    _material, deposit_type, deposit_subtype, _pattern = _derive_rule_inputs(project)
+
+    assert profile["deposit_subtype"] == "orogenic_general"
+    assert deposit_type == "orogenic gold"
+    assert deposit_subtype == "orogenic_general"
+
+
+def test_self_analog_filter_rejects_omai_wenot_variant():
+    assert _is_self_analog(
+        "Omai gold mines - omai gold project",
+        "Wenot Deposit (Omai Gold Project)",
+    )
 
 
 def test_gold_underground_target_rejects_low_grade_unknown_mining_analog():

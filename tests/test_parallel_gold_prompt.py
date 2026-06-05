@@ -19,6 +19,7 @@ from nodes.parallel_gold_model import (
     _apply_blind_yukon_irgs_near_surface_window,
     _blind_result_mentions_mre_anchor,
     _clean_blind_analogs,
+    _evidence_mentions_target_mre,
     _replace_blind_mre_leak_estimate,
     _output_schema,
     _blind_local_fallback_estimate,
@@ -341,6 +342,25 @@ def test_blind_node_does_not_auto_enable_web_discovery_for_thin_cohort(monkeypat
     assert "BLIND SUPPLIED-COHORT MODE" in captured["prompt"]
     assert "Use this supplied cohort only" in captured["prompt"]
     assert "MUST\nperform a real web search" not in captured["prompt"]
+
+
+def test_blind_analog_cleaning_rejects_omai_wenot_self_analog():
+    cleaned = _clean_blind_analogs(
+        {"name": "Omai gold mines - omai gold project"},
+        [
+            {"name": "Wenot Deposit (Omai Gold Project)", "tonnage_mt": 84.1, "grade_value": 1.76},
+            {"name": "Toroparu Project", "tonnage_mt": 126.9, "grade_value": 1.3},
+        ],
+        None,
+    )
+
+    assert [analog["name"] for analog in cleaned] == ["Toroparu Project"]
+
+
+def test_mineral_resource_url_is_mre_tainted_evidence():
+    assert _evidence_mentions_target_mre({
+        "source_url": "https://example.com/announces-significantly-increased-mineral-resource-for-wawa",
+    })
 
 
 def test_blind_node_uses_local_fallback_when_parallel_returns_no_result(monkeypatch):

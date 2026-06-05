@@ -3,9 +3,13 @@ from __future__ import annotations
 from scripts.run_parallel_gold_backtest import (
     _blind_library_analog_is_compatible,
     _blind_cutoff_from_mre_run,
+    _evidence_is_pre_cutoff,
+    _evidence_score_value,
     _gold_library_filters,
     _merge_library_analogs,
+    _parse_loose_date,
     _select_truth_target_rows,
+    _supplement_with_library_analogs,
 )
 
 
@@ -164,6 +168,82 @@ def test_gold_library_filters_infer_irgs_from_yukon_near_surface_gold():
     assert filters["deposit_subtype"] == "irgs_general"
 
 
+def test_gold_library_filters_route_carlin_targets_to_great_basin_pool():
+    filters = _gold_library_filters({
+        "name": "Mercur Gold Project",
+        "material": "gold",
+        "deposit_type": "Carlin-type",
+        "deposit_subtype": "carlin_general",
+        "tectonic_belt": "laramide_southwest",
+        "region": "Utah",
+        "district": "Camp Floyd and Ophir Mining District",
+    })
+
+    assert filters["target_tectonic_belt"] == "great_basin_carlin"
+
+
+def test_gold_library_filters_route_guiana_shear_hosted_to_orogenic():
+    filters = _gold_library_filters({
+        "name": "Omai gold project",
+        "material": "gold",
+        "deposit_type": "Shear-hosted and Intrusive-hosted",
+        "tectonic_belt": "guiana_shield",
+    })
+
+    assert filters["deposit_type"] == "orogenic gold"
+    assert filters["deposit_subtype"] == "orogenic_general"
+
+
+def test_mineral_resource_evidence_url_is_not_pre_mre_clean():
+    assert not _evidence_is_pre_cutoff(
+        {
+            "source_url": "https://example.com/company-announces-mineral-resource-for-wawa-gold-project",
+            "source_date": "2024-08-28",
+            "queried_pre_mre_cutoff": "2026-01-01",
+        },
+        _parse_loose_date("2026-01-01"),
+    )
+
+
+def test_supplement_uses_broad_subtype_library_only_after_empty_exact_belt(monkeypatch):
+    calls = []
+
+    def fake_get_approved_analogs(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("target_tectonic_belt") == "newfoundland_appalachian":
+            return []
+        return [
+            {
+                "name": "Coffee Gold Project",
+                "tonnage_mt": 80,
+                "grade_value": 1.15,
+                "deposit_subtype": "irgs_general",
+                "tectonic_belt": "yukon_tintina",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "scripts.run_parallel_gold_backtest.supabase_ops.get_approved_analogs",
+        fake_get_approved_analogs,
+    )
+
+    analogs = _supplement_with_library_analogs(
+        {
+            "name": "Clarence Stream Project",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "tectonic_belt": "newfoundland_appalachian",
+        },
+        [],
+    )
+
+    assert [call.get("target_tectonic_belt") for call in calls] == [
+        "newfoundland_appalachian",
+        None,
+    ]
+    assert [analog["name"] for analog in analogs] == ["Coffee Gold Project"]
+
+
 def test_backfilled_year_only_mre_uses_conservative_blind_cutoff():
     cutoff = _blind_cutoff_from_mre_run({
         "source": "exa_2pass_mre_truth_backfill",
@@ -171,3 +251,21 @@ def test_backfilled_year_only_mre_uses_conservative_blind_cutoff():
     })
 
     assert cutoff == "2026-01-01"
+
+
+def test_evidence_score_value_extracts_numeric_score_for_comparison():
+    richer = {
+        "queried_pre_mre_cutoff": "2025-01-01",
+        "source_url": "https://example.com/pre-mre",
+        "confidence": "medium",
+        "total_meters_drilled": 23000,
+        "weighted_grade_g_t": 1.0,
+        "strike_length_m": 750,
+    }
+    thinner = {
+        "queried_pre_mre_cutoff": "2025-01-01",
+        "source_url": "https://example.com/pre-mre",
+        "confidence": "low",
+    }
+
+    assert _evidence_score_value(richer) > _evidence_score_value(thinner)

@@ -100,8 +100,15 @@ def _evidence_is_pre_cutoff(evidence: Optional[Dict[str, Any]], cutoff: Optional
     return bool(source_date and source_date < cutoff)
 
 
+def _evidence_score_value(evidence: Optional[Dict[str, Any]]) -> int:
+    return int((evidence_quality_score(evidence) or {}).get("score") or 0)
+
+
 _EVIDENCE_MRE_MARKERS = (
+    "maiden resource",
+    "mineral resource",
     "mineral resource estimate",
+    "resource update",
     "resource estimate",
     "updated resource",
     "updated mre",
@@ -507,6 +514,15 @@ def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
     if (
         material_key in {"gold", "au"}
         and not deposit_subtype
+        and (target_belt == "guiana_shield" or "shear" in str(deposit_type or "").lower())
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
+    if material_key in {"gold", "au"} and str(deposit_subtype or "").lower() == "carlin_general":
+        target_belt = "great_basin_carlin"
+    if (
+        material_key in {"gold", "au"}
+        and not deposit_subtype
         and "near-surface" in str(deposit_type or "").lower()
         and (target_belt == "yukon_tintina" or "yukon" in blob or "tintina" in blob)
     ):
@@ -633,6 +649,22 @@ def _supplement_with_library_analogs(
         )
         return list(analogs)
     merged = _merge_library_analogs(project, analogs, library, max_count=max_count)
+    if len(merged) < min_count and filters["target_tectonic_belt"]:
+        try:
+            broad_library = supabase_ops.get_approved_analogs(
+                material=material,
+                deposit_type=deposit_type,
+                deposit_subtype=deposit_subtype,
+                target_tectonic_belt=None,
+                limit=50,
+            )
+        except Exception:
+            logging.exception(
+                "[parallel-gold-backtest] failed loading broad approved analog library for %s",
+                project.get("name"),
+            )
+        else:
+            merged = _merge_library_analogs(project, merged, broad_library, max_count=max_count)
     if len(merged) > len(analogs):
         logging.info(
             "[parallel-gold-backtest] seeded %s approved-library analog(s) for %s",
@@ -694,8 +726,8 @@ def _run_one(
         if evidence:
             save_evidence = True
             if cached_pre_cutoff:
-                cached_score = evidence_quality_score(cached_pre_cutoff)
-                fresh_score = evidence_quality_score(evidence)
+                cached_score = _evidence_score_value(cached_pre_cutoff)
+                fresh_score = _evidence_score_value(evidence)
                 if cached_score > fresh_score:
                     logging.info(
                         "[pre-mre-evidence] keeping richer cached evidence for %s "
