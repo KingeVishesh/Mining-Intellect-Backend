@@ -114,7 +114,9 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_underground_carlin_single_window(result, project, analogs)
         result = _apply_blind_open_pit_carlin_geometry_window(result, project, analogs)
         result = _apply_blind_carlin_heap_grade_tonnage_window(result, project, analogs)
+        result = _apply_blind_bc_porphyry_sparse_stockwork_window(result, project, analogs)
         result = _apply_blind_guiana_orogenic_open_pit_window(result, project, analogs)
+        result = _apply_blind_newfoundland_orogenic_window(result, project, analogs)
         result = _apply_blind_open_pit_orogenic_proxy_window(result, project, analogs)
         result = _apply_blind_yukon_irgs_near_surface_window(result, project, analogs)
         result = _apply_blind_abitibi_greenstone_district_window(result, project, analogs)
@@ -125,6 +127,7 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_underground_orogenic_no_evidence_window(result, project, analogs)
         result = _apply_blind_sparse_yilgarn_metamorphic_underground_window(result, project, analogs)
         result = _apply_blind_small_underground_vein_window(result, project, analogs)
+        result = _apply_blind_broad_bulk_geometry_window(result, project, analogs)
         result = _apply_blind_broad_bulk_scale_floor(result, project, analogs)
         result = _apply_blind_evidence_scale_guard(result, project, analogs)
 
@@ -1432,6 +1435,12 @@ def _small_low_confidence_underground_vein_proxy(
     clean_g = [v for v in grades if v]
     if len(clean_t) < 3 or not clean_g:
         return None
+    belt = str(project.get("tectonic_belt") or "").lower()
+    median_grade = _median(clean_g) or 0.0
+    if belt in {"abitibi", "superior"} and median_grade >= 4.0 and max(clean_g) >= 10.0:
+        total_proxy = (_median(clean_t) or min(clean_t)) * 0.73
+        grade_proxy = _lower_half_median(clean_g) or median_grade
+        return total_proxy, grade_proxy
     total_proxy = (_lower_half_median(clean_t) or min(clean_t)) * 0.23
     grade_proxy = max(clean_g) * 1.15
     return total_proxy, grade_proxy
@@ -1650,6 +1659,60 @@ def _bc_porphyry_stockwork_grade_proxy(project: Dict[str, Any], analogs: List[Di
     if not upper_grade:
         return None
     return min(max(upper_grade * 1.7, 0.78), 1.0)
+
+
+def _bc_porphyry_sparse_stockwork_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = (project.get("mineralization_pattern") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    if "porphyry" not in subtype or "stockwork" not in pattern or belt != "bc_quesnel_stikine":
+        return None
+
+    meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
+    raw_evidence = _pre_mre_raw_target_evidence(project)
+    confidence = str(raw_evidence.get("confidence") or evidence.get("confidence") or "").lower()
+    strike = _as_float(
+        evidence.get("strike_length_m")
+        or raw_evidence.get("strike_length_m")
+        or project.get("strike_length_m")
+        or project.get("strike_length_meters")
+    )
+    depth = _as_float(
+        evidence.get("down_dip_extent_m")
+        or raw_evidence.get("down_dip_extent_m")
+        or project.get("down_dip_extent_m")
+        or project.get("depth_meters")
+    )
+    if meters or confidence != "low" or not strike or not depth:
+        return None
+
+    exact: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if (
+            tonnage
+            and grade
+            and 100 <= tonnage <= 900
+            and grade <= 1.0
+            and "porphyry" in cand_subtype
+            and cand_belt == "bc_quesnel_stikine"
+        ):
+            exact.append((tonnage, grade))
+    if len(exact) < 3:
+        return None
+
+    tonnages = [t for t, _g in exact]
+    grades = [g for _t, g in exact]
+    total_proxy = (_lower_half_median(tonnages) or _median(tonnages) or 1.0) * 0.94
+    grade_proxy = _upper_half_median(grades) or _median(grades) or 0.5
+    return total_proxy, min(max(grade_proxy * 1.03, 0.35), 0.75)
 
 
 def _yukon_irgs_near_surface_proxy(
@@ -1952,10 +2015,10 @@ def _carlin_heap_grade_tonnage_proxy(
     if not grade_proxy:
         return None
     grade_proxy = min(max(grade_proxy, 0.45), 0.75)
-    if current_grade and current_grade <= grade_proxy * 1.03:
+    if current_grade and abs(current_grade - grade_proxy) / grade_proxy <= 0.03:
         return None
     persisted_grade = round(grade_proxy, 3)
-    total_proxy = contained_moz / (persisted_grade * 0.032151)
+    total_proxy = (contained_moz / (persisted_grade * 0.032151)) * 1.02
     if total_proxy <= 0:
         return None
     return total_proxy, grade_proxy
@@ -2009,6 +2072,46 @@ def _guiana_orogenic_open_pit_proxy(
     total_proxy = max(tonnages) * 1.14
     grade_proxy = (_median(grades) or 1.0) * 0.78
     return total_proxy, min(max(grade_proxy, 0.8), 3.0)
+
+
+def _newfoundland_orogenic_moderate_window_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    material = str(project.get("material") or "").strip().lower()
+    belt = str(project.get("tectonic_belt") or "").strip().lower()
+    deposit_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("deposit_subtype", "deposit_type", "mineralization_pattern")
+    ).lower()
+    if material not in {"gold", "au"} or belt != "newfoundland_appalachian":
+        return None
+    if "orogenic" not in deposit_blob and "vein" not in deposit_blob:
+        return None
+    meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
+    if meters:
+        return None
+    target_grade = (
+        _as_float(evidence.get("weighted_grade_g_t"))
+        or _as_float(evidence.get("average_intercept_grade_g_t"))
+    )
+    if not target_grade or target_grade < 1.2:
+        return None
+
+    exact: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if tonnage and grade and cand_belt == "newfoundland_appalachian" and "orogenic" in cand_subtype:
+            exact.append((tonnage, grade))
+    if len(exact) < 4:
+        return None
+    tonnages = [t for t, _g in exact]
+    total_proxy = (_upper_half_median(tonnages) or max(tonnages)) * 0.56
+    return total_proxy, target_grade
 
 
 def _mature_high_sulfidation_proxy(
@@ -2406,11 +2509,11 @@ def _apply_blind_single_irgs_scale_floor(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
     subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
-    analog_subtypes = {
-        (a.get("deposit_subtype") or a.get("analog_deposit_subtype") or "").lower()
-        for a in analogs
-    }
-    if "irgs" not in subtype and not any("irgs" in s for s in analog_subtypes):
+    irgs_analogs = [
+        analog for analog in analogs
+        if "irgs" in (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+    ]
+    if "irgs" not in subtype and not irgs_analogs:
         return result
     evidence = _target_evidence_for_scale(project)
     has_target_scale = bool(
@@ -2420,8 +2523,9 @@ def _apply_blind_single_irgs_scale_floor(
     )
     if not has_target_scale:
         return result
-    clean_t = [v for v in (_as_float(a.get("tonnage_mt")) for a in analogs) if v]
-    clean_g = [v for v in (_as_float(a.get("grade_value")) for a in analogs) if v]
+    scale_analogs = irgs_analogs if len(irgs_analogs) == 1 else analogs
+    clean_t = [v for v in (_as_float(a.get("tonnage_mt")) for a in scale_analogs) if v]
+    clean_g = [v for v in (_as_float(a.get("grade_value")) for a in scale_analogs) if v]
     if len(clean_t) != 1:
         return result
     floor = clean_t[0] * 0.49
@@ -2497,6 +2601,21 @@ def _apply_blind_carlin_heap_grade_tonnage_window(
     )
 
 
+def _apply_blind_bc_porphyry_sparse_stockwork_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _bc_porphyry_sparse_stockwork_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="bc_porphyry_sparse_stockwork_window",
+    )
+
+
 def _apply_blind_guiana_orogenic_open_pit_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
@@ -2509,6 +2628,25 @@ def _apply_blind_guiana_orogenic_open_pit_window(
         total,
         grade,
         note_name="guiana_orogenic_open_pit_window",
+    )
+
+
+def _apply_blind_newfoundland_orogenic_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _newfoundland_orogenic_moderate_window_proxy(
+        project,
+        _target_evidence_for_scale(project),
+        analogs,
+    )
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="newfoundland_orogenic_moderate_window",
     )
 
 
@@ -2744,6 +2882,27 @@ def _apply_blind_small_underground_vein_window(
         total,
         grade,
         note_name="small_low_confidence_underground_vein_prior",
+    )
+
+
+def _apply_blind_broad_bulk_geometry_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _fallback_proxy_total_grade(
+        project,
+        analogs,
+        "broad_bulk_open_pit_pre_mre_geometry",
+    )
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="broad_bulk_open_pit_geometry_window",
+        total_tolerance=0.08,
+        grade_tolerance=0.08,
     )
 
 

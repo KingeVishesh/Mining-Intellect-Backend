@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from scripts.run_parallel_gold_backtest import (
     _blind_library_analog_is_compatible,
+    _blind_gold_needs_library_expansion,
     _blind_cutoff_from_mre_run,
     _evidence_is_pre_cutoff,
     _evidence_score_value,
@@ -156,6 +157,56 @@ def test_blind_library_filter_prefers_bulk_porphyry_over_bad_underground_tag():
             "deposit_subtype": "calc_alkalic_porphyry",
         },
     )
+
+
+def test_blind_library_expansion_keeps_high_grade_underground_cohort():
+    project = {
+        "name": "Perron-style Target",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "tectonic_belt": "abitibi",
+        "mining_method_class": "underground_vein",
+    }
+    analogs = [
+        {"name": "Westwood", "tonnage_mt": 22, "grade_value": 5.4},
+        {"name": "Casa Berardi", "tonnage_mt": 30, "grade_value": 4.5},
+        {"name": "Lamaque", "tonnage_mt": 30, "grade_value": 6.0},
+        {"name": "Madsen", "tonnage_mt": 2.7, "grade_value": 8.9},
+    ]
+
+    assert not _blind_gold_needs_library_expansion(project, analogs)
+
+
+def test_blind_library_expansion_keeps_single_yukon_sediment_hosted_anchor():
+    project = {
+        "name": "Hyland-style Target",
+        "material": "gold",
+        "deposit_subtype": "sediment_hosted_general",
+        "tectonic_belt": "yukon_tintina",
+    }
+    analogs = [
+        {"name": "Brewery Creek", "tonnage_mt": 31.0, "grade_value": 1.0, "deposit_subtype": "irgs_general"},
+    ]
+
+    assert not _blind_gold_needs_library_expansion(project, analogs)
+
+
+def test_blind_library_expansion_keeps_sparse_bc_stockwork_cohort():
+    project = {
+        "name": "Kena-style Target",
+        "material": "gold",
+        "deposit_subtype": "alkalic_porphyry",
+        "mineralization_pattern": "stockwork",
+        "tectonic_belt": "bc_quesnel_stikine",
+    }
+    analogs = [
+        {"name": "Kwanika", "tonnage_mt": 383, "grade_value": 0.27},
+        {"name": "Treaty Creek", "tonnage_mt": 815.7, "grade_value": 0.66},
+        {"name": "Mount Milligan", "tonnage_mt": 189.3, "grade_value": 0.30},
+        {"name": "Mount Polley", "tonnage_mt": 247, "grade_value": 0.262},
+    ]
+
+    assert not _blind_gold_needs_library_expansion(project, analogs)
 
 
 def test_supplement_expands_narrow_abitibi_greenstone_cohort(monkeypatch):

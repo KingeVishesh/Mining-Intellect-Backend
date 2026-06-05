@@ -634,13 +634,40 @@ def _blind_gold_needs_library_expansion(project: Dict[str, Any], analogs: Sequen
         for a in analogs
     ]
     clean = [(t, g) for t, g in clean if t and g]
-    if len(clean) < 3:
-        return True
     max_tonnage = max((t for t, _g in clean), default=0)
     median_grade = _median_float([g for _t, g in clean]) or 0
     subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
     pattern = str(project.get("mineralization_pattern") or "").lower()
     belt = str(project.get("tectonic_belt") or "").lower()
+    target_mining = str(
+        project.get("mining_method_class") or project.get("mining_method") or ""
+    ).strip().lower()
+    if (
+        target_mining == "underground_vein"
+        and belt in {"abitibi", "superior", "yilgarn"}
+        and len(clean) >= 4
+        and median_grade >= 3.0
+    ):
+        return False
+    if (
+        belt == "yukon_tintina"
+        and any(token in subtype for token in ("sediment", "irgs", "intrusion"))
+        and len(clean) == 1
+        and 10 <= clean[0][0] <= 60
+        and 0.5 <= clean[0][1] <= 1.5
+    ):
+        return False
+    if (
+        "porphyry" in subtype
+        and "stockwork" in pattern
+        and belt == "bc_quesnel_stikine"
+        and len(clean) >= 4
+        and max_tonnage <= 900
+        and median_grade <= 1.0
+    ):
+        return False
+    if len(clean) < 3:
+        return True
     if "porphyry" in subtype and "stockwork" in pattern:
         return len(clean) < 5 or max_tonnage < 200 or median_grade > 1.5
     if belt in {"abitibi", "superior", "yilgarn"} and any(
