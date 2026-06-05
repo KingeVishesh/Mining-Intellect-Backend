@@ -129,6 +129,100 @@ def test_blind_library_filter_rejects_low_grade_bulk_for_underground_gold():
     )
 
 
+def test_blind_library_filter_prefers_bulk_porphyry_over_bad_underground_tag():
+    project = {
+        "name": "Treaty Creek",
+        "material": "gold",
+        "deposit_subtype": "calc_alkalic_porphyry",
+        "mineralization_pattern": "stockwork",
+        "mining_method_class": "underground_vein",
+    }
+
+    assert _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "KSM",
+            "tonnage_mt": 5400,
+            "grade_value": 0.51,
+            "deposit_subtype": "calc_alkalic_porphyry",
+        },
+    )
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Ana Paula",
+            "tonnage_mt": 21.4,
+            "grade_value": 2.16,
+            "deposit_subtype": "calc_alkalic_porphyry",
+        },
+    )
+
+
+def test_supplement_expands_narrow_abitibi_greenstone_cohort(monkeypatch):
+    calls = []
+
+    def fake_get_approved_analogs(**kwargs):
+        calls.append(kwargs)
+        return [
+            {
+                "name": "Nelligan Gold Project",
+                "tonnage_mt": 103,
+                "grade_value": 0.95,
+                "deposit_subtype": "greenstone_orogenic",
+            },
+            {
+                "name": "Beattie Gold Deposit",
+                "tonnage_mt": 60.9,
+                "grade_value": 1.59,
+                "deposit_subtype": "greenstone_orogenic",
+            },
+        ]
+
+    monkeypatch.setattr(
+        "scripts.run_parallel_gold_backtest.supabase_ops.get_approved_analogs",
+        fake_get_approved_analogs,
+    )
+
+    analogs = _supplement_with_library_analogs(
+        {
+            "name": "Tower Gold Project",
+            "material": "gold",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "abitibi",
+            "mining_method_class": "underground_vein",
+        },
+        [
+            {
+                "name": "Canadian Malartic - Odyssey UG",
+                "tonnage_mt": 110,
+                "grade_value": 2.5,
+                "deposit_subtype": "greenstone_orogenic",
+                "mining_method_class": "underground_vein",
+            },
+            {
+                "name": "Casa Berardi",
+                "tonnage_mt": 30,
+                "grade_value": 4.5,
+                "deposit_subtype": "greenstone_orogenic",
+                "mining_method_class": "underground_vein",
+            },
+            {
+                "name": "Lamaque Complex",
+                "tonnage_mt": 30,
+                "grade_value": 6,
+                "deposit_subtype": "greenstone_orogenic",
+                "mining_method_class": "underground_vein",
+            },
+        ],
+    )
+
+    assert calls
+    assert [analog["name"] for analog in analogs[:2]] == [
+        "Nelligan Gold Project",
+        "Beattie Gold Deposit",
+    ]
+
+
 def test_gold_library_filters_infer_orogenic_from_archean_gold_belt():
     filters = _gold_library_filters({
         "name": "Moss",

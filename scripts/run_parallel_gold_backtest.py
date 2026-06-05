@@ -499,6 +499,16 @@ def _positive_float(value: Any) -> Optional[float]:
         return None
 
 
+def _median_float(values: Iterable[float]) -> Optional[float]:
+    clean = sorted(v for v in values if v and math.isfinite(v))
+    if not clean:
+        return None
+    mid = len(clean) // 2
+    if len(clean) % 2:
+        return clean[mid]
+    return (clean[mid - 1] + clean[mid]) / 2.0
+
+
 def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
     """Infer the same minimal gold routing fields Analog Finder uses."""
     material = project.get("material") or "gold"
@@ -582,6 +592,27 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
     analog_mining = str(
         analog.get("mining_method_class") or analog.get("mining_method") or ""
     ).strip().lower()
+    target_subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    target_pattern = str(project.get("mineralization_pattern") or "").lower()
+    target_belt = str(project.get("tectonic_belt") or "").lower()
+    analog_subtype = str(
+        analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or ""
+    ).lower()
+    bulk_porphyry_target = "porphyry" in target_subtype and "stockwork" in target_pattern
+    if bulk_porphyry_target:
+        if "porphyry" not in analog_subtype:
+            return False
+        return tonnage >= 100 and grade <= 1.25
+    district_greenstone_target = (
+        target_mining == "underground_vein"
+        and target_belt in {"abitibi", "superior", "yilgarn"}
+        and any(token in target_subtype for token in ("greenstone", "orogenic"))
+    )
+    if district_greenstone_target and (
+        (analog_mining and "open" in analog_mining)
+        or (not analog_mining and tonnage >= 20 and grade <= 2.0)
+    ):
+        return True
     if target_mining == "underground_vein":
         if analog_mining and not geo_taxonomy.mining_method_compatible(target_mining, analog_mining):
             return False
@@ -592,6 +623,46 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
     elif target_mining and analog_mining and not geo_taxonomy.mining_method_compatible(target_mining, analog_mining):
         return False
     return True
+
+
+def _blind_gold_needs_library_expansion(project: Dict[str, Any], analogs: Sequence[Dict[str, Any]]) -> bool:
+    material = str(project.get("material") or "").strip().lower()
+    if material not in {"gold", "au"}:
+        return False
+    clean = [
+        (_positive_float(a.get("tonnage_mt")), _positive_float(a.get("grade_value")))
+        for a in analogs
+    ]
+    clean = [(t, g) for t, g in clean if t and g]
+    if len(clean) < 3:
+        return True
+    max_tonnage = max((t for t, _g in clean), default=0)
+    median_grade = _median_float([g for _t, g in clean]) or 0
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    if "porphyry" in subtype and "stockwork" in pattern:
+        return len(clean) < 5 or max_tonnage < 200 or median_grade > 1.5
+    if belt in {"abitibi", "superior", "yilgarn"} and any(
+        token in subtype for token in ("greenstone", "orogenic")
+    ):
+        return len(clean) < 5 or max_tonnage < 120 or median_grade > 2.5
+    return False
+
+
+def _blind_library_fit_sort_key(project: Dict[str, Any], analog: Dict[str, Any]) -> tuple:
+    tonnage = _positive_float(analog.get("tonnage_mt")) or 0.0
+    grade = _positive_float(analog.get("grade_value")) or 99.0
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    if "porphyry" in subtype and "stockwork" in pattern:
+        return (0 if tonnage >= 100 and grade <= 1.25 else 1, -tonnage, grade)
+    if belt in {"abitibi", "superior", "yilgarn"} and any(
+        token in subtype for token in ("greenstone", "orogenic")
+    ):
+        return (0 if tonnage >= 50 and grade <= 2.0 else 1, abs(grade - 1.1), -tonnage)
+    return (0,)
 
 
 def _merge_library_analogs(
@@ -607,6 +678,8 @@ def _merge_library_analogs(
         [*supplied, *library],
         cutoff,
     )
+    if _blind_gold_needs_library_expansion(project, supplied):
+        cleaned = sorted(cleaned, key=lambda analog: _blind_library_fit_sort_key(project, analog))
     merged: List[Dict[str, Any]] = []
     seen: Set[str] = set()
     for analog in cleaned:
@@ -637,7 +710,7 @@ def _supplement_with_library_analogs(
     min_count: int = 3,
     max_count: int = 8,
 ) -> List[Dict[str, Any]]:
-    if len(analogs) >= min_count:
+    if len(analogs) >= min_count and not _blind_gold_needs_library_expansion(project, analogs):
         return list(analogs)
     filters = _gold_library_filters(project)
     material = filters["material"] or "gold"
