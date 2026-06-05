@@ -1032,6 +1032,11 @@ def main() -> int:
 
     excluded_project_ids = set(args.exclude_project_id)
     excluded_project_ids.update(_run_project_ids(args.exclude_run_id))
+    selection_pool_summary: Optional[Dict[str, int]] = None
+    try:
+        selection_pool_summary = _db_truth_pool_summary(excluded_project_ids)
+    except Exception:
+        logging.exception("[parallel-gold-backtest] failed to summarize truth-backed DB pool")
 
     targets = [{"project_id": pid, "fixture": None, "fixture_name": None} for pid in args.project_id]
     if args.fixture:
@@ -1061,15 +1066,12 @@ def main() -> int:
     targets = list(deduped.values())
     if len(targets) < 10:
         pool_note = ""
-        try:
-            pool = _db_truth_pool_summary(excluded_project_ids)
+        if selection_pool_summary:
             pool_note = (
-                f" full_split_truth_total={pool['full_split_truth_total']}, "
-                f"excluded_full_split_truth={pool['excluded_full_split_truth']}, "
-                f"remaining_full_split_truth={pool['remaining_full_split_truth']}."
+                f" full_split_truth_total={selection_pool_summary['full_split_truth_total']}, "
+                f"excluded_full_split_truth={selection_pool_summary['excluded_full_split_truth']}, "
+                f"remaining_full_split_truth={selection_pool_summary['remaining_full_split_truth']}."
             )
-        except Exception:
-            logging.exception("[parallel-gold-backtest] failed to summarize truth-backed DB pool")
         print(
             f"[parallel-gold-backtest] warning: only {len(targets)} "
             "truth-backed target(s) selected; cannot prove 5/10 95% matches "
@@ -1080,6 +1082,15 @@ def main() -> int:
     if args.list_targets:
         if excluded_project_ids:
             print(f"# excluded_project_ids={len(excluded_project_ids)}")
+        if selection_pool_summary:
+            print(
+                "# full_split_truth_total="
+                f"{selection_pool_summary['full_split_truth_total']} "
+                "excluded_full_split_truth="
+                f"{selection_pool_summary['excluded_full_split_truth']} "
+                "remaining_full_split_truth="
+                f"{selection_pool_summary['remaining_full_split_truth']}"
+            )
         if args.random_targets:
             print(f"# random_targets={args.random_targets} random_seed={args.random_seed}")
         for target in targets:
@@ -1185,6 +1196,7 @@ def main() -> int:
                 "excluded_project_ids": sorted(excluded_project_ids),
                 "excluded_run_ids": args.exclude_run_id,
                 "project_ids": [target["project_id"] for target in targets],
+                "truth_pool_summary": selection_pool_summary,
             },
             "leaderboard": leaderboard,
         }

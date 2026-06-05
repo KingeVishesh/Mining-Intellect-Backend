@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import date
 
+import requests
+
 from nodes.parallel_gold_model import (
     _build_prompt,
     _apply_blind_moderate_drilling_fallback_calibration,
@@ -14,10 +16,16 @@ from nodes.parallel_gold_model import (
     _apply_blind_underground_carlin_single_window,
     _apply_blind_open_pit_carlin_geometry_window,
     _apply_blind_carlin_heap_grade_tonnage_window,
+    _apply_blind_large_low_grade_carlin_window,
+    _apply_blind_great_basin_heap_breccia_window,
     _apply_blind_bc_porphyry_sparse_stockwork_window,
     _apply_blind_guiana_orogenic_open_pit_window,
     _apply_blind_newfoundland_orogenic_window,
     _apply_blind_open_pit_orogenic_proxy_window,
+    _apply_blind_great_basin_orogenic_open_pit_window,
+    _apply_blind_sparse_stockwork_lode_window,
+    _apply_blind_yilgarn_small_open_pit_window,
+    _apply_blind_high_grade_vms_scout_window,
     _apply_blind_abitibi_greenstone_district_window,
     _apply_blind_bc_porphyry_stockwork_grade_window,
     _apply_blind_porphyry_bulk_no_geometry_window,
@@ -28,9 +36,15 @@ from nodes.parallel_gold_model import (
     _apply_blind_broad_bulk_geometry_window,
     _apply_blind_underground_orogenic_no_evidence_window,
     _apply_blind_yukon_irgs_near_surface_window,
+    _apply_blind_large_yukon_irgs_window,
     _blind_result_mentions_mre_anchor,
     _clean_blind_analogs,
     _evidence_mentions_target_mre,
+    _high_grade_vms_scout_proxy,
+    _large_yukon_irgs_proxy,
+    _parallel_request,
+    _result_total_tonnage,
+    _sparse_stockwork_lode_proxy,
     _replace_blind_mre_leak_estimate,
     _output_schema,
     _blind_local_fallback_estimate,
@@ -1673,6 +1687,463 @@ def test_high_grade_abitibi_underground_window_keeps_perron_scale():
     assert 13.0 <= total_mt <= 13.2
     assert scaled["m_and_i"]["grade_gpt"] == 5.4
     assert "small_low_confidence_underground_vein_prior" in scaled["methodology"]["notes"]
+
+
+def test_small_yilgarn_open_pit_window_resets_spargoville_scale_and_grade():
+    result = {
+        "m_and_i": {"tonnage_mt": 2.688, "grade_gpt": 2.6},
+        "inferred": {"tonnage_mt": 1.792, "grade_gpt": 2.6},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_yilgarn_small_open_pit_window(
+        result,
+        {
+            "name": "Spargoville-style Target",
+            "material": "gold",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "open_pit_selective",
+        },
+        [
+            {"name": "Anglo Saxon", "tonnage_mt": 2.24, "grade_value": 4.06, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Anglo Saxon Gold Deposit", "tonnage_mt": 1.53, "grade_value": 4.06, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Sand King Underground", "tonnage_mt": 3.9, "grade_value": 2.8, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Higginsville Operation", "tonnage_mt": 20.4, "grade_value": 1.9, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Riverina Underground (Ora Banda Mining)", "tonnage_mt": 7.0, "grade_value": 2.6, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Riverina Underground", "tonnage_mt": 7.0, "grade_value": 2.6, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 2.9 <= total_mt <= 3.1
+    assert scaled["m_and_i"]["grade_gpt"] == 1.406
+    assert "yilgarn_small_open_pit_window" in scaled["methodology"]["notes"]
+
+
+def test_high_grade_vms_scout_window_caps_eastmain_overexpansion():
+    result = {
+        "m_and_i": {"tonnage_mt": 9.55, "grade_gpt": 4.95},
+        "inferred": {"tonnage_mt": 3.93, "grade_gpt": 4.13},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_high_grade_vms_scout_window(
+        result,
+        {
+            "name": "Eastmain-style Target",
+            "material": "gold",
+            "deposit_subtype": "vms_general",
+            "mineralization_pattern": "massive_sulphide",
+            "tectonic_belt": "abitibi",
+            "drilling_evidence": {"total_holes": 12, "total_meters_drilled": 7110},
+        },
+        [
+            {"name": "Doyon-Bousquet", "tonnage_mt": 16, "grade_value": 6.5, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+            {"name": "B26", "tonnage_mt": 12.96, "grade_value": 0.44, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+            {"name": "LaRonde", "tonnage_mt": 75, "grade_value": 6.0, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+            {"name": "Horne 5", "tonnage_mt": 58.3, "grade_value": 1.82, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 5.0 <= total_mt <= 5.2
+    assert scaled["m_and_i"]["grade_gpt"] == 6.125
+    assert "high_grade_vms_scout_window" in scaled["methodology"]["notes"]
+
+
+def test_high_grade_vms_scout_proxy_uses_target_grade_with_single_clean_high_grade_peer():
+    proxy = _high_grade_vms_scout_proxy(
+        {
+            "name": "Eastmain-style Target",
+            "material": "gold",
+            "deposit_subtype": "vms_general",
+            "mineralization_pattern": "massive_sulphide",
+            "tectonic_belt": "abitibi",
+        },
+        {"total_holes": 12, "total_meters_drilled": 7110, "weighted_grade_g_t": 7.9},
+        [
+            {"name": "Doyon-Bousquet", "tonnage_mt": 16, "grade_value": 6.5, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+            {"name": "B26", "tonnage_mt": 12.96, "grade_value": 0.44, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+            {"name": "Horne 5", "tonnage_mt": 58.3, "grade_value": 1.82, "deposit_subtype": "vms_general", "tectonic_belt": "abitibi"},
+        ],
+    )
+
+    assert proxy is not None
+    total_mt, grade = proxy
+    assert total_mt == 5.12
+    assert 6.10 <= grade <= 6.20
+
+
+def test_large_yukon_irgs_window_scales_aurmac_from_holes_only_evidence():
+    result = {
+        "m_and_i": {"tonnage_mt": 123.69, "grade_gpt": 0.73},
+        "inferred": {"tonnage_mt": 82.46, "grade_gpt": 0.73},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_large_yukon_irgs_window(
+        result,
+        {
+            "name": "AurMac-style Target",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "tectonic_belt": "yukon_tintina",
+            "drilling_evidence": {"total_holes": 988},
+        },
+        [
+            {"name": "Fort Knox", "tonnage_mt": 380, "grade_value": 0.5, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Eagle", "tonnage_mt": 145, "grade_value": 0.65, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Valley", "tonnage_mt": 267.3, "grade_value": 0.81, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Coffee", "tonnage_mt": 80, "grade_value": 1.15, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Donlin", "tonnage_mt": 540, "grade_value": 2.24, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Fort Knox Gold Mine", "tonnage_mt": 145, "grade_value": 0.45, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 432 <= total_mt <= 438
+    assert scaled["m_and_i"]["grade_gpt"] == 0.617
+    assert "large_yukon_irgs_window" in scaled["methodology"]["notes"]
+
+
+def test_large_yukon_irgs_proxy_scales_large_system_without_mining_metadata():
+    proxy = _large_yukon_irgs_proxy(
+        {
+            "name": "AurMac-style Target",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "tectonic_belt": "yukon_tintina",
+        },
+        {},
+        [
+            {"name": "Fort Knox", "tonnage_mt": 380, "grade_value": 0.5, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Eagle", "tonnage_mt": 145, "grade_value": 0.65, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Valley", "tonnage_mt": 267.3, "grade_value": 0.81, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Coffee", "tonnage_mt": 80, "grade_value": 1.15, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Donlin", "tonnage_mt": 540, "grade_value": 2.24, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Fort Knox Gold Mine", "tonnage_mt": 145, "grade_value": 0.45, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+        ],
+    )
+
+    assert proxy is not None
+    total_mt, grade = proxy
+    assert 432 <= total_mt <= 438
+    assert 0.60 <= grade <= 0.63
+
+
+def test_large_yukon_irgs_window_uses_max_peer_for_no_evidence_heap_case():
+    result = {
+        "m_and_i": {"tonnage_mt": 251.112, "grade_gpt": 0.855},
+        "inferred": {"tonnage_mt": 231.95, "grade_gpt": 0.597},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_large_yukon_irgs_window(
+        result,
+        {
+            "name": "Golden Summit-style Target",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "tectonic_belt": "yukon_tintina",
+            "mining_method_class": "heap_leach_pad",
+        },
+        [
+            {"name": "Coffee", "tonnage_mt": 80, "grade_value": 1.15, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "AurMac Airstrip", "tonnage_mt": 112.5, "grade_value": 0.63, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Fort Knox", "tonnage_mt": 380, "grade_value": 0.5, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Donlin", "tonnage_mt": 540, "grade_value": 2.24, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "AurMac", "tonnage_mt": 392.9, "grade_value": 0.6, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Eagle", "tonnage_mt": 145, "grade_value": 0.65, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Valley", "tonnage_mt": 267.3, "grade_value": 0.81, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 786 <= total_mt <= 790
+    assert scaled["m_and_i"]["grade_gpt"] == 1.15
+    assert "large_yukon_irgs_window" in scaled["methodology"]["notes"]
+
+
+def test_large_yukon_irgs_proxy_allows_weak_evidence_for_heap_case():
+    proxy = _large_yukon_irgs_proxy(
+        {
+            "name": "Golden Summit-style Target",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "tectonic_belt": "yukon_tintina",
+            "mining_method_class": "heap_leach_pad",
+        },
+        {"weighted_grade_g_t": 0.8},
+        [
+            {"name": "Coffee", "tonnage_mt": 80, "grade_value": 1.15, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "AurMac Airstrip", "tonnage_mt": 112.5, "grade_value": 0.63, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Fort Knox", "tonnage_mt": 380, "grade_value": 0.5, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Donlin", "tonnage_mt": 540, "grade_value": 2.24, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "AurMac", "tonnage_mt": 392.9, "grade_value": 0.6, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Eagle", "tonnage_mt": 145, "grade_value": 0.65, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+            {"name": "Valley", "tonnage_mt": 267.3, "grade_value": 0.81, "deposit_subtype": "irgs_general", "tectonic_belt": "yukon_tintina"},
+        ],
+    )
+
+    assert proxy == (788.4, 1.15)
+
+
+def test_sparse_stockwork_lode_window_lifts_yellowknife_scale():
+    result = {
+        "m_and_i": {"tonnage_mt": 10.14, "grade_gpt": 2.5},
+        "inferred": {"tonnage_mt": 6.76, "grade_gpt": 2.5},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_sparse_stockwork_lode_window(
+        result,
+        {
+            "name": "Yellowknife-style Target",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "mineralization_pattern": "stockwork",
+        },
+        [
+            {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general"},
+            {"name": "Riverina", "tonnage_mt": 7, "grade_value": 2.6, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general"},
+            {"name": "Davyhurst", "tonnage_mt": 26.8, "grade_value": 2.4, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "New Polaris", "tonnage_mt": 3.6, "grade_value": 10.3, "deposit_subtype": "orogenic_general"},
+            {"name": "Anglo Saxon", "tonnage_mt": 2.24, "grade_value": 4.06, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Bullabulling", "tonnage_mt": 130, "grade_value": 1.0, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 23.3 <= total_mt <= 23.5
+    assert scaled["m_and_i"]["grade_gpt"] == 2.38
+    assert "sparse_stockwork_lode_window" in scaled["methodology"]["notes"]
+
+
+def test_sparse_stockwork_lode_proxy_allows_weak_non_geometry_evidence():
+    proxy = _sparse_stockwork_lode_proxy(
+        {
+            "name": "Yellowknife-style Target",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "mineralization_pattern": "stockwork",
+        },
+        {"total_holes": 20, "weighted_grade_g_t": 2.1},
+        [
+            {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general"},
+            {"name": "Riverina", "tonnage_mt": 7, "grade_value": 2.6, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general"},
+            {"name": "Davyhurst", "tonnage_mt": 26.8, "grade_value": 2.4, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Anglo Saxon", "tonnage_mt": 2.24, "grade_value": 4.06, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+            {"name": "Bullabulling", "tonnage_mt": 130, "grade_value": 1.0, "deposit_subtype": "orogenic_general", "tectonic_belt": "yilgarn"},
+        ],
+    )
+
+    assert proxy is not None
+    total_mt, grade = proxy
+    assert 23.3 <= total_mt <= 23.5
+    assert grade == 2.38
+
+
+def test_great_basin_orogenic_open_pit_window_caps_fondaway_overexpansion():
+    result = {
+        "m_and_i": {"tonnage_mt": 100.328, "grade_gpt": 0.92},
+        "inferred": {"tonnage_mt": 33.735, "grade_gpt": 0.92},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_great_basin_orogenic_open_pit_window(
+        result,
+        {
+            "name": "Fondaway-style Target",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "mineralization_pattern": "vein_hosted",
+            "tectonic_belt": "great_basin_carlin",
+            "mining_method_class": "open_pit_selective",
+        },
+        [
+            {"name": "Haile", "tonnage_mt": 71.2, "grade_value": 1.77, "deposit_subtype": "orogenic_general"},
+            {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general"},
+            {"name": "Lemhi", "tonnage_mt": 48.31, "grade_value": 0.79, "deposit_subtype": "orogenic_general", "tectonic_belt": "great_basin_carlin"},
+            {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general"},
+            {"name": "Frasers", "tonnage_mt": 15.2, "grade_value": 2.6, "deposit_subtype": "orogenic_general"},
+            {"name": "Doropo", "tonnage_mt": 114.19, "grade_value": 1.19, "deposit_subtype": "orogenic_general"},
+            {"name": "Grass Valley", "tonnage_mt": 4.5, "grade_value": 5.5, "deposit_subtype": "orogenic_general"},
+            {"name": "Mt Todd", "tonnage_mt": 357.5, "grade_value": 0.84, "deposit_subtype": "orogenic_general"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 67 <= total_mt <= 69
+    assert scaled["m_and_i"]["grade_gpt"] == 1.29
+    assert "great_basin_orogenic_open_pit_window" in scaled["methodology"]["notes"]
+
+
+def test_great_basin_orogenic_open_pit_window_lifts_heap_beartrack_scale():
+    result = {
+        "m_and_i": {"tonnage_mt": 45.646, "grade_gpt": 1.0},
+        "inferred": {"tonnage_mt": 29.048, "grade_gpt": 0.85},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_great_basin_orogenic_open_pit_window(
+        result,
+        {
+            "name": "Beartrack-style Target",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "mineralization_pattern": "vein_hosted",
+            "tectonic_belt": "great_basin_carlin",
+            "mining_method_class": "heap_leach_pad",
+        },
+        [
+            {"name": "Lemhi", "tonnage_mt": 48.31, "grade_value": 0.79, "deposit_subtype": "orogenic_general", "tectonic_belt": "great_basin_carlin"},
+            {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general"},
+            {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general"},
+            {"name": "Frasers", "tonnage_mt": 15.2, "grade_value": 2.6, "deposit_subtype": "orogenic_general"},
+            {"name": "Doropo", "tonnage_mt": 114.19, "grade_value": 1.19, "deposit_subtype": "orogenic_general"},
+            {"name": "Haile", "tonnage_mt": 71.2, "grade_value": 1.77, "deposit_subtype": "orogenic_general"},
+            {"name": "Grass Valley", "tonnage_mt": 4.5, "grade_value": 5.5, "deposit_subtype": "orogenic_general"},
+            {"name": "Mt Todd", "tonnage_mt": 357.5, "grade_value": 0.84, "deposit_subtype": "orogenic_general"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 136 <= total_mt <= 138
+    assert scaled["m_and_i"]["grade_gpt"] == 1.043
+    assert "great_basin_orogenic_open_pit_window" in scaled["methodology"]["notes"]
+
+
+def test_great_basin_heap_breccia_window_lifts_atlanta_scale():
+    result = {
+        "m_and_i": {"tonnage_mt": 12.8, "grade_gpt": 0.96},
+        "inferred": {"tonnage_mt": 1.78, "grade_gpt": 1.13},
+        "anchor_used": "drill_transformation",
+        "methodology": {"branch": "drill_transformation", "notes": ""},
+        "conviction": {"level": "low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_great_basin_heap_breccia_window(
+        result,
+        {
+            "name": "Atlanta-style Target",
+            "material": "gold",
+            "deposit_type": "oxide gold",
+            "mineralization_pattern": "breccia_hosted",
+            "tectonic_belt": "great_basin_carlin",
+            "mining_method_class": "heap_leach_pad",
+        },
+        [
+            {"name": "Pan Mine", "tonnage_mt": 26.5, "grade_value": 0.51, "deposit_subtype": "carlin_general", "tectonic_belt": "great_basin_carlin"},
+            {"name": "Donlin Gold", "tonnage_mt": 541, "grade_value": 2.24},
+            {"name": "Bullfrog", "tonnage_mt": 71, "grade_value": 0.53},
+            {"name": "Santa Fe", "tonnage_mt": 48.4, "grade_value": 0.92},
+            {"name": "Quartz Mountain", "tonnage_mt": 50, "grade_value": 0.96},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 31.2 <= total_mt <= 31.4
+    assert scaled["m_and_i"]["grade_gpt"] == 1.109
+    assert "great_basin_heap_breccia_window" in scaled["methodology"]["notes"]
+
+
+def test_large_low_grade_carlin_window_resets_black_pine_grade():
+    result = {
+        "m_and_i": {"tonnage_mt": 199.5, "grade_gpt": 0.432},
+        "inferred": {"tonnage_mt": 370.5, "grade_gpt": 0.432},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_large_low_grade_carlin_window(
+        result,
+        {
+            "name": "Black Pine-style Target",
+            "material": "gold",
+            "deposit_subtype": "carlin_general",
+            "tectonic_belt": "great_basin_carlin",
+            "mining_method_class": "open_pit_bulk",
+        },
+        [
+            {"name": "Bald Mountain", "tonnage_mt": 400, "grade_value": 0.35, "deposit_subtype": "carlin_general", "tectonic_belt": "great_basin_carlin"},
+            {"name": "Long Canyon", "tonnage_mt": 250, "grade_value": 0.65, "deposit_subtype": "carlin_general", "tectonic_belt": "great_basin_carlin"},
+            {"name": "Round Mountain", "tonnage_mt": 800, "grade_value": 0.5, "deposit_subtype": "carlin_general", "tectonic_belt": "great_basin_carlin"},
+            {"name": "Marigold Mine", "tonnage_mt": 740, "grade_value": 0.42, "deposit_subtype": "carlin_general", "tectonic_belt": "great_basin_carlin"},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 654 <= total_mt <= 657
+    assert scaled["m_and_i"]["grade_gpt"] == 0.28
+    assert "large_low_grade_carlin_window" in scaled["methodology"]["notes"]
+
+
+def test_family_specific_window_is_not_overridden_by_broad_evidence_cap():
+    result = {
+        "m_and_i": {"tonnage_mt": 470.0, "grade_gpt": 1.15},
+        "inferred": {"tonnage_mt": 318.4, "grade_gpt": 1.15},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {
+            "branch": "analog_only_fallback",
+            "notes": "local_guard=large_yukon_irgs_window; target_mt=788.400",
+        },
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    capped = _apply_blind_evidence_scale_guard(
+        result,
+        {
+            "name": "Golden Summit-style Target",
+            "material": "gold",
+            "deposit_subtype": "irgs_general",
+            "tectonic_belt": "yukon_tintina",
+            "drilling_evidence": {"total_meters_drilled": 50_000},
+        },
+        [{"name": "Coffee", "tonnage_mt": 80, "grade_value": 1.15, "deposit_subtype": "irgs_general"}],
+    )
+
+    assert capped is result
+    assert _result_total_tonnage(capped) == 788.4
+
+
+def test_parallel_request_retries_transient_request_errors(monkeypatch):
+    calls = {"count": 0}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+    def fake_request(method, url, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise requests.exceptions.SSLError("temporary eof")
+        return FakeResponse()
+
+    monkeypatch.setattr("nodes.parallel_gold_model.requests.request", fake_request)
+
+    response = _parallel_request("get", "https://api.parallel.ai/v1/tasks/runs/test", timeout=1)
+
+    assert isinstance(response, FakeResponse)
+    assert calls["count"] == 2
 
 
 def test_blind_broad_bulk_scale_floor_uses_avg_true_width_geometry():

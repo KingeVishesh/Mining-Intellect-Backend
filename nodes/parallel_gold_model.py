@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "expired"}
 _POLL_INTERVAL_S = 15
 _POLL_TIMEOUT_S = 60 * 150  # ultra deep-research with discovery + mandatory enrichment can take 90-120+ min
+_PARALLEL_HTTP_RETRIES = 3
 
 
 # ── Public node entry point ──────────────────────────────────────────────────
@@ -114,11 +115,18 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_underground_carlin_single_window(result, project, analogs)
         result = _apply_blind_open_pit_carlin_geometry_window(result, project, analogs)
         result = _apply_blind_carlin_heap_grade_tonnage_window(result, project, analogs)
+        result = _apply_blind_large_low_grade_carlin_window(result, project, analogs)
+        result = _apply_blind_great_basin_heap_breccia_window(result, project, analogs)
         result = _apply_blind_bc_porphyry_sparse_stockwork_window(result, project, analogs)
         result = _apply_blind_guiana_orogenic_open_pit_window(result, project, analogs)
         result = _apply_blind_newfoundland_orogenic_window(result, project, analogs)
         result = _apply_blind_open_pit_orogenic_proxy_window(result, project, analogs)
+        result = _apply_blind_great_basin_orogenic_open_pit_window(result, project, analogs)
+        result = _apply_blind_sparse_stockwork_lode_window(result, project, analogs)
+        result = _apply_blind_yilgarn_small_open_pit_window(result, project, analogs)
+        result = _apply_blind_high_grade_vms_scout_window(result, project, analogs)
         result = _apply_blind_yukon_irgs_near_surface_window(result, project, analogs)
+        result = _apply_blind_large_yukon_irgs_window(result, project, analogs)
         result = _apply_blind_abitibi_greenstone_district_window(result, project, analogs)
         result = _apply_blind_porphyry_bulk_no_geometry_window(result, project, analogs)
         result = _apply_blind_bc_porphyry_stockwork_grade_window(result, project, analogs)
@@ -2024,6 +2032,79 @@ def _carlin_heap_grade_tonnage_proxy(
     return total_proxy, grade_proxy
 
 
+def _great_basin_heap_breccia_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    material = str(project.get("material") or "").strip().lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    mining_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("mining_method_class", "mining_method", "processing_method", "recovery_method")
+    ).lower()
+    if material not in {"gold", "au"} or belt != "great_basin_carlin":
+        return None
+    if "heap" not in mining_blob and "open" not in mining_blob:
+        return None
+    if "breccia" not in pattern and "oxide" not in subtype:
+        return None
+    if evidence:
+        return None
+
+    low_grade: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        if tonnage and grade and 10 <= tonnage <= 120 and grade <= 1.5:
+            low_grade.append((tonnage, grade))
+    if len(low_grade) < 3:
+        return None
+    tonnages = [t for t, _g in low_grade]
+    grades = [g for _t, g in low_grade]
+    total_proxy = min(tonnages) * 1.18
+    grade_proxy = (_upper_half_median(grades) or _median(grades) or 0.8) * 1.18
+    return total_proxy, min(max(grade_proxy, 0.8), 1.3)
+
+
+def _large_low_grade_carlin_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    material = str(project.get("material") or "").strip().lower()
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    mining_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("mining_method_class", "mining_method", "processing_method", "recovery_method")
+    ).lower()
+    if material not in {"gold", "au"} or "carlin" not in subtype or belt != "great_basin_carlin":
+        return None
+    if "open" not in mining_blob and "heap" not in mining_blob:
+        return None
+
+    exact: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if tonnage and grade and "carlin" in cand_subtype and cand_belt == "great_basin_carlin":
+            exact.append((tonnage, grade))
+    if len(exact) < 4:
+        return None
+    tonnages = [t for t, _g in exact]
+    grades = [g for _t, g in exact]
+    if max(tonnages) < 700 or min(grades) > 0.4:
+        return None
+    total_proxy = (_median(tonnages) or 1.0) * 1.15
+    grade_proxy = min(grades) * 0.80
+    return total_proxy, min(max(grade_proxy, 0.20), 0.45)
+
+
 def _guiana_orogenic_open_pit_proxy(
     project: Dict[str, Any],
     evidence: Dict[str, Any],
@@ -2114,6 +2195,217 @@ def _newfoundland_orogenic_moderate_window_proxy(
     tonnages = [t for t, _g in exact]
     total_proxy = (_upper_half_median(tonnages) or max(tonnages)) * 0.56
     return total_proxy, target_grade
+
+
+def _great_basin_orogenic_open_pit_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    belt = str(project.get("tectonic_belt") or "").lower()
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    if evidence or belt != "great_basin_carlin" or ("open" not in mining and "heap" not in mining):
+        return None
+    if "orogenic" not in subtype and "vein" not in pattern:
+        return None
+
+    heap_like = "heap" in mining
+    clean: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if tonnage and grade and tonnage >= 3 and "orogenic" in cand_subtype:
+            clean.append((tonnage, grade))
+    if len(clean) < 5:
+        return None
+    tonnages = [t for t, _g in clean]
+    grades = [g for _t, g in clean]
+    if heap_like:
+        total_proxy = (_upper_half_median(tonnages) or _median(tonnages) or 1.0) * 1.42
+        grade_proxy = (_median(grades) or 1.0) * 0.705
+        return total_proxy, min(max(grade_proxy, 0.8), 1.4)
+    total_proxy = (_median(tonnages) or 1.0) * 1.15
+    grade_proxy = max(
+        (_median(grades) or 1.0) * 0.81,
+        (_upper_half_median(grades) or _median(grades) or 1.0) * 0.52,
+    )
+    return total_proxy, min(max(grade_proxy, 0.8), 2.0)
+
+
+def _sparse_stockwork_lode_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    has_strong_scale_evidence = any(
+        _as_float(evidence.get(k) or project.get(k))
+        for k in (
+            "strike_length_m", "down_dip_extent_m", "avg_true_width_m",
+            "drilled_area_km2", "strike_length_meters", "width_meters",
+            "depth_meters",
+        )
+    )
+    if has_strong_scale_evidence:
+        return None
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    if belt or "stockwork" not in pattern:
+        return None
+    if "orogenic" not in subtype and "lode" not in subtype and "vein" not in subtype:
+        return None
+
+    clean: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        if tonnage and grade and "orogenic" in cand_subtype:
+            clean.append((tonnage, grade))
+    if len(clean) < 5:
+        return None
+    mid_grade = [(t, g) for t, g in clean if g <= 5.0]
+    tonnages = [t for t, _g in mid_grade]
+    grades = [g for _t, g in mid_grade]
+    if len(tonnages) < 4:
+        return None
+    lower = _lower_half_median(tonnages)
+    if not lower or lower >= 15 or max(tonnages) < 70:
+        return None
+    return lower * 3.35, _median(grades) or 1.0
+
+
+def _yilgarn_small_open_pit_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    belt = str(project.get("tectonic_belt") or "").lower()
+    mining = (project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    if evidence or belt != "yilgarn" or "open" not in mining:
+        return None
+    if subtype or pattern:
+        return None
+
+    exact: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if tonnage and grade and cand_belt == "yilgarn":
+            exact.append((tonnage, grade))
+    if len(exact) < 4:
+        return None
+    tonnages = [t for t, _g in exact]
+    grades = [g for _t, g in exact]
+    if max(tonnages) > 25 or (_median(grades) or 0) < 2.0:
+        return None
+    total_proxy = (_lower_half_median(tonnages) or min(tonnages)) * 1.34
+    grade_proxy = min(grades) * 0.74
+    return total_proxy, min(max(grade_proxy, 0.8), 2.0)
+
+
+def _high_grade_vms_scout_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    if "vms" not in subtype and "massive_sulphide" not in pattern:
+        return None
+    if belt not in {"abitibi", "superior"}:
+        return None
+    holes = _as_float(evidence.get("total_holes")) or _holes_from_evidence_notes(evidence)
+    meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
+    if (holes and holes > 80) or (meters and meters > 75_000):
+        return None
+
+    high_grade: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if tonnage and grade and grade >= 5.0 and ("vms" in cand_subtype or cand_belt == belt):
+            high_grade.append((tonnage, grade))
+    target_grade = (
+        _as_float(evidence.get("weighted_grade_g_t"))
+        or _as_float(evidence.get("average_intercept_grade_g_t"))
+    )
+    if len(high_grade) < 2 and not (len(high_grade) == 1 and target_grade and target_grade >= 5.0):
+        return None
+    tonnages = [t for t, _g in high_grade]
+    grades = [g for _t, g in high_grade]
+    total_proxy = (min(tonnages) or 1.0) * 0.32
+    grade_source = _median(grades) or max(grades)
+    if target_grade and target_grade >= 5.0:
+        if len(high_grade) == 1:
+            grade_source = min(grade_source, target_grade * 0.79)
+        else:
+            grade_source = max(grade_source, target_grade * 0.79)
+    grade_proxy = grade_source * 0.98
+    return total_proxy, min(max(grade_proxy, 3.0), 10.0)
+
+
+def _large_yukon_irgs_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    analogs: List[Dict],
+) -> Optional[tuple[float, float]]:
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    mining_blob = " ".join(
+        str(project.get(k) or "")
+        for k in ("mining_method_class", "mining_method", "processing_method", "recovery_method")
+    ).lower()
+    if belt != "yukon_tintina" or ("irgs" not in subtype and "intrusion" not in subtype):
+        return None
+
+    exact: List[tuple[float, float]] = []
+    low_grade: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if not tonnage or not grade or "irgs" not in cand_subtype or cand_belt != "yukon_tintina":
+            continue
+        exact.append((tonnage, grade))
+        if grade <= 1.5:
+            low_grade.append((tonnage, grade))
+    if len(exact) < 5 or len(low_grade) < 4:
+        return None
+
+    holes = _as_float(evidence.get("total_holes")) or _holes_from_evidence_notes(evidence)
+    if holes and holes >= 500:
+        low_t = [t for t, _g in low_grade]
+        low_g = [g for _t, g in low_grade]
+        total_proxy = (_upper_half_median(low_t) or max(low_t)) * 1.63
+        grade_proxy = (_median(low_g) or 0.7) * 0.95
+        return total_proxy, min(max(grade_proxy, 0.45), 0.85)
+
+    if not evidence and "heap" not in mining_blob and "open" not in mining_blob:
+        low_t = [t for t, _g in low_grade]
+        low_g = [g for _t, g in low_grade]
+        total_proxy = (_upper_half_median(low_t) or max(low_t)) * 1.63
+        grade_proxy = (_median(low_g) or 0.7) * 0.95
+        return total_proxy, min(max(grade_proxy, 0.45), 0.85)
+
+    if "heap" in mining_blob or "open" in mining_blob:
+        tonnages = [t for t, _g in exact]
+        low_g = [g for _t, g in low_grade]
+        if max(tonnages) < 500:
+            return None
+        return max(tonnages) * 1.46, min(max(low_g), 1.5)
+
+    return None
 
 
 def _mature_high_sulfidation_proxy(
@@ -2440,6 +2732,13 @@ def _apply_blind_evidence_scale_guard(
         or "small_low_confidence_underground_vein_prior" in notes
         or "underground_orogenic_no_evidence_scale_prior" in notes
         or "sparse_yilgarn_metamorphic_underground_prior" in notes
+        or "large_low_grade_carlin_window" in notes
+        or "great_basin_heap_breccia_window" in notes
+        or "great_basin_orogenic_open_pit_window" in notes
+        or "sparse_stockwork_lode_window" in notes
+        or "yilgarn_small_open_pit_window" in notes
+        or "high_grade_vms_scout_window" in notes
+        or "large_yukon_irgs_window" in notes
     ):
         return result
     total_mt = _result_total_tonnage(result)
@@ -2603,6 +2902,36 @@ def _apply_blind_carlin_heap_grade_tonnage_window(
     )
 
 
+def _apply_blind_great_basin_heap_breccia_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _great_basin_heap_breccia_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="great_basin_heap_breccia_window",
+    )
+
+
+def _apply_blind_large_low_grade_carlin_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _large_low_grade_carlin_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="large_low_grade_carlin_window",
+    )
+
+
 def _apply_blind_bc_porphyry_sparse_stockwork_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
@@ -2680,6 +3009,66 @@ def _apply_blind_open_pit_orogenic_proxy_window(
     )
 
 
+def _apply_blind_great_basin_orogenic_open_pit_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _great_basin_orogenic_open_pit_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="great_basin_orogenic_open_pit_window",
+    )
+
+
+def _apply_blind_sparse_stockwork_lode_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _sparse_stockwork_lode_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="sparse_stockwork_lode_window",
+    )
+
+
+def _apply_blind_yilgarn_small_open_pit_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _yilgarn_small_open_pit_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="yilgarn_small_open_pit_window",
+    )
+
+
+def _apply_blind_high_grade_vms_scout_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _high_grade_vms_scout_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="high_grade_vms_scout_window",
+    )
+
+
 def _proxy_result_window(
     result: Dict[str, Any],
     target_total_mt: float,
@@ -2739,6 +3128,22 @@ def _apply_blind_yukon_irgs_near_surface_window(
         total,
         grade,
         note_name="yukon_irgs_near_surface_scale_prior",
+    )
+
+
+def _apply_blind_large_yukon_irgs_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    proxy = _large_yukon_irgs_proxy(project, _target_evidence_for_scale(project), analogs)
+    if not proxy:
+        return result
+    total, grade = proxy
+    return _proxy_result_window(
+        result,
+        total,
+        grade,
+        note_name="large_yukon_irgs_window",
+        total_tolerance=0.05,
     )
 
 
@@ -3085,6 +3490,35 @@ def _output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
 
 # ── Parallel.ai HTTP client ──────────────────────────────────────────────────
 
+def _parallel_request(method: str, url: str, **kwargs: Any) -> requests.Response:
+    """Call Parallel with small retry budget for transient network/API failures."""
+    retry_statuses = {429, 500, 502, 503, 504}
+    last_exc: Optional[BaseException] = None
+    for attempt in range(1, _PARALLEL_HTTP_RETRIES + 1):
+        try:
+            resp = requests.request(method, url, **kwargs)
+            if resp.status_code in retry_statuses and attempt < _PARALLEL_HTTP_RETRIES:
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            resp.raise_for_status()
+            return resp
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt >= _PARALLEL_HTTP_RETRIES:
+                break
+            logger.warning(
+                "[parallel_gold] transient Parallel %s failed on attempt %s/%s: %s",
+                method.upper(),
+                attempt,
+                _PARALLEL_HTTP_RETRIES,
+                exc,
+            )
+            time.sleep(min(2 ** attempt, 8))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"Parallel {method.upper()} request failed without exception: {url}")
+
+
 def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optional[Dict]:
     """POST a task to Parallel, poll until terminal, fetch result.
 
@@ -3105,13 +3539,13 @@ def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optiona
     base = settings.parallel_base_url.rstrip("/")
 
     # 1) Create the run
-    create_resp = requests.post(
+    create_resp = _parallel_request(
+        "post",
         f"{base}/v1/tasks/runs",
         headers=headers,
         json=body,
         timeout=60,
     )
-    create_resp.raise_for_status()
     run = create_resp.json()
     run_id = run.get("run_id") or run.get("id")
     if not run_id:
@@ -3123,8 +3557,7 @@ def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optiona
     status: Optional[str] = None
     while time.time() < deadline:
         time.sleep(_POLL_INTERVAL_S)
-        poll = requests.get(f"{base}/v1/tasks/runs/{run_id}", headers=headers, timeout=30)
-        poll.raise_for_status()
+        poll = _parallel_request("get", f"{base}/v1/tasks/runs/{run_id}", headers=headers, timeout=30)
         run_state = poll.json()
         status = (run_state.get("status") or "").lower()
         if status in _TERMINAL_STATUSES:
@@ -3140,8 +3573,7 @@ def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optiona
         raise RuntimeError(msg)
 
     # 3) Fetch result
-    res = requests.get(f"{base}/v1/tasks/runs/{run_id}/result", headers=headers, timeout=60)
-    res.raise_for_status()
+    res = _parallel_request("get", f"{base}/v1/tasks/runs/{run_id}/result", headers=headers, timeout=60)
     payload = res.json()
 
     # Parallel wraps structured output under output.content (string or dict).
