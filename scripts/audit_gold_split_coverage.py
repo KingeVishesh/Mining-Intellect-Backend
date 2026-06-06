@@ -16,8 +16,11 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
+import re
 import sys
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -86,11 +89,90 @@ def _missing(row: Dict[str, Any], fields: Iterable[str]) -> List[str]:
     return [field for field in fields if not _present(row.get(field))]
 
 
-def classify_gold_project(row: Dict[str, Any]) -> Dict[str, Any]:
+def _project_name_key(name: Any) -> str:
+    return re.sub(r"\s+", " ", str(name or "").strip().lower())
+
+
+def project_name_to_id_map(rows: Iterable[Dict[str, Any]]) -> Dict[str, str]:
+    return {
+        _project_name_key(row.get("name")): str(row.get("id"))
+        for row in rows
+        if row.get("id") and row.get("name")
+    }
+
+
+def _blank_backtest_status() -> Dict[str, Any]:
+    return {
+        "backtest_status": "not_backtest_eligible",
+        "backtest_requested_count": 0,
+        "backtest_evaluated_count": 0,
+        "backtest_pass_count": 0,
+        "backtest_miss_count": 0,
+        "backtest_error_count": 0,
+        "backtest_last_result": None,
+        "backtest_last_error_class": None,
+        "backtest_last_batch_id": None,
+        "backtest_last_artifact": None,
+    }
+
+
+def _history_for(history: Dict[str, Any], project_id: Any) -> Dict[str, Any]:
+    if not project_id:
+        return {}
+    return history.get(str(project_id), {})
+
+
+def _backtest_status_for_project(
+    row: Dict[str, Any],
+    *,
+    has_official_split: bool,
+    history: Dict[str, Any],
+) -> Dict[str, Any]:
+    status = _blank_backtest_status()
+    if not has_official_split:
+        return status
+
+    status["backtest_status"] = "ready_untested"
+    project_history = _history_for(history, row.get("id"))
+    if not project_history:
+        return status
+
+    status.update({
+        "backtest_requested_count": project_history.get("requested_count", 0),
+        "backtest_evaluated_count": project_history.get("evaluated_count", 0),
+        "backtest_pass_count": project_history.get("pass_count", 0),
+        "backtest_miss_count": project_history.get("miss_count", 0),
+        "backtest_error_count": project_history.get("error_count", 0),
+        "backtest_last_result": project_history.get("last_result"),
+        "backtest_last_error_class": project_history.get("last_error_class"),
+        "backtest_last_batch_id": project_history.get("last_batch_id"),
+        "backtest_last_artifact": project_history.get("last_artifact"),
+    })
+    last_result = project_history.get("last_result")
+    last_error_class = str(project_history.get("last_error_class") or "")
+    if last_result == "pass":
+        status["backtest_status"] = "validated_pass"
+    elif last_result == "miss":
+        status["backtest_status"] = "needs_accuracy_review"
+    elif last_result == "error" and last_error_class.startswith("parallel_quota"):
+        status["backtest_status"] = "retry_after_quota"
+    elif last_result == "error":
+        status["backtest_status"] = "retry_after_error"
+    elif project_history.get("requested_count"):
+        status["backtest_status"] = "requested_not_evaluated"
+    return status
+
+
+def classify_gold_project(
+    row: Dict[str, Any],
+    *,
+    backtest_history: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     has_official_split = _has_all(row, OFFICIAL_SPLIT_FIELDS)
     has_model_split = _has_all(row, MODEL_SPLIT_FIELDS)
     has_total_resource = _has_all(row, TOTAL_RESOURCE_FIELDS)
     has_any_split = has_official_split or has_model_split
+    backtest_history = backtest_history or {}
 
     if has_official_split:
         primary_status = "official_split_ready"
@@ -105,7 +187,7 @@ def classify_gold_project(row: Dict[str, Any]) -> Dict[str, Any]:
         primary_status = "needs_model_run"
         next_action = "run_blind_model_after_accuracy_gate"
 
-    return {
+    classified = {
         "project_id": row.get("id"),
         "name": row.get("name"),
         "primary_status": primary_status,
@@ -124,6 +206,12 @@ def classify_gold_project(row: Dict[str, Any]) -> Dict[str, Any]:
         "resource_category": row.get("resource_category"),
         "resource_vintage_year": row.get("resource_vintage_year"),
     }
+    classified.update(_backtest_status_for_project(
+        row,
+        has_official_split=has_official_split,
+        history=backtest_history,
+    ))
+    return classified
 
 
 def fetch_gold_projects() -> List[Dict[str, Any]]:
@@ -147,8 +235,160 @@ def fetch_gold_projects() -> List[Dict[str, Any]]:
     return rows
 
 
-def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    classified = [classify_gold_project(row) for row in rows]
+def _leaderboard_name_map(payload: Dict[str, Any]) -> Dict[str, str]:
+    target_selection = payload.get("target_selection") or {}
+    project_ids = target_selection.get("project_ids") or []
+    project_names = target_selection.get("project_names") or []
+    return {
+        _project_name_key(name): str(project_id)
+        for project_id, name in zip_longest(project_ids, project_names)
+        if project_id and name
+    }
+
+
+def _project_id_from_artifact_row(
+    row: Dict[str, Any],
+    name_map: Dict[str, str],
+    project_name_to_id: Dict[str, str],
+) -> Optional[str]:
+    project_id = row.get("project_id")
+    if project_id:
+        return str(project_id)
+    project_name = row.get("project")
+    if project_name:
+        key = _project_name_key(project_name)
+        return name_map.get(key) or project_name_to_id.get(key)
+    return None
+
+
+def _touch_history(
+    history: Dict[str, Dict[str, Any]],
+    project_id: str,
+    *,
+    project_name: Optional[str],
+    artifact: str,
+    batch_id: Optional[str],
+) -> Dict[str, Any]:
+    row = history.setdefault(project_id, {
+        "project_id": project_id,
+        "project_name": project_name,
+        "requested_count": 0,
+        "evaluated_count": 0,
+        "pass_count": 0,
+        "miss_count": 0,
+        "error_count": 0,
+        "last_result": None,
+        "last_error_class": None,
+        "last_batch_id": None,
+        "last_artifact": None,
+    })
+    if project_name and not row.get("project_name"):
+        row["project_name"] = project_name
+    row["last_batch_id"] = batch_id
+    row["last_artifact"] = artifact
+    return row
+
+
+def load_backtest_history(
+    paths: Iterable[Path],
+    *,
+    project_name_to_id: Optional[Dict[str, str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    history: Dict[str, Dict[str, Any]] = {}
+    project_name_to_id = project_name_to_id or {}
+    for path in paths:
+        artifact = str(path)
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        batch_id = payload.get("batch_id")
+        target_selection = payload.get("target_selection") or {}
+        project_ids = target_selection.get("project_ids") or []
+        project_names = target_selection.get("project_names") or []
+        name_map = _leaderboard_name_map(payload)
+
+        for project_id, project_name in zip_longest(project_ids, project_names):
+            if not project_id:
+                continue
+            row = _touch_history(
+                history,
+                str(project_id),
+                project_name=str(project_name) if project_name else None,
+                artifact=artifact,
+                batch_id=batch_id,
+            )
+            row["requested_count"] += 1
+
+        for result in payload.get("leaderboard") or []:
+            project_id = _project_id_from_artifact_row(result, name_map, project_name_to_id)
+            if not project_id:
+                continue
+            row = _touch_history(
+                history,
+                project_id,
+                project_name=result.get("project"),
+                artifact=artifact,
+                batch_id=batch_id,
+            )
+            row["evaluated_count"] += 1
+            if result.get("pass") is True:
+                row["pass_count"] += 1
+                row["last_result"] = "pass"
+            else:
+                row["miss_count"] += 1
+                row["last_result"] = "miss"
+            row["last_error_class"] = None
+
+        for error in payload.get("errors") or []:
+            project_id = _project_id_from_artifact_row(error, name_map, project_name_to_id)
+            if not project_id:
+                continue
+            row = _touch_history(
+                history,
+                project_id,
+                project_name=error.get("project"),
+                artifact=artifact,
+                batch_id=batch_id,
+            )
+            row["error_count"] += 1
+            row["last_result"] = "error"
+            row["last_error_class"] = error.get("error_class")
+
+    return history
+
+
+def resolve_artifact_paths(patterns: Iterable[str]) -> List[Path]:
+    paths: List[Path] = []
+    seen = set()
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if not matches:
+            matches = [pattern]
+        for match in matches:
+            path = Path(match)
+            if not path.exists() or not path.is_file():
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            paths.append(path)
+    return sorted(paths, key=lambda path: (path.stat().st_mtime, str(path)))
+
+
+def summarize(
+    rows: List[Dict[str, Any]],
+    *,
+    backtest_history: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    classified = [
+        classify_gold_project(row, backtest_history=backtest_history)
+        for row in rows
+    ]
     summary = {
         "gold_projects": len(classified),
         "official_split_ready": sum(1 for row in classified if row["has_official_split"]),
@@ -160,6 +400,21 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             1 for row in classified if row["primary_status"] == "needs_official_split_extraction"
         ),
         "needs_model_run": sum(1 for row in classified if row["primary_status"] == "needs_model_run"),
+        "backtest_ready_untested": sum(
+            1 for row in classified if row["backtest_status"] == "ready_untested"
+        ),
+        "backtest_retry_after_quota": sum(
+            1 for row in classified if row["backtest_status"] == "retry_after_quota"
+        ),
+        "backtest_retry_after_error": sum(
+            1 for row in classified if row["backtest_status"] == "retry_after_error"
+        ),
+        "backtest_needs_accuracy_review": sum(
+            1 for row in classified if row["backtest_status"] == "needs_accuracy_review"
+        ),
+        "backtest_validated_pass": sum(
+            1 for row in classified if row["backtest_status"] == "validated_pass"
+        ),
     }
     return {"summary": summary, "projects": classified}
 
@@ -176,8 +431,37 @@ def _print_summary(payload: Dict[str, Any]) -> None:
         "missing_any_split",
         "needs_official_split_extraction",
         "needs_model_run",
+        "backtest_ready_untested",
+        "backtest_retry_after_quota",
+        "backtest_retry_after_error",
+        "backtest_needs_accuracy_review",
+        "backtest_validated_pass",
     ):
         print(f"  {key:34s} {summary[key]}")
+
+
+def _print_queue_report(payload: Dict[str, Any]) -> None:
+    print()
+    print("Gold fill/backtest queue")
+    queue_order = (
+        ("retry_after_quota", "resume quota-blocked blind backtests"),
+        ("retry_after_error", "retry blind backtests after non-quota errors"),
+        ("needs_accuracy_review", "fix model/analog lessons from misses"),
+        ("ready_untested", "strict blind backtest candidates"),
+        ("needs_official_split_extraction", "extract official M&I/Inferred truth"),
+        ("needs_model_run", "run blind model after accuracy gate"),
+    )
+    for status, label in queue_order:
+        if status in {"needs_official_split_extraction", "needs_model_run"}:
+            rows = [row for row in payload["projects"] if row["primary_status"] == status]
+        else:
+            rows = [row for row in payload["projects"] if row["backtest_status"] == status]
+        print(f"  {status:32s} {len(rows):4d}  {label}")
+        for row in rows[:10]:
+            suffix = ""
+            if row.get("backtest_last_batch_id"):
+                suffix = f" | last_batch={row['backtest_last_batch_id']}"
+            print(f"    - {row['project_id']} | {row['name']}{suffix}")
 
 
 def main() -> int:
@@ -196,10 +480,52 @@ def main() -> int:
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--json-out", default=None)
+    parser.add_argument(
+        "--backtest-artifacts",
+        action="append",
+        default=[],
+        help="Leaderboard artifact path or glob. Repeatable.",
+    )
+    parser.add_argument(
+        "--backtest-status",
+        choices=(
+            "ready_untested",
+            "validated_pass",
+            "needs_accuracy_review",
+            "retry_after_quota",
+            "retry_after_error",
+            "requested_not_evaluated",
+        ),
+        default=None,
+        help="Print only projects matching this backtest queue status.",
+    )
+    parser.add_argument(
+        "--queue-report",
+        action="store_true",
+        help="Print the all-project fill/backtest queues.",
+    )
     args = parser.parse_args()
 
-    payload = summarize(fetch_gold_projects())
+    gold_projects = fetch_gold_projects()
+    artifact_paths = resolve_artifact_paths(args.backtest_artifacts)
+    backtest_history = (
+        load_backtest_history(
+            artifact_paths,
+            project_name_to_id=project_name_to_id_map(gold_projects),
+        )
+        if artifact_paths
+        else None
+    )
+    payload = summarize(gold_projects, backtest_history=backtest_history)
+    if artifact_paths:
+        payload["backtest_artifacts"] = [str(path) for path in artifact_paths]
+        payload["backtest_history_project_count"] = len(backtest_history or {})
     _print_summary(payload)
+    if artifact_paths:
+        print(f"  backtest_artifacts_loaded          {len(artifact_paths)}")
+        print(f"  backtest_history_projects         {len(backtest_history or {})}")
+    if args.queue_report:
+        _print_queue_report(payload)
 
     projects = payload["projects"]
     if args.status:
@@ -217,6 +543,19 @@ def main() -> int:
             print(
                 f"{row['project_id']} | {row['name']} | "
                 f"T={row['tonnage_mt']} G={row['grade_value']} | {row['next_action']}"
+            )
+    if args.backtest_status:
+        projects = [row for row in payload["projects"] if row["backtest_status"] == args.backtest_status]
+        if args.limit:
+            projects = projects[: args.limit]
+        print()
+        print(f"{args.backtest_status}: {len(projects)} shown")
+        for row in projects:
+            print(
+                f"{row['project_id']} | {row['name']} | "
+                f"last={row['backtest_last_result']} "
+                f"error={row['backtest_last_error_class']} "
+                f"batch={row['backtest_last_batch_id']}"
             )
 
     if args.json_out:
