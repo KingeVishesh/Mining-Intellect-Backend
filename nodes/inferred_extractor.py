@@ -19,6 +19,7 @@ Shape returned by `extract_inferred_breakdown()`:
       "inferred_grade":      float | None,    # Inferred-bucket grade (native unit)
       "mi_tonnage_mt":       float | None,    # M&I total for cross-validation
       "mi_grade":            float | None,
+      "mi_category_basis":    str | None,      # measured_plus_indicated, etc.
       "as_of_year":          int | None,      # year of the MRE/PEA cited
       "source_url":          str | None,
       "confidence":          "high" | "medium" | "low",
@@ -120,6 +121,46 @@ def _consensus(
     return float(primary), "low", rd
 
 
+def _normalise_mi_basis(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    key = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    key = key.replace("_+_", "_plus_").replace("+", "plus")
+    aliases = {
+        "m_i": "measured_plus_indicated",
+        "m&i": "measured_plus_indicated",
+        "measured_indicated": "measured_plus_indicated",
+        "measured_and_indicated": "measured_plus_indicated",
+        "measured_plus_indicated": "measured_plus_indicated",
+        "indicated": "indicated_only",
+        "indicated_only": "indicated_only",
+        "measured": "measured_only",
+        "measured_only": "measured_only",
+        "unknown": "unknown",
+    }
+    return aliases.get(key, key if key else None)
+
+
+def _consensus_mi_basis(pass_a: Dict, pass_b: Dict) -> Optional[str]:
+    bases = [
+        basis
+        for basis in (
+            _normalise_mi_basis(pass_a.get("mi_category_basis")),
+            _normalise_mi_basis(pass_b.get("mi_category_basis")),
+        )
+        if basis
+    ]
+    if not bases:
+        return None
+    if "measured_plus_indicated" in bases:
+        return "measured_plus_indicated"
+    if "indicated_only" in bases:
+        return "indicated_only"
+    if "measured_only" in bases:
+        return "measured_only"
+    return "unknown"
+
+
 def _single_query(
     api_key: str,
     query: str,
@@ -136,6 +177,17 @@ def _single_query(
             "properties": {
                 "mi_tonnage_mt":       {"type": ["number", "null"]},
                 "mi_grade":            {"type": ["number", "null"]},
+                "mi_category_basis":    {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Basis for mi_tonnage_mt/mi_grade. Use "
+                        "measured_plus_indicated only when the source reports "
+                        "a combined M&I row or you explicitly summed Measured "
+                        "+ Indicated tonnage and tonnage-weighted the grade. "
+                        "Use measured_only if the value is only a standalone "
+                        "Measured row."
+                    ),
+                },
                 "inferred_tonnage_mt": {"type": ["number", "null"]},
                 "inferred_grade":      {"type": ["number", "null"]},
                 "as_of_year":          {"type": ["integer", "null"]},
@@ -211,6 +263,9 @@ def extract_inferred_breakdown(
         f"(a) the Measured + Indicated (M&I) tonnage in Mt and grade in g/t "
         f"(for Au/Ag/PGM) or % (for Cu/Zn/Pb/Ni/Mo/U), and "
         f"(b) the Inferred tonnage in Mt and grade in same units. "
+        f"If Measured and Indicated are shown as separate rows, add their "
+        f"tonnages and calculate a tonnage-weighted grade; never use only "
+        f"the standalone Measured row as M&I. "
         f"Cite the source URL and the publication year. "
         f"If only Inferred is reported (early-stage) or only M&I/Reserves "
         f"(near-depleted producer), return null for the missing category."
@@ -221,7 +276,10 @@ def extract_inferred_breakdown(
         "EXACTLY as published in the source. Do NOT estimate, interpolate, "
         "or fabricate. Prefer the most recent annual MRE update. If you "
         "cannot find a specific figure in the source you cite, return null "
-        "for that field rather than guessing."
+        "for that field rather than guessing. For M&I, combine separate "
+        "Measured and Indicated rows into one tonnage-weighted figure. "
+        "Never treat a standalone Measured row as M&I when an Indicated row "
+        "is also present."
     )
     # ── Pass 2: technical-report-first framing ────────────────────────────
     query_b = (
@@ -238,7 +296,8 @@ def extract_inferred_breakdown(
         "figures against the source technical report. Quote tonnage in Mt "
         "(NOT kt or t) and grade in g/t for Au/Ag/PGM or % for base metals. "
         "Combine Measured and Indicated into a single M&I total weighted by "
-        "tonnage. Return null for any category not reported in the technical "
+        "tonnage. Never return only the Measured row as M&I if an Indicated "
+        "row is present. Return null for any category not reported in the technical "
         "report you cite."
     )
 
@@ -268,6 +327,7 @@ def extract_inferred_breakdown(
     source_url = (pass_b.get("source_url") or pass_a.get("source_url"))
     publisher  = (pass_b.get("publisher")  or pass_a.get("publisher"))
     as_of_year = (pass_b.get("as_of_year") or pass_a.get("as_of_year"))
+    mi_basis = _consensus_mi_basis(pass_a, pass_b)
 
     # Overall confidence is the MIN across the four fields — one
     # disagreement on any field is enough to flag the row as low confidence.
@@ -287,8 +347,12 @@ def extract_inferred_breakdown(
         "as_of_year":          as_of_year,
         "source_url":          source_url,
         "publisher":           publisher,
+        "mi_category_basis":    mi_basis,
         "confidence":          overall_conf,
         "cross_validation": {
+            "mi_category_basis":    {"pass_a": pass_a.get("mi_category_basis"),
+                                     "pass_b": pass_b.get("mi_category_basis"),
+                                     "consensus": mi_basis},
             "mi_tonnage_mt":       {"pass_a": pass_a.get("mi_tonnage_mt"),
                                     "pass_b": pass_b.get("mi_tonnage_mt"),
                                     "consensus": mi_t,
@@ -324,6 +388,16 @@ def extract_inferred_breakdown(
     ):
         if conf == "low":
             result[key] = None
+
+    if mi_basis == "measured_only":
+        result["mi_tonnage_mt"] = None
+        result["mi_grade"] = None
+        result["confidence"] = "low"
+        result["cross_validation"]["mi_category_basis"]["confidence"] = "low"
+        result["cross_validation"]["mi_category_basis"]["reason"] = (
+            "Extractor captured only a standalone Measured row, not a combined "
+            "Measured + Indicated M&I figure."
+        )
 
     # Nothing usable at all? Mark as failed.
     if (
