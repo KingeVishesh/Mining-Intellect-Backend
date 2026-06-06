@@ -59,6 +59,8 @@ PROJECT_SELECT = ",".join((
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+REVIEW_MAX_TOTAL_TONNAGE_ERR = 0.75
+REVIEW_MAX_TOTAL_GRADE_ERR = 0.75
 
 
 def _fixture_rows(names: Optional[Iterable[str]]) -> List[Dict[str, Any]]:
@@ -78,6 +80,28 @@ def _db_rows(project_ids: Iterable[str]) -> List[Dict[str, Any]]:
             continue
         rows.append(project)
     return rows
+
+
+def _audit_project_ids(paths: Iterable[Path], statuses: Optional[Iterable[str]] = None) -> set[str]:
+    wanted_statuses = {status for status in (statuses or []) if status}
+    project_ids: set[str] = set()
+    for path in paths:
+        try:
+            rows = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("Could not read audit JSON for exclusion: %s", path)
+            continue
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if wanted_statuses and row.get("status") not in wanted_statuses:
+                continue
+            project_id = row.get("project_id")
+            if project_id:
+                project_ids.add(str(project_id))
+    return project_ids
 
 
 def _fetch_gold_project_rows() -> List[Dict[str, Any]]:
@@ -186,10 +210,15 @@ def _db_gold_rows(
     randomize: bool = False,
     random_seed: Optional[str] = None,
     prioritize_candidates: bool = True,
+    exclude_project_ids: Iterable[str] = (),
 ) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     skipped: Dict[str, int] = {}
+    excluded_ids = {str(project_id) for project_id in exclude_project_ids if project_id}
     for row in _fetch_gold_project_rows():
+        if row.get("id") in excluded_ids:
+            skipped["excluded by prior audit/project id"] = skipped.get("excluded by prior audit/project id", 0) + 1
+            continue
         ok, reason = _candidate_status(
             row,
             require_known_total=require_known_total,
@@ -329,8 +358,40 @@ def _validate_against_known_total(
 def _reviewable_total_mismatch(row: Dict[str, Any], extracted: Dict[str, Any], reason: str) -> bool:
     if "differs from known total" not in reason:
         return False
+    totals = _weighted_total(
+        extracted["mi_tonnage_mt"], extracted["mi_grade"],
+        extracted["inferred_tonnage_mt"], extracted["inferred_grade"],
+    )
+    t_err = _rel_err(totals["total_tonnage_mt"], row.get("tonnage_mt"))
+    g_err = _rel_err(totals["total_grade"], row.get("grade_value"))
+    if t_err is not None and abs(t_err) > REVIEW_MAX_TOTAL_TONNAGE_ERR:
+        return False
+    if g_err is not None and abs(g_err) > REVIEW_MAX_TOTAL_GRADE_ERR:
+        return False
     relaxed_ok, _ = _validate_against_known_total(row, extracted, allow_total_mismatch=True)
     return relaxed_ok
+
+
+def _load_audit_rows(paths: Iterable[Path], statuses: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
+    wanted_statuses = {status for status in (statuses or []) if status}
+    rows: List[Dict[str, Any]] = []
+    for path in paths:
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("Could not read audit JSON: %s", path)
+            continue
+        if not isinstance(payload, list):
+            continue
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            if wanted_statuses and row.get("status") not in wanted_statuses:
+                continue
+            if not row.get("project_id") or not isinstance(row.get("extracted"), dict):
+                continue
+            rows.append(row)
+    return rows
 
 
 def _build_mre_payload(row: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
@@ -388,6 +449,12 @@ def main() -> int:
     parser.add_argument("--fixture", action="append", default=[], help="Specific fixture stem.")
     parser.add_argument("--project-id", action="append", default=[], help="Specific Supabase project ID.")
     parser.add_argument(
+        "--exclude-project-id",
+        action="append",
+        default=[],
+        help="Supabase project ID to exclude from DB candidate selection. Repeatable.",
+    )
+    parser.add_argument(
         "--db-gold",
         action="store_true",
         help="Scan Supabase gold projects missing full M&I/Inferred MRE truth.",
@@ -409,11 +476,37 @@ def main() -> int:
         help="Keep alphabetical DB candidate order instead of ranking likely full split disclosures first.",
     )
     parser.add_argument(
+        "--exclude-audit-json",
+        action="append",
+        default=[],
+        help="Previous backfill audit JSON whose project IDs should be skipped. Repeatable.",
+    )
+    parser.add_argument(
+        "--exclude-audit-status",
+        action="append",
+        default=[],
+        choices=("failed", "rejected", "review", "usable"),
+        help="Only exclude rows with this prior audit status. Defaults to all statuses.",
+    )
+    parser.add_argument(
         "--list-candidates",
         action="store_true",
         help="Print candidate rows and exit without calling Exa or writing data.",
     )
     parser.add_argument("--apply", action="store_true", help="Write verified truth to Supabase.")
+    parser.add_argument(
+        "--apply-audit-json",
+        action="append",
+        default=[],
+        help="Apply previously generated audit JSON rows instead of re-running Exa. Requires --apply.",
+    )
+    parser.add_argument(
+        "--apply-audit-status",
+        action="append",
+        default=[],
+        choices=("usable", "review"),
+        help="Audit row status to apply from --apply-audit-json. Defaults to usable only.",
+    )
     parser.add_argument("--force", action="store_true", help="Refetch even when full truth already exists.")
     parser.add_argument(
         "--allow-no-known-total",
@@ -434,7 +527,72 @@ def main() -> int:
     parser.add_argument("--json-out", default=None, help="Optional path for extraction audit JSON.")
     args = parser.parse_args()
 
+    if args.apply_audit_json:
+        if not args.apply:
+            parser.error("--apply-audit-json requires --apply")
+        statuses = args.apply_audit_status or ["usable"]
+        audit_rows = _load_audit_rows([Path(path) for path in args.apply_audit_json], statuses=statuses)
+        results: List[Dict[str, Any]] = []
+        applied = 0
+        for audit_row in audit_rows:
+            project_id = audit_row["project_id"]
+            project = supabase_ops.get_project(project_id)
+            if not project:
+                results.append({
+                    "project_id": project_id,
+                    "name": audit_row.get("name"),
+                    "status": "failed",
+                    "reason": "project not found",
+                })
+                continue
+            extracted = audit_row["extracted"]
+            extracted, unit_note = _normalise_extracted_tonnage_units(project, extracted)
+            ok, reason = _validate_against_known_total(
+                project,
+                extracted,
+                allow_total_mismatch=args.allow_total_mismatch,
+            )
+            if unit_note:
+                reason = f"{unit_note}; {reason}"
+            if not ok:
+                results.append({
+                    "project_id": project_id,
+                    "name": project.get("name") or audit_row.get("name"),
+                    "status": "rejected",
+                    "reason": reason,
+                    "extracted": extracted,
+                })
+                logger.warning("AUDIT APPLY rejected %s: %s", project.get("name"), reason)
+                continue
+            payload = _build_mre_payload(project, extracted)
+            supabase_ops.save_mre_run_if_changed(project_id, payload)
+            supabase_ops.update_project_mre_mirror(project_id, payload)
+            applied += 1
+            results.append({
+                "project_id": project_id,
+                "name": project.get("name") or audit_row.get("name"),
+                "status": "applied",
+                "reason": reason,
+                "extracted": extracted,
+            })
+            logger.info("AUDIT APPLY wrote truth to %s (%s)", project.get("name"), project_id)
+        if args.json_out:
+            out_path = Path(args.json_out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
+            logger.info("Wrote audit apply JSON: %s", out_path)
+        logger.info("Done audit apply: applied=%s selected_rows=%s", applied, len(audit_rows))
+        return 0
+
     rows: List[Dict[str, Any]] = []
+    excluded_project_ids = set(args.exclude_project_id)
+    if args.exclude_audit_json:
+        excluded_project_ids.update(
+            _audit_project_ids(
+                [Path(path) for path in args.exclude_audit_json],
+                statuses=args.exclude_audit_status,
+            )
+        )
     if args.fixtures or args.fixture:
         rows.extend(_fixture_rows(args.fixture or None))
     rows.extend(_db_rows(args.project_id))
@@ -447,6 +605,7 @@ def main() -> int:
                 randomize=args.random_candidates,
                 random_seed=args.random_seed,
                 prioritize_candidates=not args.no_prioritize_candidates,
+                exclude_project_ids=excluded_project_ids,
             )
         )
     if not rows:

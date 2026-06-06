@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
 from scripts.backfill_gold_mre_truth import (
+    _audit_project_ids,
     _candidate_status,
     _candidate_priority,
+    _load_audit_rows,
     _normalise_extracted_tonnage_units,
     _reviewable_total_mismatch,
     _resource_category_kind,
@@ -80,6 +84,38 @@ def test_candidate_priority_puts_likely_full_split_rows_first():
     assert [row["id"] for row in ordered] == ["split", "unknown", "mi", "inferred"]
 
 
+def test_audit_project_ids_reads_prior_backfill_statuses(tmp_path):
+    path = tmp_path / "audit.json"
+    path.write_text(
+        json.dumps([
+            {"project_id": "p1", "status": "failed"},
+            {"project_id": "p2", "status": "review"},
+            {"project_id": None, "status": "usable"},
+            {"project_id": "p3", "status": "usable"},
+        ]),
+        encoding="utf-8",
+    )
+
+    assert _audit_project_ids([path]) == {"p1", "p2", "p3"}
+    assert _audit_project_ids([path], statuses={"review", "usable"}) == {"p2", "p3"}
+
+
+def test_load_audit_rows_filters_to_extractable_statuses(tmp_path):
+    path = tmp_path / "audit.json"
+    path.write_text(
+        json.dumps([
+            {"project_id": "p1", "status": "usable", "extracted": {"mi_tonnage_mt": 1}},
+            {"project_id": "p2", "status": "review", "extracted": {"mi_tonnage_mt": 2}},
+            {"project_id": "p3", "status": "failed"},
+            {"project_id": None, "status": "usable", "extracted": {"mi_tonnage_mt": 3}},
+        ]),
+        encoding="utf-8",
+    )
+
+    assert [row["project_id"] for row in _load_audit_rows([path])] == ["p1", "p2"]
+    assert [row["project_id"] for row in _load_audit_rows([path], statuses={"usable"})] == ["p1"]
+
+
 def test_extracted_split_must_reconcile_to_known_total():
     row = _row(tonnage_mt=30.0, grade_value=1.5)
     extracted = {
@@ -98,7 +134,7 @@ def test_extracted_split_must_reconcile_to_known_total():
 def test_extracted_split_rejects_known_total_mismatch():
     row = _row(tonnage_mt=30.0, grade_value=1.5)
     extracted = {
-        "mi_tonnage_mt": 40.0,
+        "mi_tonnage_mt": 25.0,
         "mi_grade": 1.8,
         "inferred_tonnage_mt": 20.0,
         "inferred_grade": 1.35,
@@ -113,7 +149,7 @@ def test_extracted_split_rejects_known_total_mismatch():
 def test_complete_sane_split_with_total_mismatch_is_reviewable():
     row = _row(tonnage_mt=30.0, grade_value=1.5)
     extracted = {
-        "mi_tonnage_mt": 40.0,
+        "mi_tonnage_mt": 25.0,
         "mi_grade": 1.8,
         "inferred_tonnage_mt": 20.0,
         "inferred_grade": 1.35,
@@ -122,6 +158,20 @@ def test_complete_sane_split_with_total_mismatch_is_reviewable():
 
     assert ok is False
     assert _reviewable_total_mismatch(row, extracted, reason)
+
+
+def test_extreme_total_mismatch_is_not_reviewable():
+    row = _row(tonnage_mt=4.0, grade_value=1.2)
+    extracted = {
+        "mi_tonnage_mt": 600.0,
+        "mi_grade": 0.4,
+        "inferred_tonnage_mt": 300.0,
+        "inferred_grade": 0.4,
+    }
+    ok, reason = _validate_against_known_total(row, extracted)
+
+    assert ok is False
+    assert not _reviewable_total_mismatch(row, extracted, reason)
 
 
 def test_extracted_split_normalises_kt_tonnage_only_when_total_matches():
