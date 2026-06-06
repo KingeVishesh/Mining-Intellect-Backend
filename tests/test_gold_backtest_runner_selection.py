@@ -15,6 +15,7 @@ from scripts.run_parallel_gold_backtest import (
     _merge_library_analogs,
     _parse_loose_date,
     _resume_project_ids_from_leaderboard,
+    _select_audit_target_rows,
     _select_truth_target_rows,
     _supplement_with_library_analogs,
 )
@@ -76,6 +77,74 @@ def test_default_truth_target_selection_preserves_available_order_after_exclusio
     )
 
     assert [row["id"] for row in selected] == ["p1", "p3"]
+
+
+def test_audit_target_selection_uses_queue_statuses_and_truth_gate():
+    rows = [
+        {
+            "project_id": "p1",
+            "name": "Validated",
+            "has_official_split": True,
+            "backtest_status": "validated_pass",
+        },
+        {
+            "project_id": "p2",
+            "name": "Quota",
+            "has_official_split": True,
+            "backtest_status": "retry_after_quota",
+        },
+        {
+            "project_id": "p3",
+            "name": "Miss",
+            "has_official_split": True,
+            "backtest_status": "needs_accuracy_review",
+        },
+        {
+            "project_id": "p4",
+            "name": "No Truth",
+            "has_official_split": False,
+            "backtest_status": "retry_after_quota",
+        },
+    ]
+
+    selected = _select_audit_target_rows(
+        rows,
+        statuses={"retry_after_quota", "needs_accuracy_review"},
+        limit=10,
+        exclude_project_ids={"p2"},
+    )
+
+    assert [row["project_id"] for row in selected] == ["p3"]
+
+
+def test_audit_target_selection_is_seeded():
+    rows = [
+        {
+            "project_id": f"p{i}",
+            "name": f"Project {i}",
+            "has_official_split": True,
+            "backtest_status": "retry_after_quota",
+        }
+        for i in range(8)
+    ]
+
+    first = _select_audit_target_rows(
+        rows,
+        statuses={"retry_after_quota"},
+        limit=4,
+        random_seed="queue-1",
+        randomize=True,
+    )
+    second = _select_audit_target_rows(
+        rows,
+        statuses={"retry_after_quota"},
+        limit=4,
+        random_seed="queue-1",
+        randomize=True,
+    )
+
+    assert [row["project_id"] for row in first] == [row["project_id"] for row in second]
+    assert len(first) == 4
 
 
 def test_parallel_quota_errors_are_classified_without_retrying_as_transient():

@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import requests
 
@@ -439,6 +439,81 @@ def _select_truth_target_rows(
         eligible = sorted(eligible, key=lambda row: ((row.get("name") or "").lower(), row["id"]))
         random.Random(random_seed).shuffle(eligible)
     return eligible[:limit]
+
+
+def _select_audit_target_rows(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    statuses: Iterable[str],
+    limit: int,
+    exclude_project_ids: Iterable[str] = (),
+    random_seed: Optional[str] = None,
+    randomize: bool = False,
+) -> List[Dict[str, Any]]:
+    status_set = {str(status) for status in statuses if status}
+    excluded = {pid for pid in exclude_project_ids if pid}
+    eligible = [
+        row
+        for row in rows
+        if row.get("project_id")
+        and row["project_id"] not in excluded
+        and row.get("has_official_split")
+        and row.get("backtest_status") in status_set
+    ]
+    eligible = sorted(eligible, key=lambda row: ((row.get("name") or "").lower(), row["project_id"]))
+    if randomize:
+        random.Random(random_seed).shuffle(eligible)
+    return eligible[:limit]
+
+
+def _audit_targets(
+    path: Path,
+    *,
+    statuses: Iterable[str],
+    limit: int,
+    exclude_project_ids: Iterable[str] = (),
+    random_seed: Optional[str] = None,
+    randomize: bool = False,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = payload.get("projects") or []
+    selected = _select_audit_target_rows(
+        rows,
+        statuses=statuses,
+        limit=limit,
+        exclude_project_ids=exclude_project_ids,
+        random_seed=random_seed,
+        randomize=randomize,
+    )
+    status_set = {str(status) for status in statuses if status}
+    excluded = {pid for pid in exclude_project_ids if pid}
+    eligible_count = sum(
+        1
+        for row in rows
+        if row.get("project_id")
+        and row["project_id"] not in excluded
+        and row.get("has_official_split")
+        and row.get("backtest_status") in status_set
+    )
+    return (
+        [
+            {
+                "project_id": row["project_id"],
+                "fixture": None,
+                "fixture_name": None,
+                "project_name": row.get("name"),
+                "audit_backtest_status": row.get("backtest_status"),
+            }
+            for row in selected
+        ],
+        {
+            "audit_json": str(path),
+            "requested_statuses": sorted(status_set),
+            "eligible_count": eligible_count,
+            "selected_count": len(selected),
+            "excluded_project_count": len(excluded),
+        },
+    )
 
 
 def _db_truth_targets(
@@ -1196,6 +1271,36 @@ def main() -> int:
         help="Select this many random truth-backed gold projects from Supabase.",
     )
     parser.add_argument(
+        "--audit-json",
+        default=None,
+        help=(
+            "Gold split/backtest audit JSON to select queued targets from, "
+            "for example artifacts/gold_project_fill_queue_after_*.json."
+        ),
+    )
+    parser.add_argument(
+        "--audit-targets",
+        type=int,
+        default=0,
+        help="Select this many queued targets from --audit-json.",
+    )
+    parser.add_argument(
+        "--audit-backtest-status",
+        action="append",
+        choices=(
+            "ready_untested",
+            "retry_after_quota",
+            "retry_after_error",
+            "needs_accuracy_review",
+            "validated_pass",
+        ),
+        default=[],
+        help=(
+            "Backtest queue status to include when selecting --audit-targets. "
+            "Repeatable. Defaults to retry_after_quota and needs_accuracy_review."
+        ),
+    )
+    parser.add_argument(
         "--random-seed",
         default=None,
         help="Seed for --random-targets so production can rerun the same holdout.",
@@ -1290,6 +1395,7 @@ def main() -> int:
     excluded_project_ids = set(args.exclude_project_id)
     excluded_project_ids.update(_run_project_ids(args.exclude_run_id))
     selection_pool_summary: Optional[Dict[str, int]] = None
+    audit_selection_summary: Optional[Dict[str, Any]] = None
     try:
         selection_pool_summary = _db_truth_pool_summary(excluded_project_ids)
     except Exception:
@@ -1311,6 +1417,28 @@ def main() -> int:
             {"project_id": pid, "fixture": None, "fixture_name": None}
             for pid in resume_project_ids
         )
+    if args.audit_targets:
+        if not args.audit_json:
+            parser.error("--audit-targets requires --audit-json")
+        audit_statuses = args.audit_backtest_status or [
+            "retry_after_quota",
+            "needs_accuracy_review",
+        ]
+        already_selected = {target["project_id"] for target in targets}
+        audit_targets, audit_selection_summary = _audit_targets(
+            Path(args.audit_json),
+            statuses=audit_statuses,
+            limit=args.audit_targets,
+            exclude_project_ids=excluded_project_ids | already_selected,
+            random_seed=args.random_seed,
+            randomize=True,
+        )
+        print(
+            f"[parallel-gold-backtest] audit selection {Path(args.audit_json).name}: "
+            f"{len(audit_targets)} target(s) from statuses={','.join(audit_statuses)}",
+            flush=True,
+        )
+        targets.extend(audit_targets)
     if args.fixture:
         targets.extend(_fixture_targets(args.fixture, allow_no_truth=args.allow_no_truth))
     if args.fixture_first:
@@ -1379,9 +1507,19 @@ def main() -> int:
             )
         if args.random_targets:
             print(f"# random_targets={args.random_targets} random_seed={args.random_seed}")
+        if audit_selection_summary:
+            print(
+                "# audit_targets="
+                f"{audit_selection_summary['selected_count']} "
+                "audit_eligible="
+                f"{audit_selection_summary['eligible_count']} "
+                "audit_statuses="
+                f"{','.join(audit_selection_summary['requested_statuses'])}"
+            )
         for target in targets:
             project = supabase_ops.get_project(target["project_id"])
-            print(f"{target['project_id']} | {project.get('name') if project else '?'}")
+            status = f" | {target.get('audit_backtest_status')}" if target.get("audit_backtest_status") else ""
+            print(f"{target['project_id']} | {project.get('name') if project else '?'}{status}")
         return 0
 
     batch_id = args.batch_id or f"gold_blind_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
@@ -1552,10 +1690,12 @@ def main() -> int:
             "attempted_count": sum(1 for r in results if (r.get("error_class") or "") != "parallel_quota_skipped"),
             "quota_limited": quota_limited,
             "truth_pool_summary": selection_pool_summary,
+            "audit_selection_summary": audit_selection_summary,
             "selected_targets": [
                 {
                     "project_id": target["project_id"],
-                    "project_name": result_name_by_id.get(target["project_id"]),
+                    "project_name": result_name_by_id.get(target["project_id"]) or target.get("project_name"),
+                    "audit_backtest_status": target.get("audit_backtest_status"),
                 }
                 for target in targets
             ],
@@ -1567,8 +1707,12 @@ def main() -> int:
                 "resume_leaderboard_json": args.resume_leaderboard_json,
                 "resume_mode": args.resume_mode,
                 "project_ids": [target["project_id"] for target in targets],
-                "project_names": [result_name_by_id.get(target["project_id"]) for target in targets],
+                "project_names": [
+                    result_name_by_id.get(target["project_id"]) or target.get("project_name")
+                    for target in targets
+                ],
                 "truth_pool_summary": selection_pool_summary,
+                "audit_selection_summary": audit_selection_summary,
             },
             "leaderboard": leaderboard,
             "errors": error_rows,
