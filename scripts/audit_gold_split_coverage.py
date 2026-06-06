@@ -114,6 +114,9 @@ def _blank_backtest_status() -> Dict[str, Any]:
         "backtest_last_error_class": None,
         "backtest_last_batch_id": None,
         "backtest_last_artifact": None,
+        "backtest_last_evaluated_result": None,
+        "backtest_last_evaluated_batch_id": None,
+        "backtest_last_evaluated_artifact": None,
     }
 
 
@@ -164,10 +167,18 @@ def _backtest_status_for_project(
         "backtest_last_error_class": project_history.get("last_error_class"),
         "backtest_last_batch_id": project_history.get("last_batch_id"),
         "backtest_last_artifact": project_history.get("last_artifact"),
+        "backtest_last_evaluated_result": project_history.get("last_evaluated_result"),
+        "backtest_last_evaluated_batch_id": project_history.get("last_evaluated_batch_id"),
+        "backtest_last_evaluated_artifact": project_history.get("last_evaluated_artifact"),
     })
     last_result = project_history.get("last_result")
     last_error_class = str(project_history.get("last_error_class") or "")
-    if last_result == "pass":
+    last_evaluated_result = project_history.get("last_evaluated_result")
+    if last_evaluated_result == "pass":
+        status["backtest_status"] = "validated_pass"
+    elif last_evaluated_result == "miss":
+        status["backtest_status"] = "needs_accuracy_review"
+    elif last_result == "pass":
         status["backtest_status"] = "validated_pass"
     elif last_result == "miss":
         status["backtest_status"] = "needs_accuracy_review"
@@ -316,6 +327,9 @@ def _touch_history(
         "last_error_class": None,
         "last_batch_id": None,
         "last_artifact": None,
+        "last_evaluated_result": None,
+        "last_evaluated_batch_id": None,
+        "last_evaluated_artifact": None,
     })
     if project_name and not row.get("project_name"):
         row["project_name"] = project_name
@@ -373,9 +387,13 @@ def load_backtest_history(
             if result.get("pass") is True:
                 row["pass_count"] += 1
                 row["last_result"] = "pass"
+                row["last_evaluated_result"] = "pass"
             else:
                 row["miss_count"] += 1
                 row["last_result"] = "miss"
+                row["last_evaluated_result"] = "miss"
+            row["last_evaluated_batch_id"] = batch_id
+            row["last_evaluated_artifact"] = artifact
             row["last_error_class"] = None
 
         for error in payload.get("errors") or []:

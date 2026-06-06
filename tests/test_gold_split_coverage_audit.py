@@ -304,6 +304,53 @@ def test_backtest_history_marks_pass_and_miss_queues(tmp_path):
     ]
 
 
+def test_backtest_history_keeps_prior_evaluation_when_later_quota_blocks(tmp_path):
+    pass_artifact = tmp_path / "pass.json"
+    pass_artifact.write_text(
+        json.dumps({
+            "batch_id": "gold_blind_pass",
+            "target_selection": {"project_ids": ["p1"], "project_names": ["Alpha"]},
+            "leaderboard": [
+                {"project": "Alpha", "project_id": "p1", "pass": True},
+            ],
+            "errors": [],
+        }),
+        encoding="utf-8",
+    )
+    quota_artifact = tmp_path / "quota.json"
+    quota_artifact.write_text(
+        json.dumps({
+            "batch_id": "gold_blind_quota",
+            "target_selection": {"project_ids": ["p1"], "project_names": ["Alpha"]},
+            "leaderboard": [],
+            "errors": [
+                {"project": "Alpha", "project_id": "p1", "error_class": "parallel_quota"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    history = load_backtest_history([pass_artifact, quota_artifact])
+    payload = summarize([
+        {
+            "id": "p1",
+            "name": "Alpha",
+            "mre_mi_tonnage_mt": 6,
+            "mre_mi_grade": 1.1,
+            "mre_inferred_tonnage_mt": 4,
+            "mre_inferred_grade": 0.9,
+        },
+    ], backtest_history=history)
+    row = payload["projects"][0]
+
+    assert row["backtest_status"] == "validated_pass"
+    assert row["backtest_last_result"] == "error"
+    assert row["backtest_last_error_class"] == "parallel_quota"
+    assert row["backtest_last_evaluated_result"] == "pass"
+    assert payload["summary"]["backtest_validated_pass"] == 1
+    assert payload["summary"]["backtest_retry_after_quota"] == 0
+
+
 def test_backtest_history_resolves_legacy_rows_by_project_name(tmp_path):
     artifact = tmp_path / "legacy.json"
     artifact.write_text(

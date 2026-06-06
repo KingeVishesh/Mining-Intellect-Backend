@@ -1551,6 +1551,14 @@ def main() -> int:
             "requested_count": len(targets),
             "attempted_count": sum(1 for r in results if (r.get("error_class") or "") != "parallel_quota_skipped"),
             "quota_limited": quota_limited,
+            "truth_pool_summary": selection_pool_summary,
+            "selected_targets": [
+                {
+                    "project_id": target["project_id"],
+                    "project_name": result_name_by_id.get(target["project_id"]),
+                }
+                for target in targets
+            ],
             "target_selection": {
                 "random_targets": args.random_targets,
                 "random_seed": args.random_seed,
