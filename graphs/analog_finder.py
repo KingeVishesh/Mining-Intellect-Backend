@@ -304,9 +304,7 @@ def _build_profile(row: dict) -> dict:
     clean_deposit_type = rules_engine.sanitize_deposit_type(row.get("deposit_type"))
     row = {**row, "deposit_type": clean_deposit_type}
     material = (row.get("material") or "").strip().lower()
-    belt = row.get("tectonic_belt") or geo_taxonomy.detect_belt(
-        row.get("country"), row.get("region"), row.get("district"),
-    )
+    belt = geo_taxonomy.detect_belt_from_row(row)
     explicit_subtype = row.get("deposit_subtype") or geo_taxonomy.detect_subtype(
         row.get("deposit_type"), row.get("mineralization_style"),
         row.get("alteration_signature"), row.get("district") or row.get("location_name"),
@@ -1051,9 +1049,7 @@ def _derive_rule_inputs(project: Dict) -> tuple:
         project.get("alteration_signature"),
         project.get("district") or project.get("location_name"),
     )
-    belt = project.get("tectonic_belt") or geo_taxonomy.detect_belt(
-        project.get("country"), project.get("region"), project.get("district"),
-    )
+    belt = geo_taxonomy.detect_belt_from_row(project)
     if (
         not deposit_type
         and not deposit_subtype

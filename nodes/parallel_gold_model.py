@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from config import settings
+from nodes import geo_taxonomy
 
 logger = logging.getLogger(__name__)
 
@@ -570,7 +571,8 @@ _PROJECT_FIELDS_TO_SHOW = [
 ]
 
 _ANALOG_FIELDS_TO_SHOW = [
-    "name", "country", "deposit_type", "deposit_subtype",
+    "name", "country", "region", "district", "tectonic_belt",
+    "analog_tectonic_belt", "deposit_type", "deposit_subtype",
     "stage", "operator", "host_rock", "structural_setting",
     "tonnage_mt", "grade_value", "cutoff_grade",
     "mre_mi_tonnage_mt", "mre_mi_grade",
@@ -2378,9 +2380,7 @@ def _guiana_orogenic_open_pit_proxy(
     for analog in analogs:
         tonnage = _as_float(analog.get("tonnage_mt"))
         grade = _as_float(analog.get("grade_value"))
-        analog_belt = str(
-            analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or ""
-        ).strip().lower()
+        analog_belt = geo_taxonomy.detect_belt_from_row(analog)
         analog_subtype = str(analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
         if tonnage and grade and analog_belt == "guiana_shield" and "orogenic" in analog_subtype:
             exact.append((tonnage, grade))

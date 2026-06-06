@@ -531,7 +531,7 @@ def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
     material = project.get("material") or "gold"
     deposit_type = project.get("deposit_type")
     deposit_subtype = project.get("deposit_subtype")
-    target_belt = project.get("tectonic_belt")
+    target_belt = geo_taxonomy.detect_belt_from_row(project)
     material_key = str(material or "").strip().lower()
     blob = " ".join(
         str(project.get(k) or "")

@@ -12,7 +12,7 @@ fill the gap on rows that have only old-style freeform `deposit_type`,
 `mineralization_style`, `processing_method`, etc.
 """
 from __future__ import annotations
-from typing import Optional, Dict, List, FrozenSet
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional
 
 
 # ── Vocabularies ─────────────────────────────────────────────────────────────
@@ -1441,6 +1441,82 @@ def detect_belt(
         ]
         if len(country_belts) == 1:
             return country_belts[0]
+    return None
+
+
+_GUIANA_SHIELD_ROW_MARKERS = (
+    "guiana shield",
+    "guyana shield",
+    "cuyuni",
+    "mazaruni",
+    "cuyuni mazaruni",
+    "aurora gold",
+    "toroparu",
+    "rosebel",
+    "merian",
+    "karouni",
+    "oko west",
+    "oko gold",
+    "omai",
+)
+
+
+def _belt_slug(value: Any) -> Optional[str]:
+    slug = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return slug if slug in ALL_BELT_SLUGS else None
+
+
+def detect_belt_from_row(row: Mapping[str, Any]) -> Optional[str]:
+    """Infer a belt slug from a project/analog row.
+
+    Some analog rows carry the belt in `analog_tectonic_belt`, some in
+    `tectonic_belt`, and older/library rows only imply it through country,
+    district, region, or a well-known Guiana peer name. This keeps belt
+    matching strict while avoiding false "missing belt" treatment for good
+    analogs whose metadata is incomplete.
+    """
+    for key in ("tectonic_belt", "analog_tectonic_belt"):
+        slug = _belt_slug(row.get(key))
+        if slug:
+            return slug
+
+    inferred = detect_belt(
+        row.get("country") or row.get("analog_country"),
+        " ".join(
+            str(row.get(key) or "")
+            for key in (
+                "region", "analog_region", "state_or_province",
+                "province", "location_name",
+            )
+        ),
+        " ".join(
+            str(row.get(key) or "")
+            for key in ("district", "analog_district", "name", "analog_name")
+        ),
+    )
+    if inferred:
+        return inferred
+
+    country = _norm(row.get("country") or row.get("analog_country"))
+    guiana_countries = {
+        _norm(country_name)
+        for country_name in TECTONIC_BELTS["guiana_shield"]["countries"]
+    }
+    blob = _norm(
+        " ".join(
+            str(row.get(key) or "")
+            for key in (
+                "name", "analog_name", "country", "analog_country",
+                "region", "analog_region", "district", "analog_district",
+                "location_name",
+            )
+        )
+    )
+    if (
+        (not country or country in guiana_countries)
+        and any(marker in blob for marker in _GUIANA_SHIELD_ROW_MARKERS)
+    ):
+        return "guiana_shield"
     return None
 
 

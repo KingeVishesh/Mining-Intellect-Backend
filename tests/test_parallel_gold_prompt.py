@@ -2715,6 +2715,38 @@ def test_guiana_orogenic_open_pit_window_prioritizes_exact_belt_peers():
     assert "guiana_orogenic_open_pit_window" in scaled["methodology"]["notes"]
 
 
+def test_guiana_orogenic_open_pit_window_infers_peer_belt_when_metadata_is_sparse():
+    result = {
+        "m_and_i": {"tonnage_mt": 113.048, "grade_gpt": 1.0, "contained_moz": 3.635},
+        "inferred": {"tonnage_mt": 75.365, "grade_gpt": 1.0, "contained_moz": 2.423},
+        "anchor_used": "analog_only_fallback",
+        "methodology": {"branch": "analog_only_fallback", "notes": ""},
+        "conviction": {"level": "very_low", "rationale": ""},
+    }
+
+    scaled = _apply_blind_guiana_orogenic_open_pit_window(
+        result,
+        {
+            "name": "Omai gold mines - omai gold project",
+            "material": "Gold",
+            "tectonic_belt": "guiana_shield",
+            "deposit_type": "Shear-hosted and Intrusive-hosted",
+            "mining_method_class": "open_pit_selective",
+        },
+        [
+            {"name": "Aurora Gold Project", "country": "Guyana", "tonnage_mt": 40.6, "grade_value": 3.07, "deposit_subtype": "orogenic_general"},
+            {"name": "Toroparu Project", "district": "Upper Puruni Guyana", "tonnage_mt": 126.9, "grade_value": 1.3, "deposit_subtype": "orogenic_general"},
+            {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general", "tectonic_belt": None},
+            {"name": "Macraes", "tonnage_mt": 41.68, "grade_value": 1.0, "deposit_subtype": "orogenic_general", "tectonic_belt": None},
+        ],
+    )
+
+    total_mt = scaled["m_and_i"]["tonnage_mt"] + scaled["inferred"]["tonnage_mt"]
+    assert 144 <= total_mt <= 146
+    assert scaled["m_and_i"]["grade_gpt"] == 1.704
+    assert "guiana_orogenic_open_pit_window" in scaled["methodology"]["notes"]
+
+
 def test_large_andean_heap_window_replaces_remote_scale_cap():
     result = {
         "m_and_i": {"tonnage_mt": 153.846, "grade_gpt": 0.84, "contained_moz": 4.154},

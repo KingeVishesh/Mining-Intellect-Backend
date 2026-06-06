@@ -1378,6 +1378,22 @@ def test_great_basin_belt_includes_idaho():
     assert detect_belt("USA", "Utah", "Oquirrh Formation") == "great_basin_carlin"
 
 
+def test_guiana_peer_row_infers_belt_before_profile_routing():
+    from nodes.geo_taxonomy import detect_belt_from_row
+
+    profile = _build_profile({
+        "name": "Toroparu Project",
+        "material": "gold",
+        "deposit_type": "Shear-hosted gold",
+        "district": "Upper Puruni Guyana",
+    })
+
+    assert profile["tectonic_belt"] == "guiana_shield"
+    assert profile["deposit_subtype"] == "orogenic_general"
+    assert detect_belt_from_row({"name": "Aurora Gold Project", "country": "Guyana"}) == "guiana_shield"
+    assert detect_belt_from_row({"name": "Aurora Gold Project", "country": "Canada"}) is None
+
+
 def test_mode_compatible_substring_check():
     """Regression: `"mixed" in (target, candidate)` is tuple membership and
     never fires for `mixed_oxide_sulfide`. The check must use substring."""
