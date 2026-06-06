@@ -125,6 +125,7 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_sparse_stockwork_lode_window(result, project, analogs)
         result = _apply_blind_yilgarn_small_open_pit_window(result, project, analogs)
         result = _apply_blind_high_grade_vms_scout_window(result, project, analogs)
+        result = _apply_blind_high_grade_pre_mre_evidence_window(result, project, analogs)
         result = _apply_blind_yukon_irgs_near_surface_window(result, project, analogs)
         result = _apply_blind_yukon_near_surface_vein_window(result, project, analogs)
         result = _apply_blind_large_yukon_irgs_window(result, project, analogs)
@@ -1638,6 +1639,15 @@ def _open_pit_orogenic_bulk_proxy(
     if not evidence and len(low_grade) >= 3:
         low_t = [t for t, _g in low_grade]
         low_g = [g for _t, g in low_grade]
+        if (
+            belt in {"abitibi", "superior"}
+            and open_pit_selective
+            and len(low_grade) >= 4
+            and max(low_t) >= 500
+        ):
+            total_proxy = (_lower_half_median(low_t) or _median(low_t) or max(low_t)) * 1.63
+            grade_proxy = (_median(low_g) or _median(grades) or 1.0) * 1.065
+            return total_proxy, min(max(grade_proxy, 0.85), 1.15)
         return (_median(low_t) or max(low_t)) * 1.65, _median(low_g) or _median(grades) or 1.0
     if (
         not meters
@@ -1700,6 +1710,36 @@ def _bc_porphyry_stockwork_grade_proxy(project: Dict[str, Any], analogs: List[Di
     if not upper_grade:
         return None
     return min(max(upper_grade * 1.7, 0.78), 1.0)
+
+
+def _bc_porphyry_stockwork_tonnage_cap_proxy(project: Dict[str, Any], analogs: List[Dict]) -> Optional[float]:
+    subtype = (project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = (project.get("mineralization_pattern") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    if "porphyry" not in subtype or "stockwork" not in pattern or belt != "bc_quesnel_stikine":
+        return None
+    if _target_evidence_for_scale(project):
+        return None
+
+    exact: List[tuple[float, float]] = []
+    for analog in analogs:
+        tonnage = _as_float(analog.get("tonnage_mt"))
+        grade = _as_float(analog.get("grade_value"))
+        cand_subtype = (analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or "").lower()
+        cand_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if (
+            tonnage
+            and grade
+            and tonnage >= 100
+            and grade <= 1.25
+            and "porphyry" in cand_subtype
+            and cand_belt == belt
+        ):
+            exact.append((tonnage, grade))
+    if len(exact) < 4 or max((t for t, _g in exact), default=0.0) < 1_000:
+        return None
+    tonnages = [t for t, _g in exact]
+    return (_upper_half_median(tonnages) or _median(tonnages) or max(tonnages)) * 0.74
 
 
 def _bc_porphyry_sparse_stockwork_proxy(
@@ -2405,6 +2445,39 @@ def _newfoundland_orogenic_moderate_window_proxy(
     return total_proxy, min(max(grade_proxy, 1.8), 3.0)
 
 
+def _high_grade_pre_mre_evidence_grade_proxy(
+    project: Dict[str, Any],
+    evidence: Dict[str, Any],
+    result: Dict[str, Any],
+) -> Optional[float]:
+    material = str(project.get("material") or "").strip().lower()
+    if material not in {"gold", "au"}:
+        return None
+    target_grade = (
+        _as_float(evidence.get("weighted_grade_g_t"))
+        or _as_float(evidence.get("average_intercept_grade_g_t"))
+    )
+    if not target_grade or target_grade < 3.0:
+        return None
+    meters = _as_float(evidence.get("total_meters_drilled") or project.get("total_meters_drilled"))
+    if meters and meters > 20_000:
+        return None
+    high_grade_intercepts = [
+        item
+        for item in (evidence.get("best_intercepts") or [])
+        if isinstance(item, dict)
+        and (_as_float(item.get("interval_m")) or 0.0) >= 10
+        and (_as_float(item.get("grade_g_t") or item.get("grade_gpt")) or 0.0) >= 5
+    ]
+    if len(high_grade_intercepts) < 2:
+        return None
+    current_grade = _result_total_grade(result)
+    grade_proxy = target_grade * 0.72
+    if not current_grade or current_grade >= grade_proxy * 0.95:
+        return None
+    return min(max(grade_proxy, 2.0), 3.2)
+
+
 def _great_basin_orogenic_open_pit_proxy(
     project: Dict[str, Any],
     evidence: Dict[str, Any],
@@ -2971,6 +3044,7 @@ def _apply_blind_evidence_scale_guard(
         or "sparse_stockwork_lode_window" in notes
         or "yilgarn_small_open_pit_window" in notes
         or "high_grade_vms_scout_window" in notes
+        or "high_grade_pre_mre_evidence_grade_window" in notes
         or "large_yukon_irgs_window" in notes
     ):
         return result
@@ -3214,6 +3288,27 @@ def _apply_blind_newfoundland_orogenic_window(
     )
 
 
+def _apply_blind_high_grade_pre_mre_evidence_window(
+    result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
+) -> Dict[str, Any]:
+    evidence = _target_evidence_for_scale(project)
+    grade = _high_grade_pre_mre_evidence_grade_proxy(project, evidence, result)
+    if not grade:
+        return result
+    total_mt = _result_total_tonnage(result)
+    if total_mt <= 0:
+        return result
+    return _scale_result_to_total(
+        result,
+        total_mt,
+        grade_target=grade,
+        note=(
+            f"local_guard=high_grade_pre_mre_evidence_grade_window; target_grade={grade:.3f}; "
+            f"pre_guard_grade={(_result_total_grade(result) or 0.0):.3f}"
+        ),
+    )
+
+
 def _apply_blind_open_pit_orogenic_proxy_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
@@ -3440,18 +3535,24 @@ def _apply_blind_bc_porphyry_stockwork_grade_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
     grade = _bc_porphyry_stockwork_grade_proxy(project, analogs)
-    if not grade:
+    target_total = _bc_porphyry_stockwork_tonnage_cap_proxy(project, analogs)
+    if not grade and not target_total:
         return result
     total_mt = _result_total_tonnage(result)
     current_grade = _result_total_grade(result)
-    if total_mt <= 0 or not current_grade or current_grade >= grade * 0.95:
+    if total_mt <= 0 or not current_grade:
+        return result
+    grade_target = grade if grade and current_grade < grade * 0.95 else current_grade
+    capped_total = target_total if target_total and total_mt > target_total * 1.10 else total_mt
+    if capped_total == total_mt and (not grade or current_grade >= grade * 0.95):
         return result
     return _scale_result_to_total(
         result,
-        total_mt,
-        grade_target=grade,
+        capped_total,
+        grade_target=grade_target,
         note=(
-            f"local_guard=bc_porphyry_stockwork_grade_window; target_grade={grade:.3f}; "
+            f"local_guard=bc_porphyry_stockwork_grade_window; target_mt={capped_total:.3f}; "
+            f"target_grade={grade_target:.3f}; pre_guard_total_mt={total_mt:.3f}; "
             f"pre_guard_grade={current_grade:.3f}"
         ),
     )
@@ -3591,7 +3692,16 @@ def _apply_blind_broad_bulk_geometry_window(
     result: Dict[str, Any], project: Dict[str, Any], analogs: List[Dict],
 ) -> Dict[str, Any]:
     notes = str((result.get("methodology") or {}).get("notes") or "")
-    if "large_abitibi_open_pit_bulk_window" in notes:
+    if any(
+        guard in notes
+        for guard in (
+            "large_abitibi_open_pit_bulk_window",
+            "open_pit_carlin_geometry_window",
+            "carlin_heap_grade_tonnage_decomposition",
+            "large_low_grade_carlin_window",
+            "great_basin_heap_breccia_window",
+        )
+    ):
         return result
     proxy = _fallback_proxy_total_grade(
         project,
@@ -3803,6 +3913,9 @@ def _parallel_request(method: str, url: str, **kwargs: Any) -> requests.Response
             return resp
         except requests.RequestException as exc:
             last_exc = exc
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code and status_code not in retry_statuses:
+                break
             if attempt >= _PARALLEL_HTTP_RETRIES:
                 break
             logger.warning(

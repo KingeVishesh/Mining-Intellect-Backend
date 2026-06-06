@@ -1156,13 +1156,22 @@ def main() -> int:
                 f"excluded_full_split_truth={selection_pool_summary['excluded_full_split_truth']}, "
                 f"remaining_full_split_truth={selection_pool_summary['remaining_full_split_truth']}."
             )
-        print(
-            f"[parallel-gold-backtest] warning: only {len(targets)} "
-            "truth-backed target(s) selected; cannot prove 5/10 95% matches "
-            "until more projects have full MRE truth fields or prior holdouts "
-            f"are not excluded.{pool_note}",
-            flush=True,
-        )
+        explicit_subset = bool(args.project_id or args.fixture or args.fixture_first) and not args.random_targets
+        if explicit_subset:
+            print(
+                f"[parallel-gold-backtest] targeted subset: {len(targets)} "
+                "truth-backed target(s) selected from explicit IDs/fixtures."
+                f"{pool_note}",
+                flush=True,
+            )
+        else:
+            print(
+                f"[parallel-gold-backtest] warning: only {len(targets)} "
+                "truth-backed target(s) selected; cannot prove 5/10 95% matches "
+                "until more projects have full MRE truth fields or prior holdouts "
+                f"are not excluded.{pool_note}",
+                flush=True,
+            )
     if args.list_targets:
         if excluded_project_ids:
             print(f"# excluded_project_ids={len(excluded_project_ids)}")
