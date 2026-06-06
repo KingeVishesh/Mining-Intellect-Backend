@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import random
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -117,6 +118,39 @@ def _missing_truth_fields(row: Dict[str, Any]) -> List[str]:
     return [field for field in TRUTH_FIELDS if row.get(field) is None]
 
 
+def _resource_category_kind(row: Dict[str, Any]) -> str:
+    category = re.sub(r"\s+", " ", str(row.get("resource_category") or "").strip().lower())
+    if not category:
+        return "unknown"
+    has_inferred = "inferred" in category
+    has_mi = any(token in category for token in ("measured", "indicated", "m&i", "m and i"))
+    if has_inferred and has_mi:
+        return "mi_and_inferred"
+    if has_inferred:
+        return "inferred_only"
+    if has_mi:
+        return "mi_only"
+    return "unknown"
+
+
+def _candidate_priority(row: Dict[str, Any]) -> tuple:
+    category_rank = {
+        "mi_and_inferred": 0,
+        "unknown": 20,
+        "mi_only": 40,
+        "inferred_only": 50,
+    }[_resource_category_kind(row)]
+    compliance_rank = 0 if row.get("resource_compliance_standard") else 1
+    vintage = _as_float(row.get("resource_vintage_year")) or 0
+    return (
+        category_rank,
+        compliance_rank,
+        -vintage,
+        (row.get("name") or "").lower(),
+        row.get("id") or "",
+    )
+
+
 def _has_valid_known_total(row: Dict[str, Any]) -> bool:
     tonnage = _as_float(row.get("tonnage_mt"))
     grade = _as_float(row.get("grade_value"))
@@ -151,6 +185,7 @@ def _db_gold_rows(
     include_full_truth: bool = False,
     randomize: bool = False,
     random_seed: Optional[str] = None,
+    prioritize_candidates: bool = True,
 ) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     skipped: Dict[str, int] = {}
@@ -167,13 +202,16 @@ def _db_gold_rows(
     if randomize:
         candidates = sorted(candidates, key=lambda row: ((row.get("name") or "").lower(), row["id"]))
         random.Random(random_seed).shuffle(candidates)
+    elif prioritize_candidates:
+        candidates = sorted(candidates, key=_candidate_priority)
     if limit:
         candidates = candidates[:limit]
     logger.info(
-        "DB gold candidates selected=%s randomize=%s seed=%s skipped=%s",
+        "DB gold candidates selected=%s randomize=%s seed=%s prioritize=%s skipped=%s",
         len(candidates),
         randomize,
         random_seed,
+        prioritize_candidates,
         json.dumps(skipped, sort_keys=True),
     )
     return candidates
@@ -288,6 +326,13 @@ def _validate_against_known_total(
     return True, f"total cross-check ok: T {t_err*100:.1f}%, G {g_err*100:.1f}%"
 
 
+def _reviewable_total_mismatch(row: Dict[str, Any], extracted: Dict[str, Any], reason: str) -> bool:
+    if "differs from known total" not in reason:
+        return False
+    relaxed_ok, _ = _validate_against_known_total(row, extracted, allow_total_mismatch=True)
+    return relaxed_ok
+
+
 def _build_mre_payload(row: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
     totals = _weighted_total(
         extracted["mi_tonnage_mt"], extracted["mi_grade"],
@@ -359,6 +404,11 @@ def main() -> int:
         help="Seed for --random-candidates so the same backfill batch can be reproduced.",
     )
     parser.add_argument(
+        "--no-prioritize-candidates",
+        action="store_true",
+        help="Keep alphabetical DB candidate order instead of ranking likely full split disclosures first.",
+    )
+    parser.add_argument(
         "--list-candidates",
         action="store_true",
         help="Print candidate rows and exit without calling Exa or writing data.",
@@ -396,6 +446,7 @@ def main() -> int:
                 include_full_truth=args.force,
                 randomize=args.random_candidates,
                 random_seed=args.random_seed,
+                prioritize_candidates=not args.no_prioritize_candidates,
             )
         )
     if not rows:
@@ -418,13 +469,18 @@ def main() -> int:
                 "reason": reason,
                 "tonnage_mt": row.get("tonnage_mt"),
                 "grade_value": row.get("grade_value"),
+                "resource_category": row.get("resource_category"),
+                "resource_category_kind": _resource_category_kind(row),
+                "resource_compliance_standard": row.get("resource_compliance_standard"),
+                "resource_vintage_year": row.get("resource_vintage_year"),
+                "priority": _candidate_priority(row),
                 "missing_truth_fields": _missing_truth_fields(row),
             })
         for item in audit:
             print(
                 f"{item['status']:9s} | {item['project_id']} | "
                 f"{item['name']} | T={item['tonnage_mt']} G={item['grade_value']} | "
-                f"{item['reason']}"
+                f"{item['resource_category_kind']} | {item['reason']}"
             )
         if args.json_out:
             out_path = Path(args.json_out)
@@ -461,6 +517,15 @@ def main() -> int:
         if unit_note:
             reason = f"{unit_note}; {reason}"
         status = "usable" if ok else "rejected"
+        if not ok and _reviewable_total_mismatch(row, extracted, reason):
+            status = "review"
+            relaxed_ok, relaxed_reason = _validate_against_known_total(
+                row,
+                extracted,
+                allow_total_mismatch=True,
+            )
+            if relaxed_ok:
+                reason = f"reviewable total mismatch: {reason}; {relaxed_reason}"
         audit.append({
             "name": name,
             "project_id": project_id,

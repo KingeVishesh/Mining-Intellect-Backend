@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from scripts.backfill_gold_mre_truth import (
     _candidate_status,
+    _candidate_priority,
     _normalise_extracted_tonnage_units,
+    _reviewable_total_mismatch,
+    _resource_category_kind,
     _validate_against_known_total,
 )
 
@@ -56,6 +59,27 @@ def test_db_gold_candidate_skips_rows_without_known_total_by_default():
     assert relaxed_ok is True
 
 
+def test_resource_category_kind_detects_full_split_disclosures():
+    assert _resource_category_kind(_row(resource_category="Measured + Indicated + Inferred")) == "mi_and_inferred"
+    assert _resource_category_kind(_row(resource_category="Indicated and Inferred")) == "mi_and_inferred"
+    assert _resource_category_kind(_row(resource_category="Inferred")) == "inferred_only"
+    assert _resource_category_kind(_row(resource_category="Measured + Indicated")) == "mi_only"
+    assert _resource_category_kind(_row(resource_category=None)) == "unknown"
+
+
+def test_candidate_priority_puts_likely_full_split_rows_first():
+    rows = [
+        _row(id="unknown", name="Unknown", resource_category=None),
+        _row(id="inferred", name="Inferred", resource_category="Inferred"),
+        _row(id="mi", name="MI", resource_category="Measured + Indicated"),
+        _row(id="split", name="Split", resource_category="Indicated + Inferred"),
+    ]
+
+    ordered = sorted(rows, key=_candidate_priority)
+
+    assert [row["id"] for row in ordered] == ["split", "unknown", "mi", "inferred"]
+
+
 def test_extracted_split_must_reconcile_to_known_total():
     row = _row(tonnage_mt=30.0, grade_value=1.5)
     extracted = {
@@ -84,6 +108,20 @@ def test_extracted_split_rejects_known_total_mismatch():
 
     assert ok is False
     assert "tonnage differs" in reason
+
+
+def test_complete_sane_split_with_total_mismatch_is_reviewable():
+    row = _row(tonnage_mt=30.0, grade_value=1.5)
+    extracted = {
+        "mi_tonnage_mt": 40.0,
+        "mi_grade": 1.8,
+        "inferred_tonnage_mt": 20.0,
+        "inferred_grade": 1.35,
+    }
+    ok, reason = _validate_against_known_total(row, extracted)
+
+    assert ok is False
+    assert _reviewable_total_mismatch(row, extracted, reason)
 
 
 def test_extracted_split_normalises_kt_tonnage_only_when_total_matches():
