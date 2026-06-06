@@ -12,6 +12,7 @@ Examples:
     python3 scripts/audit_gold_split_coverage.py
     python3 scripts/audit_gold_split_coverage.py --status needs_model_run
     python3 scripts/audit_gold_split_coverage.py --json-out artifacts/gold_split_coverage.json
+    python3 scripts/audit_gold_split_coverage.py --truth-backfill-artifacts 'artifacts/gold_mre_truth_*.json' --queue-report
 """
 from __future__ import annotations
 
@@ -116,6 +117,22 @@ def _blank_backtest_status() -> Dict[str, Any]:
     }
 
 
+def _blank_truth_backfill_status() -> Dict[str, Any]:
+    return {
+        "truth_backfill_attempt_count": 0,
+        "truth_backfill_failed_count": 0,
+        "truth_backfill_rejected_count": 0,
+        "truth_backfill_review_count": 0,
+        "truth_backfill_usable_count": 0,
+        "truth_backfill_applied_count": 0,
+        "truth_backfill_last_status": None,
+        "truth_backfill_last_raw_status": None,
+        "truth_backfill_last_reason": None,
+        "truth_backfill_last_artifact": None,
+        "truth_backfill_last_validation": None,
+    }
+
+
 def _history_for(history: Dict[str, Any], project_id: Any) -> Dict[str, Any]:
     if not project_id:
         return {}
@@ -167,12 +184,14 @@ def classify_gold_project(
     row: Dict[str, Any],
     *,
     backtest_history: Optional[Dict[str, Any]] = None,
+    truth_backfill_history: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     has_official_split = _has_all(row, OFFICIAL_SPLIT_FIELDS)
     has_model_split = _has_all(row, MODEL_SPLIT_FIELDS)
     has_total_resource = _has_all(row, TOTAL_RESOURCE_FIELDS)
     has_any_split = has_official_split or has_model_split
     backtest_history = backtest_history or {}
+    truth_backfill_history = truth_backfill_history or {}
 
     if has_official_split:
         primary_status = "official_split_ready"
@@ -211,6 +230,22 @@ def classify_gold_project(
         has_official_split=has_official_split,
         history=backtest_history,
     ))
+    classified.update(_blank_truth_backfill_status())
+    backfill = _history_for(truth_backfill_history, row.get("id"))
+    if backfill:
+        classified.update({
+            key: value
+            for key, value in backfill.items()
+            if key.startswith("truth_backfill_")
+        })
+        if primary_status == "needs_official_split_extraction":
+            last_status = classified.get("truth_backfill_last_status")
+            if last_status == "review":
+                classified["next_action"] = "manual_review_official_split"
+            elif last_status == "usable":
+                classified["next_action"] = "apply_verified_backfill_truth"
+            elif last_status in {"failed", "rejected"}:
+                classified["next_action"] = "triage_backfill_failure_or_model_after_accuracy_gate"
     return classified
 
 
@@ -361,6 +396,68 @@ def load_backtest_history(
     return history
 
 
+def _truth_backfill_effective_status(item: Dict[str, Any]) -> str:
+    status = str(item.get("status") or "unknown")
+    reason = str(item.get("reason") or "").lower()
+    if status == "usable" and "accepted despite local total mismatch" in reason:
+        return "review"
+    return status
+
+
+def load_truth_backfill_history(
+    paths: Iterable[Path],
+    *,
+    project_name_to_id: Optional[Dict[str, str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    history: Dict[str, Dict[str, Any]] = {}
+    project_name_to_id = project_name_to_id or {}
+    for path in paths:
+        artifact = str(path)
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, list):
+            continue
+
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            project_id = item.get("project_id")
+            if not project_id and item.get("name"):
+                project_id = project_name_to_id.get(_project_name_key(item.get("name")))
+            if not project_id:
+                continue
+
+            row = history.setdefault(str(project_id), {
+                "project_id": str(project_id),
+                "project_name": item.get("name"),
+                **_blank_truth_backfill_status(),
+            })
+            if item.get("name") and not row.get("project_name"):
+                row["project_name"] = item.get("name")
+            raw_status = str(item.get("status") or "unknown")
+            status = _truth_backfill_effective_status(item)
+            row["truth_backfill_attempt_count"] += 1
+            if status == "failed":
+                row["truth_backfill_failed_count"] += 1
+            elif status == "rejected":
+                row["truth_backfill_rejected_count"] += 1
+            elif status == "review":
+                row["truth_backfill_review_count"] += 1
+            elif status == "usable":
+                row["truth_backfill_usable_count"] += 1
+            elif status == "applied":
+                row["truth_backfill_applied_count"] += 1
+            row["truth_backfill_last_status"] = status
+            row["truth_backfill_last_raw_status"] = raw_status
+            row["truth_backfill_last_reason"] = item.get("reason")
+            row["truth_backfill_last_artifact"] = artifact
+            row["truth_backfill_last_validation"] = item.get("validation")
+
+    return history
+
+
 def resolve_artifact_paths(patterns: Iterable[str]) -> List[Path]:
     paths: List[Path] = []
     seen = set()
@@ -384,9 +481,14 @@ def summarize(
     rows: List[Dict[str, Any]],
     *,
     backtest_history: Optional[Dict[str, Dict[str, Any]]] = None,
+    truth_backfill_history: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     classified = [
-        classify_gold_project(row, backtest_history=backtest_history)
+        classify_gold_project(
+            row,
+            backtest_history=backtest_history,
+            truth_backfill_history=truth_backfill_history,
+        )
         for row in rows
     ]
     summary = {
@@ -415,6 +517,30 @@ def summarize(
         "backtest_validated_pass": sum(
             1 for row in classified if row["backtest_status"] == "validated_pass"
         ),
+        "truth_backfill_attempted": sum(
+            1 for row in classified if row["truth_backfill_attempt_count"] > 0
+        ),
+        "truth_backfill_failed": sum(
+            1 for row in classified if row["truth_backfill_last_status"] == "failed"
+        ),
+        "truth_backfill_rejected": sum(
+            1 for row in classified if row["truth_backfill_last_status"] == "rejected"
+        ),
+        "truth_backfill_review": sum(
+            1 for row in classified if row["truth_backfill_last_status"] == "review"
+        ),
+        "truth_backfill_usable_pending_apply": sum(
+            1 for row in classified
+            if row["truth_backfill_last_status"] == "usable" and not row["has_official_split"]
+        ),
+        "truth_backfill_applied": sum(
+            1 for row in classified if row["truth_backfill_last_status"] == "applied"
+        ),
+        "truth_backfill_unattempted_extraction": sum(
+            1 for row in classified
+            if row["primary_status"] == "needs_official_split_extraction"
+            and row["truth_backfill_attempt_count"] == 0
+        ),
     }
     return {"summary": summary, "projects": classified}
 
@@ -436,6 +562,13 @@ def _print_summary(payload: Dict[str, Any]) -> None:
         "backtest_retry_after_error",
         "backtest_needs_accuracy_review",
         "backtest_validated_pass",
+        "truth_backfill_attempted",
+        "truth_backfill_failed",
+        "truth_backfill_rejected",
+        "truth_backfill_review",
+        "truth_backfill_usable_pending_apply",
+        "truth_backfill_applied",
+        "truth_backfill_unattempted_extraction",
     ):
         print(f"  {key:34s} {summary[key]}")
 
@@ -448,11 +581,37 @@ def _print_queue_report(payload: Dict[str, Any]) -> None:
         ("retry_after_error", "retry blind backtests after non-quota errors"),
         ("needs_accuracy_review", "fix model/analog lessons from misses"),
         ("ready_untested", "strict blind backtest candidates"),
-        ("needs_official_split_extraction", "extract official M&I/Inferred truth"),
+        ("truth_backfill_usable_pending_apply", "apply verified official split truth"),
+        ("truth_backfill_review", "manual review official split mismatches"),
+        ("truth_backfill_failed_or_rejected", "triage failed/incomplete official split extraction"),
+        ("truth_backfill_unattempted_extraction", "extract official M&I/Inferred truth"),
         ("needs_model_run", "run blind model after accuracy gate"),
     )
     for status, label in queue_order:
-        if status in {"needs_official_split_extraction", "needs_model_run"}:
+        if status == "truth_backfill_usable_pending_apply":
+            rows = [
+                row for row in payload["projects"]
+                if row["truth_backfill_last_status"] == "usable" and not row["has_official_split"]
+            ]
+        elif status == "truth_backfill_review":
+            rows = [
+                row for row in payload["projects"]
+                if row["primary_status"] == "needs_official_split_extraction"
+                and row["truth_backfill_last_status"] == "review"
+            ]
+        elif status == "truth_backfill_failed_or_rejected":
+            rows = [
+                row for row in payload["projects"]
+                if row["primary_status"] == "needs_official_split_extraction"
+                and row["truth_backfill_last_status"] in {"failed", "rejected"}
+            ]
+        elif status == "truth_backfill_unattempted_extraction":
+            rows = [
+                row for row in payload["projects"]
+                if row["primary_status"] == "needs_official_split_extraction"
+                and row["truth_backfill_attempt_count"] == 0
+            ]
+        elif status == "needs_model_run":
             rows = [row for row in payload["projects"] if row["primary_status"] == status]
         else:
             rows = [row for row in payload["projects"] if row["backtest_status"] == status]
@@ -461,6 +620,8 @@ def _print_queue_report(payload: Dict[str, Any]) -> None:
             suffix = ""
             if row.get("backtest_last_batch_id"):
                 suffix = f" | last_batch={row['backtest_last_batch_id']}"
+            elif row.get("truth_backfill_last_status"):
+                suffix = f" | backfill={row['truth_backfill_last_status']}"
             print(f"    - {row['project_id']} | {row['name']}{suffix}")
 
 
@@ -487,6 +648,12 @@ def main() -> int:
         help="Leaderboard artifact path or glob. Repeatable.",
     )
     parser.add_argument(
+        "--truth-backfill-artifacts",
+        action="append",
+        default=[],
+        help="Gold MRE truth backfill audit/apply artifact path or glob. Repeatable.",
+    )
+    parser.add_argument(
         "--backtest-status",
         choices=(
             "ready_untested",
@@ -508,22 +675,42 @@ def main() -> int:
 
     gold_projects = fetch_gold_projects()
     artifact_paths = resolve_artifact_paths(args.backtest_artifacts)
+    truth_artifact_paths = resolve_artifact_paths(args.truth_backfill_artifacts)
+    name_to_id = project_name_to_id_map(gold_projects)
     backtest_history = (
         load_backtest_history(
             artifact_paths,
-            project_name_to_id=project_name_to_id_map(gold_projects),
+            project_name_to_id=name_to_id,
         )
         if artifact_paths
         else None
     )
-    payload = summarize(gold_projects, backtest_history=backtest_history)
+    truth_backfill_history = (
+        load_truth_backfill_history(
+            truth_artifact_paths,
+            project_name_to_id=name_to_id,
+        )
+        if truth_artifact_paths
+        else None
+    )
+    payload = summarize(
+        gold_projects,
+        backtest_history=backtest_history,
+        truth_backfill_history=truth_backfill_history,
+    )
     if artifact_paths:
         payload["backtest_artifacts"] = [str(path) for path in artifact_paths]
         payload["backtest_history_project_count"] = len(backtest_history or {})
+    if truth_artifact_paths:
+        payload["truth_backfill_artifacts"] = [str(path) for path in truth_artifact_paths]
+        payload["truth_backfill_history_project_count"] = len(truth_backfill_history or {})
     _print_summary(payload)
     if artifact_paths:
         print(f"  backtest_artifacts_loaded          {len(artifact_paths)}")
         print(f"  backtest_history_projects         {len(backtest_history or {})}")
+    if truth_artifact_paths:
+        print(f"  truth_backfill_artifacts_loaded    {len(truth_artifact_paths)}")
+        print(f"  truth_backfill_history_projects   {len(truth_backfill_history or {})}")
     if args.queue_report:
         _print_queue_report(payload)
 
