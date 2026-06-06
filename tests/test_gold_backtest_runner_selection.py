@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from scripts.run_parallel_gold_backtest import (
     _blind_library_analog_is_compatible,
     _blind_gold_needs_library_expansion,
@@ -11,6 +13,7 @@ from scripts.run_parallel_gold_backtest import (
     _is_parallel_quota_error,
     _merge_library_analogs,
     _parse_loose_date,
+    _resume_project_ids_from_leaderboard,
     _select_truth_target_rows,
     _supplement_with_library_analogs,
 )
@@ -81,6 +84,47 @@ def test_parallel_quota_errors_are_classified_without_retrying_as_transient():
     assert _error_class(error) == "parallel_quota"
     assert _error_class("Parallel API call failed: 500 Server Error") == "parallel_api"
     assert _error_class("project not found") == "error"
+
+
+def test_resume_leaderboard_modes_select_retry_targets(tmp_path):
+    path = tmp_path / "leaderboard.json"
+    path.write_text(
+        json.dumps({
+            "target_selection": {"project_ids": ["p1", "p2", "p3", "p4"]},
+            "leaderboard": [
+                {"project": "Alpha", "project_id": "p1", "pass": True},
+                {"project": "Beta", "project_id": "p2", "pass": False},
+            ],
+            "errors": [
+                {"project": "Gamma", "project_id": "p3", "error_class": "parallel_quota"},
+                {"project": "Delta", "project_id": "p4", "error_class": "parallel_quota_skipped"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    assert _resume_project_ids_from_leaderboard(path, mode="errors") == ["p3", "p4"]
+    assert _resume_project_ids_from_leaderboard(path, mode="misses") == ["p2"]
+    assert _resume_project_ids_from_leaderboard(path, mode="non_passed") == ["p3", "p4", "p2"]
+    assert _resume_project_ids_from_leaderboard(path, mode="incomplete") == ["p2", "p3", "p4"]
+
+
+def test_resume_leaderboard_dedupes_targets(tmp_path):
+    path = tmp_path / "leaderboard.json"
+    path.write_text(
+        json.dumps({
+            "target_selection": {"project_ids": ["p1", "p2"]},
+            "leaderboard": [
+                {"project": "Beta", "project_id": "p2", "pass": False},
+            ],
+            "errors": [
+                {"project": "Beta", "project_id": "p2", "error_class": "parallel_api"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    assert _resume_project_ids_from_leaderboard(path, mode="non_passed") == ["p2"]
 
 
 def test_library_analog_merge_dedupes_and_drops_self_named_rows():

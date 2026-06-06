@@ -1046,6 +1046,117 @@ def _error_class(error: Any) -> str:
     return "error"
 
 
+def _dedupe_project_ids(project_ids: Iterable[Any]) -> List[str]:
+    seen: Set[str] = set()
+    deduped: List[str] = []
+    for project_id in project_ids:
+        if not project_id:
+            continue
+        pid = str(project_id)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        deduped.append(pid)
+    return deduped
+
+
+def _leaderboard_name_to_project_id(payload: Dict[str, Any]) -> Dict[str, str]:
+    target_selection = payload.get("target_selection") or {}
+    project_ids = target_selection.get("project_ids") or []
+    project_names = target_selection.get("project_names") or []
+    mapping = {
+        str(name): str(project_id)
+        for project_id, name in zip(project_ids, project_names)
+        if project_id and name
+    }
+    missing_name_ids = [
+        str(project_id)
+        for project_id in project_ids
+        if project_id and str(project_id) not in set(mapping.values())
+    ]
+    for project_id in missing_name_ids:
+        try:
+            with _SUPABASE_LOCK:
+                project = supabase_ops.get_project(project_id)
+        except Exception:
+            logging.exception(
+                "[parallel-gold-backtest] failed to resolve project name for resume target %s",
+                project_id,
+            )
+            continue
+        name = project.get("name") if project else None
+        if name:
+            mapping[str(name)] = project_id
+    return mapping
+
+
+def _leaderboard_project_id(
+    row: Dict[str, Any],
+    payload: Dict[str, Any],
+    name_to_id_cache: Dict[str, str],
+) -> Optional[str]:
+    project_id = row.get("project_id")
+    if project_id:
+        return str(project_id)
+    project_name = row.get("project")
+    if not project_name:
+        return None
+    if not name_to_id_cache:
+        name_to_id_cache.update(_leaderboard_name_to_project_id(payload))
+    return name_to_id_cache.get(str(project_name))
+
+
+def _resume_project_ids_from_leaderboard(path: Path, *, mode: str = "errors") -> List[str]:
+    """Return project IDs to retry from a prior leaderboard artifact.
+
+    modes:
+      errors      retry errored/skipped targets only
+      misses      retry evaluated targets that failed the 95% gate
+      non_passed  retry both errors/skips and misses
+      incomplete  retry every requested target that did not produce a passing row
+    """
+    if mode not in {"errors", "misses", "non_passed", "incomplete"}:
+        raise ValueError(f"unsupported resume mode: {mode}")
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    leaderboard = payload.get("leaderboard") or []
+    errors = payload.get("errors") or []
+    target_selection = payload.get("target_selection") or {}
+    requested_ids = _dedupe_project_ids(target_selection.get("project_ids") or [])
+    name_to_id_cache: Dict[str, str] = {}
+
+    if mode == "incomplete":
+        passed_ids = {
+            project_id
+            for row in leaderboard
+            if row.get("pass") is True
+            for project_id in [_leaderboard_project_id(row, payload, name_to_id_cache)]
+            if project_id
+        }
+        if requested_ids:
+            return _dedupe_project_ids(
+                project_id for project_id in requested_ids if project_id not in passed_ids
+            )
+
+    retry_ids: List[str] = []
+    if mode in {"errors", "non_passed", "incomplete"}:
+        retry_ids.extend(
+            project_id
+            for row in errors
+            for project_id in [_leaderboard_project_id(row, payload, name_to_id_cache)]
+            if project_id
+        )
+    if mode in {"misses", "non_passed", "incomplete"}:
+        retry_ids.extend(
+            project_id
+            for row in leaderboard
+            if row.get("pass") is False
+            for project_id in [_leaderboard_project_id(row, payload, name_to_id_cache)]
+            if project_id
+        )
+    return _dedupe_project_ids(retry_ids)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-id", action="append", default=[])
@@ -1120,6 +1231,24 @@ def main() -> int:
         default=None,
         help="Optional path to write a machine-readable pass/fail leaderboard with failure lessons.",
     )
+    parser.add_argument(
+        "--resume-leaderboard-json",
+        action="append",
+        default=[],
+        help=(
+            "Read a prior leaderboard artifact and add retry targets from it. "
+            "Repeatable for multiple partial batches."
+        ),
+    )
+    parser.add_argument(
+        "--resume-mode",
+        choices=("errors", "misses", "non_passed", "incomplete"),
+        default="errors",
+        help=(
+            "Which prior targets to retry from --resume-leaderboard-json. "
+            "Default errors retries quota/API failures and skipped targets."
+        ),
+    )
     args = parser.parse_args()
     if args.processor:
         settings.parallel_processor = args.processor
@@ -1140,6 +1269,21 @@ def main() -> int:
         logging.exception("[parallel-gold-backtest] failed to summarize truth-backed DB pool")
 
     targets = [{"project_id": pid, "fixture": None, "fixture_name": None} for pid in args.project_id]
+    for resume_path in args.resume_leaderboard_json:
+        resume_project_ids = _resume_project_ids_from_leaderboard(
+            Path(resume_path),
+            mode=args.resume_mode,
+        )
+        if resume_project_ids:
+            print(
+                f"[parallel-gold-backtest] resume {Path(resume_path).name}: "
+                f"{len(resume_project_ids)} target(s) from mode={args.resume_mode}",
+                flush=True,
+            )
+        targets.extend(
+            {"project_id": pid, "fixture": None, "fixture_name": None}
+            for pid in resume_project_ids
+        )
     if args.fixture:
         targets.extend(_fixture_targets(args.fixture, allow_no_truth=args.allow_no_truth))
     if args.fixture_first:
@@ -1173,7 +1317,12 @@ def main() -> int:
                 f"excluded_full_split_truth={selection_pool_summary['excluded_full_split_truth']}, "
                 f"remaining_full_split_truth={selection_pool_summary['remaining_full_split_truth']}."
             )
-        explicit_subset = bool(args.project_id or args.fixture or args.fixture_first) and not args.random_targets
+        explicit_subset = bool(
+            args.project_id
+            or args.fixture
+            or args.fixture_first
+            or args.resume_leaderboard_json
+        ) and not args.random_targets
         if explicit_subset:
             print(
                 f"[parallel-gold-backtest] targeted subset: {len(targets)} "
@@ -1320,15 +1469,15 @@ def main() -> int:
         passed = _core_pass(result["errors"], args.threshold)
         pass_count += int(passed)
         failure = result.get("failure_class") or {}
-        leaderboard.append(
-            leaderboard_row(
-                project_name=result["project_name"],
-                errors=result["errors"],
-                passed=passed,
-                failure=failure,
-                guards=result.get("local_guards"),
-            )
+        row = leaderboard_row(
+            project_name=result["project_name"],
+            errors=result["errors"],
+            passed=passed,
+            failure=failure,
+            guards=result.get("local_guards"),
         )
+        row["project_id"] = result.get("project_id")
+        leaderboard.append(row)
         print(
             f"{result['project_name'][:54]:54s} "
             f"{'YES' if passed else 'NO':>5s} "
@@ -1351,6 +1500,11 @@ def main() -> int:
         for result in results
         if result.get("error")
     ]
+    result_name_by_id = {
+        result.get("project_id"): result.get("project_name")
+        for result in results
+        if result.get("project_id") and result.get("project_name")
+    }
     print(f"95% core matches: {pass_count}/{evaluated_count}")
     if error_rows:
         print(
@@ -1373,7 +1527,10 @@ def main() -> int:
                 "random_seed": args.random_seed,
                 "excluded_project_ids": sorted(excluded_project_ids),
                 "excluded_run_ids": args.exclude_run_id,
+                "resume_leaderboard_json": args.resume_leaderboard_json,
+                "resume_mode": args.resume_mode,
                 "project_ids": [target["project_id"] for target in targets],
+                "project_names": [result_name_by_id.get(target["project_id"]) for target in targets],
                 "truth_pool_summary": selection_pool_summary,
             },
             "leaderboard": leaderboard,
