@@ -394,7 +394,58 @@ def _load_audit_rows(paths: Iterable[Path], statuses: Optional[Iterable[str]] = 
     return rows
 
 
-def _build_mre_payload(row: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
+def _filter_audit_rows_by_project_id(
+    rows: Iterable[Dict[str, Any]],
+    project_ids: Iterable[str],
+) -> List[Dict[str, Any]]:
+    wanted_ids = {str(project_id) for project_id in project_ids if project_id}
+    if not wanted_ids:
+        return list(rows)
+    return [row for row in rows if str(row.get("project_id")) in wanted_ids]
+
+
+def _validation_snapshot(row: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[str, Any]:
+    known_t = _as_float(row.get("tonnage_mt"))
+    known_g = _as_float(row.get("grade_value"))
+    snapshot: Dict[str, Any] = {
+        "known_total": {
+            "tonnage_mt": known_t,
+            "grade_value": known_g,
+        },
+        "extracted_total": None,
+        "errors_pct": None,
+    }
+    required = (
+        _as_float(extracted.get("mi_tonnage_mt")),
+        _as_float(extracted.get("mi_grade")),
+        _as_float(extracted.get("inferred_tonnage_mt")),
+        _as_float(extracted.get("inferred_grade")),
+    )
+    if any(value is None for value in required):
+        return snapshot
+    mi_t, mi_g, inf_t, inf_g = required
+    totals = _weighted_total(mi_t, mi_g, inf_t, inf_g)
+    snapshot["extracted_total"] = {
+        "tonnage_mt": totals["total_tonnage_mt"],
+        "grade_value": totals["total_grade"],
+        "contained_oz": totals["total_contained"],
+    }
+    t_err = _rel_err(totals["total_tonnage_mt"], known_t)
+    g_err = _rel_err(totals["total_grade"], known_g)
+    snapshot["errors_pct"] = {
+        "tonnage": None if t_err is None or not math.isfinite(t_err) else t_err * 100,
+        "grade": None if g_err is None or not math.isfinite(g_err) else g_err * 100,
+    }
+    return snapshot
+
+
+def _build_mre_payload(
+    row: Dict[str, Any],
+    extracted: Dict[str, Any],
+    *,
+    manual_review_note: Optional[str] = None,
+    validation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     totals = _weighted_total(
         extracted["mi_tonnage_mt"], extracted["mi_grade"],
         extracted["inferred_tonnage_mt"], extracted["inferred_grade"],
@@ -427,6 +478,8 @@ def _build_mre_payload(row: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[s
                 "publisher": extracted.get("publisher"),
                 "confidence": extracted.get("confidence"),
                 "cross_validation": extracted.get("cross_validation"),
+                "manual_review_note": manual_review_note,
+                "validation": validation,
             },
             default=str,
         ),
@@ -507,6 +560,17 @@ def main() -> int:
         choices=("usable", "review"),
         help="Audit row status to apply from --apply-audit-json. Defaults to usable only.",
     )
+    parser.add_argument(
+        "--apply-audit-project-id",
+        action="append",
+        default=[],
+        help="Only apply matching project IDs from --apply-audit-json. Repeatable.",
+    )
+    parser.add_argument(
+        "--manual-review-note",
+        default=None,
+        help="Required when applying review rows; stored in MRE notes for auditability.",
+    )
     parser.add_argument("--force", action="store_true", help="Refetch even when full truth already exists.")
     parser.add_argument(
         "--allow-no-known-total",
@@ -531,7 +595,13 @@ def main() -> int:
         if not args.apply:
             parser.error("--apply-audit-json requires --apply")
         statuses = args.apply_audit_status or ["usable"]
+        if "review" in statuses and (not args.apply_audit_project_id or not args.manual_review_note):
+            parser.error(
+                "--apply-audit-status review requires --apply-audit-project-id "
+                "and --manual-review-note"
+            )
         audit_rows = _load_audit_rows([Path(path) for path in args.apply_audit_json], statuses=statuses)
+        audit_rows = _filter_audit_rows_by_project_id(audit_rows, args.apply_audit_project_id)
         results: List[Dict[str, Any]] = []
         applied = 0
         for audit_row in audit_rows:
@@ -554,6 +624,7 @@ def main() -> int:
             )
             if unit_note:
                 reason = f"{unit_note}; {reason}"
+            validation = _validation_snapshot(project, extracted)
             if not ok:
                 results.append({
                     "project_id": project_id,
@@ -561,10 +632,16 @@ def main() -> int:
                     "status": "rejected",
                     "reason": reason,
                     "extracted": extracted,
+                    "validation": validation,
                 })
                 logger.warning("AUDIT APPLY rejected %s: %s", project.get("name"), reason)
                 continue
-            payload = _build_mre_payload(project, extracted)
+            payload = _build_mre_payload(
+                project,
+                extracted,
+                manual_review_note=args.manual_review_note,
+                validation=validation,
+            )
             supabase_ops.save_mre_run_if_changed(project_id, payload)
             supabase_ops.update_project_mre_mirror(project_id, payload)
             applied += 1
@@ -572,8 +649,11 @@ def main() -> int:
                 "project_id": project_id,
                 "name": project.get("name") or audit_row.get("name"),
                 "status": "applied",
+                "audit_status": audit_row.get("status"),
                 "reason": reason,
                 "extracted": extracted,
+                "manual_review_note": args.manual_review_note,
+                "validation": validation,
             })
             logger.info("AUDIT APPLY wrote truth to %s (%s)", project.get("name"), project_id)
         if args.json_out:
@@ -692,6 +772,7 @@ def main() -> int:
             "status": status,
             "reason": reason,
             "extracted": extracted,
+            "validation": _validation_snapshot(row, extracted),
         })
         logger.info("  %s: %s", status.upper(), reason)
         if not ok:

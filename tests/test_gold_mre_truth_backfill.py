@@ -6,11 +6,13 @@ from scripts.backfill_gold_mre_truth import (
     _audit_project_ids,
     _candidate_status,
     _candidate_priority,
+    _filter_audit_rows_by_project_id,
     _load_audit_rows,
     _normalise_extracted_tonnage_units,
     _reviewable_total_mismatch,
     _resource_category_kind,
     _validate_against_known_total,
+    _validation_snapshot,
 )
 
 
@@ -116,6 +118,16 @@ def test_load_audit_rows_filters_to_extractable_statuses(tmp_path):
     assert [row["project_id"] for row in _load_audit_rows([path], statuses={"usable"})] == ["p1"]
 
 
+def test_filter_audit_rows_by_project_id_is_opt_in():
+    rows = [
+        {"project_id": "p1", "status": "review"},
+        {"project_id": "p2", "status": "review"},
+    ]
+
+    assert _filter_audit_rows_by_project_id(rows, []) == rows
+    assert _filter_audit_rows_by_project_id(rows, ["p2"]) == [{"project_id": "p2", "status": "review"}]
+
+
 def test_extracted_split_must_reconcile_to_known_total():
     row = _row(tonnage_mt=30.0, grade_value=1.5)
     extracted = {
@@ -129,6 +141,31 @@ def test_extracted_split_must_reconcile_to_known_total():
 
     assert ok is True
     assert "cross-check ok" in reason
+
+
+def test_validation_snapshot_records_known_extracted_and_error_pct():
+    row = _row(tonnage_mt=30.0, grade_value=1.5)
+    extracted = {
+        "mi_tonnage_mt": 10.0,
+        "mi_grade": 1.8,
+        "inferred_tonnage_mt": 20.0,
+        "inferred_grade": 1.35,
+    }
+
+    snapshot = _validation_snapshot(row, extracted)
+
+    assert snapshot["known_total"] == {"tonnage_mt": 30.0, "grade_value": 1.5}
+    assert snapshot["extracted_total"]["tonnage_mt"] == 30.0
+    assert snapshot["extracted_total"]["grade_value"] == 1.5
+    assert snapshot["errors_pct"] == {"tonnage": 0.0, "grade": 0.0}
+
+
+def test_validation_snapshot_tolerates_incomplete_extraction():
+    snapshot = _validation_snapshot(_row(), {"mi_tonnage_mt": 10.0})
+
+    assert snapshot["known_total"] == {"tonnage_mt": 30.0, "grade_value": 1.5}
+    assert snapshot["extracted_total"] is None
+    assert snapshot["errors_pct"] is None
 
 
 def test_extracted_split_rejects_known_total_mismatch():
