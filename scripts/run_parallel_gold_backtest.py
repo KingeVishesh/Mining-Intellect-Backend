@@ -869,6 +869,26 @@ def _supplement_with_library_analogs(
     return merged
 
 
+def _analog_diagnostics(project: Dict[str, Any], analogs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    cutoff = _parse_loose_date(project.get("mre_date") or project.get("mre_data_source"))
+    clean = parallel_gold_model_module._clean_blind_analogs(
+        project,
+        list(analogs or []),
+        cutoff,
+    )
+    needs_library_expansion = _blind_gold_needs_library_expansion(project, clean)
+    return {
+        "supplied_count": len(analogs or []),
+        "clean_count": len(clean),
+        "needs_library_expansion": needs_library_expansion,
+        "needs_analog_refresh": len(clean) < 5 or needs_library_expansion,
+        "clean_names": [
+            analog.get("name") or analog.get("analog_name")
+            for analog in clean[:10]
+        ],
+    }
+
+
 def _merge_fixture_truth(project: Dict[str, Any], fixture: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not fixture:
         merged = dict(project)
@@ -944,6 +964,7 @@ def _run_one(
     with _SUPABASE_LOCK:
         analogs = supabase_ops.get_analogs(project_id)
         analogs = _supplement_with_library_analogs(project_for_model, analogs)
+    analog_diagnostics = _analog_diagnostics(project_for_model, analogs)
     state = {
         "project_id": project_id,
         "project": project_for_model,
@@ -953,7 +974,12 @@ def _run_one(
     }
     out = parallel_gold_model_node(state)
     if out.get("error"):
-        return {"project_id": project_id, "project_name": project.get("name"), "error": out["error"]}
+        return {
+            "project_id": project_id,
+            "project_name": project.get("name"),
+            "error": out["error"],
+            "analog_diagnostics": analog_diagnostics,
+        }
 
     model = out.get("parallel_model") or {}
     evidence_score = evidence_quality_score(project_for_model.get("drilling_evidence"))
@@ -1017,6 +1043,7 @@ def _run_one(
         "evidence_quality": evidence_score,
         "failure_class": failure,
         "local_guards": extract_local_guards(model),
+        "analog_diagnostics": analog_diagnostics,
     }
 
 
@@ -1477,6 +1504,7 @@ def main() -> int:
             guards=result.get("local_guards"),
         )
         row["project_id"] = result.get("project_id")
+        row["analog_diagnostics"] = result.get("analog_diagnostics")
         leaderboard.append(row)
         print(
             f"{result['project_name'][:54]:54s} "
@@ -1496,6 +1524,7 @@ def main() -> int:
             "project_id": result.get("project_id"),
             "error": result.get("error"),
             "error_class": result.get("error_class") or _error_class(result.get("error")),
+            "analog_diagnostics": result.get("analog_diagnostics"),
         }
         for result in results
         if result.get("error")

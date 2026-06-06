@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from scripts.run_parallel_gold_backtest import (
+    _analog_diagnostics,
     _blind_library_analog_is_compatible,
     _blind_gold_needs_library_expansion,
     _blind_cutoff_from_mre_run,
@@ -84,6 +85,18 @@ def test_parallel_quota_errors_are_classified_without_retrying_as_transient():
     assert _error_class(error) == "parallel_quota"
     assert _error_class("Parallel API call failed: 500 Server Error") == "parallel_api"
     assert _error_class("project not found") == "error"
+
+
+def test_analog_diagnostics_flags_sparse_clean_pool():
+    diagnostics = _analog_diagnostics(
+        {"name": "Sparse Gold", "material": "gold", "deposit_subtype": "orogenic_general"},
+        [{"name": "Only Analog", "tonnage_mt": 10, "grade_value": 1.0}],
+    )
+
+    assert diagnostics["supplied_count"] == 1
+    assert diagnostics["clean_count"] == 1
+    assert diagnostics["needs_analog_refresh"] is True
+    assert diagnostics["clean_names"] == ["Only Analog"]
 
 
 def test_resume_leaderboard_modes_select_retry_targets(tmp_path):
