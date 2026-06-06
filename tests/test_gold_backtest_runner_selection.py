@@ -7,6 +7,8 @@ from scripts.run_parallel_gold_backtest import (
     _evidence_is_pre_cutoff,
     _evidence_score_value,
     _gold_library_filters,
+    _error_class,
+    _is_parallel_quota_error,
     _merge_library_analogs,
     _parse_loose_date,
     _select_truth_target_rows,
@@ -70,6 +72,15 @@ def test_default_truth_target_selection_preserves_available_order_after_exclusio
     )
 
     assert [row["id"] for row in selected] == ["p1", "p3"]
+
+
+def test_parallel_quota_errors_are_classified_without_retrying_as_transient():
+    error = "Parallel API call failed: 402 Client Error: Payment Required for url"
+
+    assert _is_parallel_quota_error(error)
+    assert _error_class(error) == "parallel_quota"
+    assert _error_class("Parallel API call failed: 500 Server Error") == "parallel_api"
+    assert _error_class("project not found") == "error"
 
 
 def test_library_analog_merge_dedupes_and_drops_self_named_rows():

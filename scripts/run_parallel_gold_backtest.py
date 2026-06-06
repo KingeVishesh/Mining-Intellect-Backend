@@ -1029,6 +1029,23 @@ def _core_pass(errors: Dict[str, Optional[float]], threshold: float) -> bool:
     )
 
 
+def _is_parallel_quota_error(error: Any) -> bool:
+    text = str(error or "").lower()
+    return (
+        "402" in text
+        and ("payment required" in text or "quota" in text or "parallel api" in text)
+    )
+
+
+def _error_class(error: Any) -> str:
+    if _is_parallel_quota_error(error):
+        return "parallel_quota"
+    text = str(error or "").lower()
+    if "parallel api" in text:
+        return "parallel_api"
+    return "error"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-id", action="append", default=[])
@@ -1199,9 +1216,19 @@ def main() -> int:
     )
 
     results: List[Dict[str, Any]] = []
-    pool = ThreadPoolExecutor(max_workers=max(1, args.workers))
-    futures = [
-        pool.submit(
+    max_workers = max(1, args.workers)
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    futures: Dict[Any, Dict[str, Any]] = {}
+    next_target_index = 0
+    quota_limited = False
+
+    def submit_next_target() -> bool:
+        nonlocal next_target_index
+        if next_target_index >= len(targets):
+            return False
+        target = targets[next_target_index]
+        next_target_index += 1
+        future = pool.submit(
             _run_one,
             target["project_id"],
             fixture=target.get("fixture"),
@@ -1211,19 +1238,37 @@ def main() -> int:
             batch_id=batch_id,
             threshold=args.threshold,
         )
-        for target in targets
-    ]
+        futures[future] = target
+        return True
+
+    for _ in range(min(max_workers, len(targets))):
+        submit_next_target()
     try:
-        for future in as_completed(futures):
+        while futures:
+            future = next(as_completed(list(futures)))
+            target = futures.pop(future)
             try:
                 result = future.result()
             except Exception as exc:
                 logging.exception("[parallel-gold-backtest] worker failed")
-                result = {"project_id": "unknown", "error": str(exc)}
+                result = {
+                    "project_id": target.get("project_id") or "unknown",
+                    "error": str(exc),
+                    "error_class": _error_class(exc),
+                }
+            if result.get("error") and not result.get("error_class"):
+                result["error_class"] = _error_class(result.get("error"))
             results.append(result)
             name = result.get("project_name") or result.get("project_id")
             if result.get("error"):
                 print(f"  FAIL  {name}: {result['error']}", flush=True)
+                if result.get("error_class") == "parallel_quota":
+                    quota_limited = True
+                    print(
+                        "  NOTE  Parallel quota/payment limit reached; "
+                        "not submitting additional queued targets.",
+                        flush=True,
+                    )
             else:
                 passed = _core_pass(result["errors"], args.threshold)
                 print(
@@ -1233,6 +1278,9 @@ def main() -> int:
                     f"Au {fmt_pct(result['errors']['contained'])}",
                     flush=True,
                 )
+            if not quota_limited:
+                while len(futures) < max_workers and submit_next_target():
+                    pass
     except KeyboardInterrupt:
         print("\n[parallel-gold-backtest] interrupted; cancelling queued futures", flush=True)
         for future in futures:
@@ -1241,6 +1289,24 @@ def main() -> int:
         raise
     else:
         pool.shutdown(wait=True)
+
+    if quota_limited and next_target_index < len(targets):
+        for target in targets[next_target_index:]:
+            project_name = None
+            try:
+                with _SUPABASE_LOCK:
+                    skipped_project = supabase_ops.get_project(target["project_id"])
+                project_name = skipped_project.get("name") if skipped_project else None
+            except Exception:
+                logging.exception(
+                    "[parallel-gold-backtest] failed to load skipped project name"
+                )
+            results.append({
+                "project_id": target["project_id"],
+                "project_name": project_name,
+                "error": "Skipped because an earlier Parallel quota/payment error stopped new submissions.",
+                "error_class": "parallel_quota_skipped",
+            })
 
     print()
     print(f"{'Project':54s} {'Pass':>5s} {'T err':>9s} {'G err':>9s} {'Au err':>9s}")
@@ -1274,7 +1340,23 @@ def main() -> int:
             print(f"{'':54s} {'':>5s} lesson: {failure.get('class')} — {failure.get('lesson')}")
 
     print("-" * 86)
-    print(f"95% core matches: {pass_count}/{sum(1 for r in results if not r.get('error'))}")
+    evaluated_count = sum(1 for r in results if not r.get("error"))
+    error_rows = [
+        {
+            "project": result.get("project_name"),
+            "project_id": result.get("project_id"),
+            "error": result.get("error"),
+            "error_class": result.get("error_class") or _error_class(result.get("error")),
+        }
+        for result in results
+        if result.get("error")
+    ]
+    print(f"95% core matches: {pass_count}/{evaluated_count}")
+    if error_rows:
+        print(
+            f"errored/skipped targets: {len(error_rows)} "
+            f"(quota_limited={'yes' if quota_limited else 'no'})"
+        )
     print(f"batch_id: {batch_id}")
     if args.leaderboard_json:
         payload = {
@@ -1282,7 +1364,10 @@ def main() -> int:
             "threshold": args.threshold,
             "min_pass_count": args.min_pass_count,
             "pass_count": pass_count,
-            "evaluated_count": sum(1 for r in results if not r.get("error")),
+            "evaluated_count": evaluated_count,
+            "requested_count": len(targets),
+            "attempted_count": sum(1 for r in results if (r.get("error_class") or "") != "parallel_quota_skipped"),
+            "quota_limited": quota_limited,
             "target_selection": {
                 "random_targets": args.random_targets,
                 "random_seed": args.random_seed,
@@ -1292,6 +1377,7 @@ def main() -> int:
                 "truth_pool_summary": selection_pool_summary,
             },
             "leaderboard": leaderboard,
+            "errors": error_rows,
         }
         out_path = Path(args.leaderboard_json)
         out_path.parent.mkdir(parents=True, exist_ok=True)
