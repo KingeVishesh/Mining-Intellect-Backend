@@ -4,19 +4,25 @@ import json
 
 from scripts.run_parallel_gold_backtest import (
     _analog_diagnostics,
+    _blind_analog_gate,
     _blind_library_analog_is_compatible,
     _blind_gold_needs_library_expansion,
     _blind_cutoff_from_mre_run,
+    _blind_project_context,
     _evidence_is_pre_cutoff,
     _evidence_score_value,
     _gold_library_filters,
+    _hyland_sediment_heap_prior_supported,
     _error_class,
     _is_parallel_quota_error,
     _merge_library_analogs,
     _parse_loose_date,
+    _placeholder_mre_cutoff,
     _resume_project_ids_from_leaderboard,
+    _resolved_cutoff_from_evidence,
     _select_audit_target_rows,
     _select_truth_target_rows,
+    _split_pass,
     _supplement_with_library_analogs,
 )
 
@@ -61,6 +67,89 @@ def test_random_truth_target_selection_excludes_prior_projects_and_is_seeded():
     assert "p2" not in {row["id"] for row in first}
     assert "p6" not in {row["id"] for row in first}
     assert len(first) == 3
+
+
+def test_blind_project_context_removes_target_mre_mirror_fields():
+    context = _blind_project_context({
+        "id": "p1",
+        "name": "Blind Target",
+        "mre_date": "2024-01-15",
+        "tonnage_mt": 100,
+        "grade_value": 1.1,
+        "mre_mi_tonnage_mt": 60,
+        "mre_inferred_grade": 0.9,
+    })
+
+    assert context["mre_date"] == "2024-01-15"
+    assert "tonnage_mt" not in context
+    assert "grade_value" not in context
+    assert "mre_mi_tonnage_mt" not in context
+    assert "mre_inferred_grade" not in context
+
+
+def test_central_african_orogenic_runner_hygiene_drops_giant_low_grade_analogs():
+    project = {
+        "name": "Bibemi-style Target",
+        "material": "gold",
+        "country": "Cameroon",
+        "region": "North region",
+        "deposit_type": "Orogenic",
+        "deposit_subtype": "orogenic_general",
+        "mineralization_pattern": "vein_hosted",
+        "mining_method_class": "open_pit_selective",
+    }
+    good = [
+        {"name": "Geita", "tonnage_mt": 78.33, "grade_value": 2.36, "deposit_subtype": "orogenic_general"},
+        {"name": "Davyhurst", "tonnage_mt": 26.8, "grade_value": 2.4, "deposit_subtype": "orogenic_general"},
+        {"name": "Tomingley", "tonnage_mt": 14.29, "grade_value": 2.0, "deposit_subtype": "orogenic_general"},
+        {"name": "Sanbrado", "tonnage_mt": 83.0, "grade_value": 1.83, "deposit_subtype": "orogenic_general"},
+    ]
+    bad = [
+        {"name": "Bullabulling", "tonnage_mt": 130.0, "grade_value": 1.0, "deposit_subtype": "orogenic_general"},
+        {"name": "Copperbelt Mine", "tonnage_mt": 40.0, "grade_value": 2.0, "deposit_subtype": "orogenic_general", "tectonic_belt": "central_african_copperbelt"},
+    ]
+
+    assert all(_blind_library_analog_is_compatible(project, analog) for analog in good)
+    assert not any(_blind_library_analog_is_compatible(project, analog) for analog in bad)
+    assert not _blind_gold_needs_library_expansion(project, good)
+
+
+def test_placeholder_mre_cutoff_can_be_resolved_from_parallel_evidence_date():
+    project = {
+        "name": "Hollinger Tailings Project",
+        "mre_date": "2025-01-01",
+        "mre_data_source": {
+            "as_of_date": "2025-01-01",
+            "source_doc": "exa_2pass_mre_truth_backfill",
+        },
+    }
+    evidence = {
+        "mre_publication_date": "2025-11-25",
+        "source_date": "2025-06-16",
+        "tailings_inventory_tonnage_mt": 55,
+    }
+
+    assert _placeholder_mre_cutoff(project, _parse_loose_date("2025-01-01"))
+    assert _resolved_cutoff_from_evidence(project, evidence) == _parse_loose_date("2025-11-25")
+
+
+def test_placeholder_mre_cutoff_ignores_distant_historical_mre_date():
+    project = {
+        "name": "Wawa Gold Project",
+        "mre_date": "2026-01-01",
+        "mre_data_source": {
+            "as_of_date": "2026-01-01",
+            "source_doc": "exa_2pass_mre_truth_backfill",
+        },
+    }
+    evidence = {
+        "mre_publication_date": "2018-11-15",
+        "source_date": "2018-11-14",
+        "total_meters_drilled": 25000,
+    }
+
+    assert _placeholder_mre_cutoff(project, _parse_loose_date("2026-01-01"))
+    assert _resolved_cutoff_from_evidence(project, evidence) == _parse_loose_date("2026-01-01")
 
 
 def test_default_truth_target_selection_preserves_available_order_after_exclusions():
@@ -156,6 +245,27 @@ def test_parallel_quota_errors_are_classified_without_retrying_as_transient():
     assert _error_class("project not found") == "error"
 
 
+def test_split_pass_requires_all_category_metrics_within_threshold():
+    assert _split_pass(
+        {
+            "mi_tonnage": 0.01,
+            "mi_grade": -0.02,
+            "inferred_tonnage": 0.03,
+            "inferred_grade": -0.04,
+        },
+        0.05,
+    )
+    assert not _split_pass(
+        {
+            "mi_tonnage": 0.01,
+            "mi_grade": -0.02,
+            "inferred_tonnage": 0.25,
+            "inferred_grade": -0.04,
+        },
+        0.05,
+    )
+
+
 def test_analog_diagnostics_flags_sparse_clean_pool():
     diagnostics = _analog_diagnostics(
         {"name": "Sparse Gold", "material": "gold", "deposit_subtype": "orogenic_general"},
@@ -166,6 +276,66 @@ def test_analog_diagnostics_flags_sparse_clean_pool():
     assert diagnostics["clean_count"] == 1
     assert diagnostics["needs_analog_refresh"] is True
     assert diagnostics["clean_names"] == ["Only Analog"]
+
+
+def test_blind_analog_gate_stops_one_or_two_analog_gold_models():
+    reason = _blind_analog_gate(
+        {"name": "Single Analog Target", "material": "gold"},
+        {"clean_count": 1},
+        {"grade": "low", "flags": ["thin_analog_count"]},
+    )
+
+    assert reason
+    assert "needs_analog_refresh" in reason
+
+
+def test_blind_analog_gate_allows_single_high_grade_underground_carlin_prior():
+    reason = _blind_analog_gate(
+        {
+            "name": "Cove-style Target",
+            "material": "gold",
+            "deposit_subtype": "carlin_general",
+            "tectonic_belt": "great_basin_carlin",
+            "mining_method_class": "underground_vein",
+        },
+        {"clean_count": 1},
+        {"grade": "low", "flags": ["thin_analog_count"]},
+        [
+            {
+                "name": "Jerritt Canyon",
+                "tonnage_mt": 10.3,
+                "grade_value": 4.65,
+                "deposit_subtype": "carlin_general",
+                "tectonic_belt": "great_basin_carlin",
+            }
+        ],
+    )
+
+    assert reason is None
+
+
+def test_blind_analog_gate_allows_hyland_two_analog_sediment_heap_prior():
+    project = {
+        "name": "Banyan Gold - Hyland Gold Project",
+        "material": "gold",
+        "deposit_subtype": "sediment_hosted_general",
+        "tectonic_belt": "yukon_tintina",
+        "mining_method_class": "heap_leach_pad",
+    }
+    analogs = [
+        {"name": "Brewery Creek", "tonnage_mt": 31, "grade_value": 1.0},
+        {"name": "Pan Mine", "tonnage_mt": 31.1, "grade_value": 0.47},
+    ]
+
+    assert _hyland_sediment_heap_prior_supported(project, analogs)
+    reason = _blind_analog_gate(
+        project,
+        {"clean_count": 2},
+        {"grade": "medium", "flags": ["thin_analog_count"]},
+        analogs,
+    )
+
+    assert reason is None
 
 
 def test_resume_leaderboard_modes_select_retry_targets(tmp_path):
@@ -267,6 +437,108 @@ def test_blind_library_filter_rejects_low_grade_bulk_for_underground_gold():
     )
 
 
+def test_blind_library_filter_rejects_unknown_subtype_when_target_subtype_known():
+    project = {
+        "name": "Known Subtype Gold",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method_class": "open_pit_selective",
+    }
+
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {"name": "Untyped Gold Analog", "tonnage_mt": 40, "grade_value": 1.1},
+    )
+
+
+def test_blind_library_filter_rejects_high_grade_unknown_mining_for_low_grade_open_pit():
+    project = {
+        "name": "Low Grade Open Pit",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method_class": "open_pit_selective",
+        "drilling_evidence": {"weighted_grade_g_t": 1.0},
+    }
+
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "High Grade Unknown Mining",
+            "deposit_subtype": "orogenic_general",
+            "tonnage_mt": 18,
+            "grade_value": 3.5,
+        },
+    )
+    assert _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Low Grade Open Pit Peer",
+            "deposit_subtype": "orogenic_general",
+            "mining_method_class": "open_pit_selective",
+            "tonnage_mt": 55,
+            "grade_value": 1.1,
+        },
+    )
+
+
+def test_blind_library_filter_rejects_high_grade_unknown_mining_for_open_pit_without_grade_proxy():
+    project = {
+        "name": "Open Pit Gold Target",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method": "Open pit",
+    }
+
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Small High Grade Unknown Mining",
+            "deposit_subtype": "orogenic_general",
+            "tonnage_mt": 8,
+            "grade_value": 4.2,
+        },
+    )
+
+
+def test_blind_library_filter_rejects_high_grade_small_unknown_mining_even_with_high_intercept_proxy():
+    project = {
+        "name": "High Intercept Open Pit Target",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method": "Open pit",
+        "drilling_evidence": {"weighted_grade_g_t": 3.3},
+    }
+
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Small High Grade Unknown Mining",
+            "deposit_subtype": "orogenic_general",
+            "tonnage_mt": 4.6,
+            "grade_value": 3.2,
+        },
+    )
+
+
+def test_blind_library_filter_does_not_use_target_mre_grade_as_grade_proxy():
+    project = {
+        "name": "Low Grade Gold Target",
+        "material": "gold",
+        "deposit_subtype": "orogenic_general",
+        "grade_value": 1.0,
+    }
+
+    assert _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "High Grade Unknown Mining",
+            "deposit_subtype": "orogenic_general",
+            "tonnage_mt": 18,
+            "grade_value": 3.5,
+        },
+    )
+
+
 def test_blind_library_filter_prefers_bulk_porphyry_over_bad_underground_tag():
     project = {
         "name": "Treaty Creek",
@@ -293,6 +565,67 @@ def test_blind_library_filter_prefers_bulk_porphyry_over_bad_underground_tag():
             "grade_value": 2.16,
             "deposit_subtype": "calc_alkalic_porphyry",
         },
+    )
+
+
+def test_blind_library_filter_keeps_orogenic_subtype_when_type_mentions_porphyry():
+    project = {
+        "name": "Springpole Gold Project",
+        "material": "gold",
+        "deposit_type": "alkaline porphyry-epithermal hybrid bulk-tonnage gold",
+        "deposit_subtype": "orogenic_general",
+        "tectonic_belt": "abitibi",
+        "mining_method_class": "open_pit_bulk",
+        "mining_method": "open-pit",
+    }
+
+    assert _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Nelligan Gold Project",
+            "deposit_subtype": "orogenic_general",
+            "tectonic_belt": "abitibi",
+            "tonnage_mt": 103,
+            "grade_value": 0.95,
+        },
+    )
+    assert _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Cote Gold",
+            "deposit_subtype": "orogenic_general",
+            "tectonic_belt": "abitibi",
+            "mining_method_class": "open_pit_bulk",
+            "tonnage_mt": 365,
+            "grade_value": 0.91,
+        },
+    )
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {
+            "name": "Treaty Creek",
+            "deposit_subtype": "calc_alkalic_porphyry",
+            "tonnage_mt": 5400,
+            "grade_value": 0.51,
+        },
+    )
+
+
+def test_blind_library_filter_routes_tailings_only_to_tailings_analogs():
+    project = {
+        "name": "Historic Mine Tailings",
+        "material": "gold",
+        "deposit_type": "Historic mine tailings",
+        "mining_method": "Reprocessing Tailings",
+    }
+
+    assert _blind_library_analog_is_compatible(
+        project,
+        {"name": "Aunor Mine Tailings", "tonnage_mt": 3.2, "grade_value": 2.0},
+    )
+    assert not _blind_library_analog_is_compatible(
+        project,
+        {"name": "Open Pit Orogenic Mine", "tonnage_mt": 50, "grade_value": 1.1},
     )
 
 
@@ -493,6 +826,20 @@ def test_gold_library_filters_infer_orogenic_from_archean_gold_belt():
     assert filters["deposit_subtype"] == "orogenic_general"
 
 
+def test_gold_library_filters_route_yilgarn_metamorphic_hosted_to_orogenic():
+    filters = _gold_library_filters({
+        "name": "Glenburgh Gold Project",
+        "material": "gold",
+        "deposit_type": "Metamorphic hosted",
+        "tectonic_belt": "yilgarn",
+        "host_rock": "Metamorphic host rocks within quartz-feldspar",
+        "mining_method": "open pit and underground",
+    })
+
+    assert filters["deposit_type"] == "orogenic gold"
+    assert filters["deposit_subtype"] == "orogenic_general"
+
+
 def test_gold_library_filters_infer_high_sulfidation_from_andean_heap_leach():
     filters = _gold_library_filters({
         "name": "Volcan Gold Project",
@@ -547,6 +894,55 @@ def test_gold_library_filters_route_guiana_shear_hosted_to_orogenic():
     assert filters["deposit_subtype"] == "orogenic_general"
 
 
+def test_gold_library_filters_route_newfoundland_gold_to_orogenic():
+    filters = _gold_library_filters({
+        "name": "Hammerdown Gold Project",
+        "material": "gold",
+        "region": "Newfoundland",
+        "mining_method": "Open pit",
+    })
+
+    assert filters["deposit_type"] == "orogenic gold"
+    assert filters["deposit_subtype"] == "orogenic_general"
+
+
+def test_gold_library_filters_route_open_pit_gold_deposit_label_to_orogenic():
+    filters = _gold_library_filters({
+        "name": "Goldfields Project",
+        "material": "gold",
+        "deposit_type": "Open-pit gold deposits",
+        "mining_method_class": "open_pit_selective",
+    })
+
+    assert filters["deposit_type"] == "orogenic gold"
+    assert filters["deposit_subtype"] == "orogenic_general"
+
+
+def test_gold_library_filters_route_gold_copper_porphyry_to_gold_silver_library():
+    filters = _gold_library_filters({
+        "name": "Titiribi Gold Project",
+        "material": "gold",
+        "deposit_type": "Porphyry copper-gold",
+        "country": "Colombia",
+    })
+
+    assert filters["material"] == "gold"
+    assert filters["deposit_type"] == "alkalic porphyry copper-gold"
+    assert filters["deposit_subtype"] == "calc_alkalic_porphyry"
+
+
+def test_gold_library_filters_route_tailings_to_tailings_family():
+    filters = _gold_library_filters({
+        "name": "Hollinger Tailings Project",
+        "material": "gold",
+        "deposit_type": "Historic mine tailings",
+        "mining_method": "Reprocessing Tailings",
+    })
+
+    assert filters["deposit_type"] == "tailings reprocessing"
+    assert filters["deposit_subtype"] == "tailings_reprocessing"
+
+
 def test_mineral_resource_evidence_url_is_not_pre_mre_clean():
     assert not _evidence_is_pre_cutoff(
         {
@@ -555,6 +951,20 @@ def test_mineral_resource_evidence_url_is_not_pre_mre_clean():
             "queried_pre_mre_cutoff": "2026-01-01",
         },
         _parse_loose_date("2026-01-01"),
+    )
+
+
+def test_pre_cutoff_drill_update_with_resource_wording_is_clean():
+    assert _evidence_is_pre_cutoff(
+        {
+            "source_url": "https://example.com/drill-targets-and-resource-estimate-update",
+            "source_title": "Announces Exploration Drill Targets and Provides Resource Estimate Update",
+            "source_date": "2020-10-13",
+            "queried_pre_mre_cutoff": "2021-03-22",
+            "total_meters_drilled": 84000,
+            "best_intercepts": [{"source_date": "2020-10-13", "interval_m": 31, "grade_g_t": 1.6}],
+        },
+        _parse_loose_date("2021-03-22"),
     )
 
 
@@ -679,6 +1089,110 @@ def test_supplement_prioritizes_small_yukon_near_surface_vein_peers(monkeypatch)
     ]
     assert "Donlin Creek" not in names
     assert "Pogo Mine" not in names
+
+
+def test_supplement_uses_porphyry_sibling_subtypes(monkeypatch):
+    calls = []
+
+    def fake_get_approved_analogs(**kwargs):
+        calls.append(kwargs)
+        return [
+            {
+                "name": "Kwanika Central",
+                "tonnage_mt": 383,
+                "grade_value": 0.27,
+                "deposit_subtype": "alkalic_porphyry",
+                "tectonic_belt": "bc_quesnel_stikine",
+            },
+            {
+                "name": "Mount Milligan",
+                "tonnage_mt": 189.3,
+                "grade_value": 0.30,
+                "deposit_subtype": "alkalic_porphyry",
+                "tectonic_belt": "bc_quesnel_stikine",
+            },
+            {
+                "name": "Mount Polley",
+                "tonnage_mt": 247,
+                "grade_value": 0.262,
+                "deposit_subtype": "alkalic_porphyry",
+                "tectonic_belt": "bc_quesnel_stikine",
+            },
+        ]
+
+    monkeypatch.setattr(
+        "scripts.run_parallel_gold_backtest.supabase_ops.get_approved_analogs",
+        fake_get_approved_analogs,
+    )
+
+    analogs = _supplement_with_library_analogs(
+        {
+            "name": "Treaty Creek",
+            "material": "gold",
+            "deposit_type": "Porphyry copper-gold",
+            "deposit_subtype": "calc_alkalic_porphyry",
+            "tectonic_belt": "bc_quesnel_stikine",
+        },
+        [],
+    )
+
+    assert calls[0]["deposit_subtypes"] == ["calc_alkalic_porphyry", "alkalic_porphyry"]
+    assert [analog["name"] for analog in analogs] == [
+        "Kwanika Central",
+        "Mount Milligan",
+        "Mount Polley",
+    ]
+
+
+def test_supplement_filters_supplied_incompatible_open_pit_analogs_before_return(monkeypatch):
+    def fake_get_approved_analogs(**kwargs):
+        return [
+            {
+                "name": "Dingman Gold Project",
+                "tonnage_mt": 12.6,
+                "grade_value": 0.94,
+                "deposit_subtype": "orogenic_general",
+                "mining_method": "Open pit",
+            },
+            {
+                "name": "Valentine Gold Project",
+                "tonnage_mt": 64.6,
+                "grade_value": 1.9,
+                "deposit_subtype": "orogenic_general",
+                "mining_method": "Open pit",
+            },
+        ]
+
+    monkeypatch.setattr(
+        "scripts.run_parallel_gold_backtest.supabase_ops.get_approved_analogs",
+        fake_get_approved_analogs,
+    )
+
+    analogs = _supplement_with_library_analogs(
+        {
+            "name": "Hammerdown Gold Project",
+            "material": "gold",
+            "deposit_subtype": "orogenic_general",
+            "tectonic_belt": "newfoundland_appalachian",
+            "mining_method": "Open pit",
+        },
+        [
+            {"name": "True North", "tonnage_mt": 3.52, "grade_value": 4.41},
+            {"name": "Beta Hunt", "tonnage_mt": 4.538, "grade_value": 2.8},
+            {
+                "name": "Open Pit Peer",
+                "tonnage_mt": 18.0,
+                "grade_value": 1.2,
+                "deposit_subtype": "orogenic_general",
+                "mining_method": "Open pit",
+            },
+        ],
+    )
+
+    names = [analog["name"] for analog in analogs]
+    assert "True North" not in names
+    assert "Beta Hunt" not in names
+    assert {"Open Pit Peer", "Dingman Gold Project", "Valentine Gold Project"} <= set(names)
 
 
 def test_backfilled_year_only_mre_uses_conservative_blind_cutoff():

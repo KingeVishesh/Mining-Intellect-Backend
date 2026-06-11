@@ -20,6 +20,7 @@ import math
 import random
 import re
 import sys
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
@@ -41,6 +42,7 @@ from nodes import parallel_gold_model as parallel_gold_model_module  # noqa: E40
 from nodes.parallel_gold_model import parallel_gold_model_node  # noqa: E402
 from scripts.backtest_parallel import official_truth, pct_err, fmt_pct  # noqa: E402
 from scripts.gold_backtest_diagnostics import (  # noqa: E402
+    analog_quality_score,
     classify_failure,
     evidence_quality_score,
     extract_local_guards,
@@ -55,7 +57,69 @@ DEFAULT_FIXTURES = (
     "hammerdown", "opinaca", "p2_gold", "red_hill", "rhosgobel",
 )
 _SUPABASE_LOCK = RLock()
+_SUPABASE_READ_RETRIES = 4
+_SUPABASE_RETRY_MAX_SLEEP_S = 12
 _DATE_RE = re.compile(r"\b(19|20)\d{2}(?:[-/](?:0?[1-9]|1[0-2])(?:[-/](?:0?[1-9]|[12]\d|3[01]))?)?\b")
+_BLIND_TARGET_MRE_FIELDS = (
+    "tonnage_mt",
+    "grade_value",
+    "cutoff_grade",
+    "mre_mi_tonnage_mt",
+    "mre_mi_grade",
+    "mre_mi_contained",
+    "mre_inferred_tonnage_mt",
+    "mre_inferred_grade",
+    "mre_inferred_contained",
+    "total_contained",
+)
+
+
+def _transient_external_read_error(exc: Exception) -> bool:
+    text = f"{exc.__class__.__name__}: {exc}".lower()
+    return any(
+        token in text
+        for token in (
+            "readtimeout",
+            "read timed out",
+            "timed out",
+            "connection reset",
+            "connection aborted",
+            "eof occurred",
+            "temporarily unavailable",
+        )
+    )
+
+
+def _supabase_read(label: str, fn, *args, **kwargs):
+    for attempt in range(1, _SUPABASE_READ_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if attempt >= _SUPABASE_READ_RETRIES or not _transient_external_read_error(exc):
+                raise
+            sleep_s = min(_SUPABASE_RETRY_MAX_SLEEP_S, 1.5 * (2 ** (attempt - 1))) + random.uniform(0, 0.5)
+            logging.warning(
+                "[parallel-gold-backtest] transient Supabase read failed for %s on attempt %s/%s: %s",
+                label,
+                attempt,
+                _SUPABASE_READ_RETRIES,
+                exc,
+            )
+            time.sleep(sleep_s)
+
+
+def _blind_project_context(project: Dict[str, Any]) -> Dict[str, Any]:
+    """Return project context safe for blind pre-MRE modelling.
+
+    The DB row carries official MRE mirror fields so the runner can score a
+    holdout. Those fields must not influence analog selection, prompt context,
+    or local guardrails in blind mode. Keep the MRE date/source metadata
+    because it defines the chronology cutoff, but remove target tonnage/grade.
+    """
+    cleaned = dict(project)
+    for key in _BLIND_TARGET_MRE_FIELDS:
+        cleaned.pop(key, None)
+    return cleaned
 
 
 def _parse_loose_date(value: Any) -> Optional[date]:
@@ -86,8 +150,6 @@ def _parse_loose_date(value: Any) -> Optional[date]:
 def _evidence_is_pre_cutoff(evidence: Optional[Dict[str, Any]], cutoff: Optional[date]) -> bool:
     if not evidence or not cutoff:
         return bool(evidence)
-    if _evidence_mentions_target_mre(evidence):
-        return False
     # Prefer the publication/source date over report_cutoff_date. The latter
     # is often our synthetic "search before this MRE cutoff" marker, not the
     # date the evidence itself became public.
@@ -95,6 +157,22 @@ def _evidence_is_pre_cutoff(evidence: Optional[Dict[str, Any]], cutoff: Optional
         _parse_loose_date(evidence.get("source_date") or evidence.get("source_url"))
         or _latest_intercept_source_date(evidence)
     )
+    if _evidence_mentions_target_mre(evidence):
+        has_pre_mre_facts = bool(
+            evidence.get("best_intercepts")
+            or any(
+                evidence.get(key) is not None
+                for key in (
+                    "total_meters_drilled", "total_holes", "weighted_grade_g_t",
+                    "average_intercept_grade_g_t", "strike_length_m",
+                    "down_dip_extent_m", "avg_true_width_m", "drilled_area_km2",
+                    "tailings_inventory_tonnage_mt", "tailings_inventory_min_mt",
+                    "tailings_inventory_max_mt", "tailings_grade_g_t",
+                )
+            )
+        )
+        if not (source_date and source_date < cutoff and has_pre_mre_facts):
+            return False
     if source_date:
         return source_date < cutoff
     if evidence.get("queried_pre_mre_cutoff") == cutoff.isoformat():
@@ -105,6 +183,40 @@ def _evidence_is_pre_cutoff(evidence: Optional[Dict[str, Any]], cutoff: Optional
 
 def _evidence_score_value(evidence: Optional[Dict[str, Any]]) -> int:
     return int((evidence_quality_score(evidence) or {}).get("score") or 0)
+
+
+def _placeholder_mre_cutoff(project: Dict[str, Any], cutoff: Optional[date]) -> bool:
+    if not cutoff or (cutoff.month, cutoff.day) not in {(1, 1), (12, 31)}:
+        return False
+    meta = project.get("mre_data_source")
+    source = ""
+    if isinstance(meta, dict):
+        source = str(meta.get("source_doc") or meta.get("source") or "")
+    source = source or str(project.get("mre_source") or project.get("source") or "")
+    return "exa_2pass_mre_truth_backfill" in source or "backfill" in source
+
+
+def _resolved_cutoff_from_evidence(project: Dict[str, Any], evidence: Dict[str, Any]) -> Optional[date]:
+    cutoff = _parse_loose_date(project.get("mre_date") or project.get("mre_data_source"))
+    resolved = _parse_loose_date(
+        evidence.get("mre_publication_date")
+        or evidence.get("mre_effective_date")
+        or evidence.get("queried_pre_mre_cutoff")
+    )
+    if not resolved:
+        return cutoff
+    if not cutoff:
+        return resolved
+    if _placeholder_mre_cutoff(project, cutoff):
+        # Parallel can find earlier historical resources for projects with
+        # multiple MREs. Use evidence to sharpen placeholder cutoffs only when
+        # it is plausibly the scored MRE date, not a many-years-old prior MRE.
+        if abs((resolved - cutoff).days) <= 730:
+            return resolved
+        return cutoff
+    if resolved < cutoff:
+        return resolved
+    return cutoff
 
 
 _EVIDENCE_MRE_MARKERS = (
@@ -149,7 +261,7 @@ def _latest_intercept_source_date(evidence: Dict[str, Any]) -> Optional[date]:
     return max(dates) if dates else None
 
 
-def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _extract_pre_mre_target_evidence_exa(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Extract target drilling/geometry from sources before the target MRE.
 
     This is intentionally backtest-specific: it asks Exa Answer for public
@@ -160,6 +272,19 @@ def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[s
         return None
     cutoff = _parse_loose_date(project.get("mre_date") or project.get("mre_data_source"))
     cutoff_s = cutoff.isoformat() if cutoff else "the first published mineral resource estimate"
+    cutoff_note = ""
+    if _placeholder_mre_cutoff(project, cutoff):
+        cutoff_s = (
+            "the exact first public MRE announcement/publication date that you "
+            "must identify first; do not use the stored year-only placeholder"
+        )
+        cutoff_note = (
+            "\nThe stored cutoff appears to be a year-only placeholder from an MRE "
+            "truth backfill. First identify the first public MRE announcement or "
+            "effective-date disclosure and return it as mre_publication_date; use "
+            "that exact date as the cutoff. You may use the MRE announcement only "
+            "for chronology, never for tonnes, grade, ounces, categories, or tables.\n"
+        )
     loc = ", ".join(
         p for p in (
             project.get("region"),
@@ -173,8 +298,11 @@ def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[s
         f"company disclosures published before {cutoff_s}. Extract cumulative "
         f"drilling meters/holes completed before the first MRE, representative "
         f"pre-MRE average or weighted assay grade, mineralized strike length, "
-        f"depth/down-dip extent, true width, and source URLs. Do not use or "
-        f"quote the MRE resource tonnes, grade, or ounces."
+        f"depth/down-dip extent, true width, and source URLs. For tailings or "
+        f"reprocessing projects, also extract the pre-MRE tailings inventory "
+        f"tonnage/range, tailings characterization meters/holes, and representative "
+        f"tailings assay grade. Do not use or quote the MRE resource tonnes, "
+        f"grade, or ounces."
     )
     payload = {
         "query": query,
@@ -190,6 +318,12 @@ def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[s
                 "total_holes": {"type": ["integer", "null"]},
                 "total_meters_drilled": {"type": ["number", "null"]},
                 "weighted_grade_g_t": {"type": ["number", "null"]},
+                "average_intercept_grade_g_t": {"type": ["number", "null"]},
+                "tailings_inventory_tonnage_mt": {"type": ["number", "null"]},
+                "tailings_inventory_min_mt": {"type": ["number", "null"]},
+                "tailings_inventory_max_mt": {"type": ["number", "null"]},
+                "tailings_grade_g_t": {"type": ["number", "null"]},
+                "tailings_sample_count": {"type": ["integer", "null"]},
                 "strike_length_m": {"type": ["number", "null"]},
                 "down_dip_extent_m": {"type": ["number", "null"]},
                 "avg_true_width_m": {"type": ["number", "null"]},
@@ -208,6 +342,7 @@ def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[s
                     },
                 },
                 "report_cutoff_date": {"type": ["string", "null"]},
+                "mre_publication_date": {"type": ["string", "null"]},
                 "source_url": {"type": ["string", "null"]},
                 "source_date": {"type": ["string", "null"]},
                 "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
@@ -241,6 +376,12 @@ def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[s
         "total_holes": answer.get("total_holes"),
         "total_meters_drilled": answer.get("total_meters_drilled"),
         "weighted_grade_g_t": answer.get("weighted_grade_g_t"),
+        "average_intercept_grade_g_t": answer.get("average_intercept_grade_g_t"),
+        "tailings_inventory_tonnage_mt": answer.get("tailings_inventory_tonnage_mt"),
+        "tailings_inventory_min_mt": answer.get("tailings_inventory_min_mt"),
+        "tailings_inventory_max_mt": answer.get("tailings_inventory_max_mt"),
+        "tailings_grade_g_t": answer.get("tailings_grade_g_t"),
+        "tailings_sample_count": answer.get("tailings_sample_count"),
         "strike_length_m": answer.get("strike_length_m"),
         "down_dip_extent_m": answer.get("down_dip_extent_m"),
         "avg_true_width_m": answer.get("avg_true_width_m"),
@@ -250,27 +391,246 @@ def _extract_pre_mre_target_evidence(project: Dict[str, Any]) -> Optional[Dict[s
         "source": "exa_pre_mre_target_evidence",
         "source_url": answer.get("source_url"),
         "source_date": answer.get("source_date"),
+        "mre_publication_date": answer.get("mre_publication_date"),
         "report_cutoff_date": answer.get("report_cutoff_date") or (cutoff.isoformat() if cutoff else None),
         "confidence": answer.get("confidence", "low"),
         "notes": answer.get("notes"),
-        "queried_pre_mre_cutoff": cutoff.isoformat() if cutoff else None,
+        "queried_pre_mre_cutoff": (
+            _resolved_cutoff_from_evidence(project, answer).isoformat()
+            if _resolved_cutoff_from_evidence(project, answer)
+            else None
+        ),
         "extracted_at": datetime.now(timezone.utc).isoformat(),
     }
+    cutoff = _resolved_cutoff_from_evidence(project, evidence)
+    if cutoff:
+        evidence["queried_pre_mre_cutoff"] = cutoff.isoformat()
+        if not answer.get("report_cutoff_date"):
+            evidence["report_cutoff_date"] = cutoff.isoformat()
     if (
         evidence.get("total_meters_drilled") is None
         and evidence.get("weighted_grade_g_t") is None
+        and evidence.get("average_intercept_grade_g_t") is None
         and evidence.get("strike_length_m") is None
+        and evidence.get("tailings_inventory_tonnage_mt") is None
+        and evidence.get("tailings_inventory_min_mt") is None
     ):
         return None
     if cutoff and not _evidence_is_pre_cutoff(evidence, cutoff):
         logging.warning(
-            "[pre-mre-evidence] rejected post-cutoff evidence for %s: cutoff=%s evidence_date=%s",
+            "[pre-mre-evidence] rejected MRE-tainted or post-cutoff evidence for %s: cutoff=%s evidence_date=%s",
             project.get("name"),
             cutoff,
             evidence.get("report_cutoff_date") or evidence.get("source_date"),
         )
         return None
     return evidence
+
+
+def _extract_pre_mre_target_evidence_parallel(project: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Use Parallel deep research for pre-MRE target drilling/geometry evidence."""
+    if not settings.parallel_api_key:
+        logging.warning("[pre-mre-evidence] PARALLEL_API_KEY not configured")
+        return None
+    cutoff = _parse_loose_date(project.get("mre_date") or project.get("mre_data_source"))
+    cutoff_s = cutoff.isoformat() if cutoff else "the first published mineral resource estimate"
+    cutoff_note = ""
+    if _placeholder_mre_cutoff(project, cutoff):
+        cutoff_s = (
+            "the exact first public MRE announcement/publication date that you "
+            "must identify first; do not use the stored year-only placeholder"
+        )
+        cutoff_note = (
+            "\nThe stored cutoff appears to be a year-only placeholder from an MRE "
+            "truth backfill. First identify the first public MRE announcement or "
+            "effective-date disclosure and return it as mre_publication_date; use "
+            "that exact date as the cutoff. You may use the MRE announcement only "
+            "for chronology, never for tonnes, grade, ounces, categories, or tables.\n"
+        )
+    loc = ", ".join(
+        p for p in (
+            project.get("region"),
+            project.get("state_or_province"),
+            project.get("country"),
+        )
+        if p
+    )
+    prompt = f"""
+You are a mining backtest data auditor.
+
+TARGET: {project.get('name')} gold project {loc}
+HARD CUTOFF: use only public information published BEFORE {cutoff_s}.
+
+Find pre-MRE drilling or sampling evidence usable for a blind resource model:
+- cumulative drill holes and drill meters completed before the cutoff,
+- representative pre-MRE average or weighted assay grade, if explicitly stated,
+- mineralized strike length, down-dip/depth extent, true width, or drilled area,
+- up to five representative pre-MRE intercepts with source dates and URLs.
+- for tailings/reprocessing projects: pre-MRE tailings inventory tonnage/range,
+  tailings characterization meters/holes, sample count, and representative
+  tailings assay grade.
+{cutoff_note}
+
+Do not use, quote, infer from, or mention the target MRE/resource tonnes,
+grade, ounces, categories, or technical-report resource tables. If a source is
+dated on or after the cutoff, discard it. If a value is unavailable from
+pre-cutoff sources, return null rather than estimating.
+"""
+    schema = {
+        "type": "object",
+        "properties": {
+            "total_holes": {"type": ["integer", "null"]},
+            "total_meters_drilled": {"type": ["number", "null"]},
+            "weighted_grade_g_t": {"type": ["number", "null"]},
+            "average_intercept_grade_g_t": {"type": ["number", "null"]},
+            "tailings_inventory_tonnage_mt": {"type": ["number", "null"]},
+            "tailings_inventory_min_mt": {"type": ["number", "null"]},
+            "tailings_inventory_max_mt": {"type": ["number", "null"]},
+            "tailings_grade_g_t": {"type": ["number", "null"]},
+            "tailings_sample_count": {"type": ["integer", "null"]},
+            "strike_length_m": {"type": ["number", "null"]},
+            "down_dip_extent_m": {"type": ["number", "null"]},
+            "avg_true_width_m": {"type": ["number", "null"]},
+            "drilled_area_km2": {"type": ["number", "null"]},
+            "evidence_class": {
+                "type": "string",
+                "enum": [
+                    "normal_drilling",
+                    "blast_hole_or_grade_control",
+                    "tailings_sampling",
+                    "surface_sampling",
+                    "unknown",
+                ],
+            },
+            "best_intercepts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "hole_id": {"type": ["string", "null"]},
+                        "interval_m": {"type": ["number", "null"]},
+                        "grade_g_t": {"type": ["number", "null"]},
+                        "source_url": {"type": ["string", "null"]},
+                        "source_date": {"type": ["string", "null"]},
+                    },
+                },
+            },
+            "source_url": {"type": ["string", "null"]},
+            "source_date": {"type": ["string", "null"]},
+            "source_title": {"type": ["string", "null"]},
+            "mre_publication_date": {"type": ["string", "null"]},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "notes": {"type": ["string", "null"]},
+        },
+        "required": [
+            "total_holes",
+            "total_meters_drilled",
+            "weighted_grade_g_t",
+            "confidence",
+        ],
+    }
+    try:
+        answer = parallel_gold_model_module._run_parallel_task(
+            prompt=prompt,
+            output_schema=schema,
+        )
+    except Exception as exc:
+        logging.warning("[pre-mre-evidence] Parallel request failed for %s: %s", project.get("name"), exc)
+        return None
+    if not isinstance(answer, dict):
+        return None
+    intercepts = answer.get("best_intercepts") or []
+    if isinstance(intercepts, dict) and isinstance(intercepts.get("value"), list):
+        intercepts = intercepts["value"]
+    evidence = {
+        "total_holes": answer.get("total_holes"),
+        "total_meters_drilled": answer.get("total_meters_drilled"),
+        "weighted_grade_g_t": answer.get("weighted_grade_g_t"),
+        "average_intercept_grade_g_t": answer.get("average_intercept_grade_g_t"),
+        "tailings_inventory_tonnage_mt": answer.get("tailings_inventory_tonnage_mt"),
+        "tailings_inventory_min_mt": answer.get("tailings_inventory_min_mt"),
+        "tailings_inventory_max_mt": answer.get("tailings_inventory_max_mt"),
+        "tailings_grade_g_t": answer.get("tailings_grade_g_t"),
+        "tailings_sample_count": answer.get("tailings_sample_count"),
+        "strike_length_m": answer.get("strike_length_m"),
+        "down_dip_extent_m": answer.get("down_dip_extent_m"),
+        "avg_true_width_m": answer.get("avg_true_width_m"),
+        "drilled_area_km2": answer.get("drilled_area_km2"),
+        "evidence_class": answer.get("evidence_class") or "unknown",
+        "best_intercepts": intercepts if isinstance(intercepts, list) else [],
+        "qa_qc_present": None,
+        "source": "parallel_pre_mre_target_evidence",
+        "source_url": answer.get("source_url"),
+        "source_date": answer.get("source_date"),
+        "source_title": answer.get("source_title"),
+        "mre_publication_date": answer.get("mre_publication_date"),
+        "report_cutoff_date": cutoff.isoformat() if cutoff else None,
+        "confidence": answer.get("confidence", "low"),
+        "notes": answer.get("notes"),
+        "queried_pre_mre_cutoff": (
+            _resolved_cutoff_from_evidence(project, answer).isoformat()
+            if _resolved_cutoff_from_evidence(project, answer)
+            else None
+        ),
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    cutoff = _resolved_cutoff_from_evidence(project, evidence)
+    if cutoff:
+        evidence["queried_pre_mre_cutoff"] = cutoff.isoformat()
+        evidence["report_cutoff_date"] = cutoff.isoformat()
+    if (
+        evidence.get("total_meters_drilled") is None
+        and evidence.get("weighted_grade_g_t") is None
+        and evidence.get("average_intercept_grade_g_t") is None
+        and evidence.get("strike_length_m") is None
+        and evidence.get("tailings_inventory_tonnage_mt") is None
+        and evidence.get("tailings_inventory_min_mt") is None
+        and not evidence.get("best_intercepts")
+    ):
+        return None
+    if cutoff and not _evidence_is_pre_cutoff(evidence, cutoff):
+        logging.warning(
+            "[pre-mre-evidence] rejected Parallel MRE-tainted or post-cutoff evidence for %s: cutoff=%s evidence_date=%s",
+            project.get("name"),
+            cutoff,
+            evidence.get("source_date") or evidence.get("report_cutoff_date"),
+        )
+        return None
+    return evidence
+
+
+def _extract_pre_mre_target_evidence(
+    project: Dict[str, Any],
+    *,
+    provider: str = "auto",
+) -> Optional[Dict[str, Any]]:
+    """Extract target evidence with the requested provider.
+
+    `auto` keeps Exa when it returns a useful high/medium evidence payload and
+    escalates to Parallel when evidence is absent or weak. This keeps the fast
+    path intact while letting accuracy-first backtests pay for deeper research.
+    """
+    provider = (provider or "auto").lower()
+    if provider == "none":
+        return None
+    candidates: List[Dict[str, Any]] = []
+    if provider in {"auto", "exa"}:
+        evidence = _extract_pre_mre_target_evidence_exa(project)
+        if evidence:
+            candidates.append(evidence)
+        if provider == "exa":
+            return evidence
+    should_try_parallel = provider == "parallel" or (
+        provider == "auto"
+        and (not candidates or _evidence_score_value(candidates[0]) < 45)
+    )
+    if should_try_parallel:
+        evidence = _extract_pre_mre_target_evidence_parallel(project)
+        if evidence:
+            candidates.append(evidence)
+    if not candidates:
+        return None
+    return max(candidates, key=_evidence_score_value)
 
 
 def _round(value: Any, ndigits: int = 3) -> Optional[float]:
@@ -591,6 +951,100 @@ def _positive_float(value: Any) -> Optional[float]:
         return None
 
 
+def _pre_mre_target_grade_proxy(project: Dict[str, Any]) -> Optional[float]:
+    evidence = project.get("drilling_evidence")
+    if not isinstance(evidence, dict) or evidence.get("redacted"):
+        return None
+    direct = (
+        _positive_float(evidence.get("tailings_grade_g_t"))
+        or _positive_float(evidence.get("weighted_grade_g_t"))
+        or _positive_float(evidence.get("average_intercept_grade_g_t"))
+    )
+    if direct:
+        return direct
+    grades = [
+        _positive_float(item.get("grade_g_t") or item.get("grade_gpt"))
+        for item in (evidence.get("best_intercepts") or [])
+        if isinstance(item, dict)
+    ]
+    grades = [grade for grade in grades if grade]
+    if not grades:
+        return None
+    # Best intercepts are usually optimistic; use only a rough band signal.
+    return _median_float(grades) * 0.5
+
+
+def _text_blob(*rows: Dict[str, Any]) -> str:
+    fields = (
+        "name",
+        "deposit_type",
+        "deposit_subtype",
+        "mineralization_pattern",
+        "mining_method",
+        "mining_method_class",
+        "processing_method",
+        "recovery_method",
+        "stage",
+        "district",
+        "region",
+        "country",
+    )
+    return " ".join(str(row.get(key) or "") for row in rows for key in fields).lower()
+
+
+def _is_tailings_context(*rows: Dict[str, Any]) -> bool:
+    blob = _text_blob(*rows)
+    return any(token in blob for token in ("tailings", "tailing", "reprocessing", "re-process"))
+
+
+def _is_open_pit_context(*rows: Dict[str, Any]) -> bool:
+    blob = _text_blob(*rows)
+    return any(
+        token in blob
+        for token in (
+            "open pit",
+            "open-pit",
+            "open_pit",
+            "openpit",
+            "heap leach",
+            "heap_leach",
+        )
+    )
+
+
+def _is_central_african_orogenic_open_pit_target(project: Dict[str, Any]) -> bool:
+    material = str(project.get("material") or "").strip().lower()
+    if material not in {"gold", "au", "gold_silver", "gold-and-silver", "gold and silver"}:
+        return False
+    belt = str(project.get("tectonic_belt") or geo_taxonomy.detect_belt_from_row(project) or "").lower()
+    context = _text_blob(project)
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    pattern = str(project.get("mineralization_pattern") or "").lower()
+    if belt != "central_african_orogenic" and not any(
+        token in context for token in ("cameroon", "central african republic", "chad")
+    ):
+        return False
+    return _is_open_pit_context(project) and (
+        any(token in subtype for token in ("orogenic", "greenstone", "gold"))
+        or "vein" in pattern
+    )
+
+
+def _is_underground_context(*rows: Dict[str, Any]) -> bool:
+    blob = _text_blob(*rows)
+    return any(token in blob for token in ("underground", "ug mine", "narrow vein", "high grade vein"))
+
+
+def _porphyry_sibling_subtypes(subtype: Optional[str]) -> List[str]:
+    subtype = str(subtype or "").lower()
+    if "porphyry" not in subtype:
+        return []
+    siblings = ["calc_alkalic_porphyry", "alkalic_porphyry"]
+    if subtype and subtype not in siblings:
+        siblings.append(subtype)
+    return siblings
+
+
 def _median_float(values: Iterable[float]) -> Optional[float]:
     clean = sorted(v for v in values if v and math.isfinite(v))
     if not clean:
@@ -613,9 +1067,28 @@ def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
         for k in (
             "tectonic_belt", "district", "region", "location_name",
             "mining_method", "mining_method_class", "processing_method",
-            "recovery_method",
+            "recovery_method", "country", "deposit_type", "deposit_subtype",
+            "name",
         )
     ).lower()
+    if material_key in {"gold", "au"} and _is_tailings_context(project):
+        deposit_type = "tailings reprocessing"
+        deposit_subtype = "tailings_reprocessing"
+    if (
+        material_key in {"gold", "au"}
+        and not deposit_subtype
+        and "open-pit gold" in blob
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
+    if material_key in {"gold", "au"} and "porphyry" in blob:
+        if not deposit_type or "porphyry" in str(deposit_type).lower():
+            deposit_type = "alkalic porphyry copper-gold"
+        if not deposit_subtype:
+            if target_belt == "andean" or any(token in blob for token in ("andean", "colombia", "chile", "peru", "ecuador")):
+                deposit_subtype = "calc_alkalic_porphyry"
+            else:
+                deposit_subtype = "alkalic_porphyry"
     if (
         material_key in {"gold", "au"}
         and not deposit_type
@@ -626,8 +1099,26 @@ def _gold_library_filters(project: Dict[str, Any]) -> Dict[str, Optional[str]]:
         deposit_subtype = "orogenic_general"
     if (
         material_key in {"gold", "au"}
+        and target_belt == "yilgarn"
+        and "metamorphic" in blob
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
+    if (
+        material_key in {"gold", "au"}
         and not deposit_subtype
         and (target_belt == "guiana_shield" or "shear" in str(deposit_type or "").lower())
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
+    if (
+        material_key in {"gold", "au"}
+        and not deposit_subtype
+        and (
+            target_belt == "newfoundland_appalachian"
+            or "newfoundland" in blob
+            or "appalachian" in blob
+        )
     ):
         deposit_type = "orogenic gold"
         deposit_subtype = "orogenic_general"
@@ -671,7 +1162,7 @@ def _resource_variant_key(analog: Dict[str, Any]) -> Optional[tuple]:
 def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[str, Any]) -> bool:
     """Production-like guard for approved-library rows used in blind backtests."""
     material = str(project.get("material") or "").strip().lower()
-    if material not in {"gold", "au"}:
+    if material not in {"gold", "au", "gold_silver", "gold-and-silver", "gold and silver"}:
         return True
     tonnage = _positive_float(analog.get("tonnage_mt"))
     grade = _positive_float(analog.get("grade_value"))
@@ -685,11 +1176,34 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
         analog.get("mining_method_class") or analog.get("mining_method") or ""
     ).strip().lower()
     target_subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    target_type = str(project.get("deposit_type") or "").lower()
     target_pattern = str(project.get("mineralization_pattern") or "").lower()
     target_belt = str(project.get("tectonic_belt") or "").lower()
+    target_grade = _pre_mre_target_grade_proxy(project)
     analog_subtype = str(
         analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or ""
     ).lower()
+    target_open_pit_like = _is_open_pit_context(project) or target_mining == "open_pit_selective"
+    target_underground_like = _is_underground_context(project) or target_mining == "underground_vein"
+    analog_open_pit_like = _is_open_pit_context(analog) or "open" in analog_mining
+    analog_underground_like = _is_underground_context(analog) or "underground" in analog_mining
+    if _is_tailings_context(project):
+        return _is_tailings_context(analog)
+    if _is_tailings_context(analog) and not _is_tailings_context(project):
+        return False
+    if target_subtype and not analog_subtype:
+        return False
+    if (
+        any(token in target_subtype for token in ("orogenic", "greenstone"))
+        and "porphyry" in analog_subtype
+    ):
+        return False
+    if _is_central_african_orogenic_open_pit_target(project):
+        analog_belt = str(analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or "").lower()
+        if analog_belt == "central_african_copperbelt":
+            return False
+        if tonnage > 120 or grade < 1.5 or grade > 2.7:
+            return False
     near_surface_yukon_vein_target = (
         target_belt == "yukon_tintina"
         and not str(project.get("deposit_subtype") or "").strip()
@@ -703,7 +1217,10 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
             return False
         if grade > 6.0:
             return False
-    bulk_porphyry_target = "porphyry" in target_subtype and "stockwork" in target_pattern
+    bulk_porphyry_target = "porphyry" in target_subtype or (
+        "porphyry" in target_type
+        and not any(token in target_subtype for token in ("orogenic", "greenstone"))
+    )
     if bulk_porphyry_target:
         if "porphyry" not in analog_subtype:
             return False
@@ -718,12 +1235,28 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
         or (not analog_mining and tonnage >= 20 and grade <= 2.0)
     ):
         return True
-    if target_mining == "underground_vein":
+    if target_underground_like and not target_open_pit_like:
         if analog_mining and not geo_taxonomy.mining_method_compatible(target_mining, analog_mining):
             return False
         if not analog_mining and grade < 2.0:
             return False
         if not analog_mining and tonnage >= 50:
+            return False
+    elif target_open_pit_like:
+        compatible_target_mining = (
+            "open_pit_bulk"
+            if "bulk" in target_mining
+            else "open_pit_selective"
+        )
+        if analog_underground_like and not analog_open_pit_like:
+            return False
+        if not analog_mining and target_grade and target_grade <= 1.5 and grade >= 2.0:
+            return False
+        if not analog_mining and target_grade and target_grade <= 1.5 and tonnage < 10:
+            return False
+        if not analog_mining and not analog_open_pit_like and grade >= 2.5 and tonnage < 25:
+            return False
+        if analog_mining and not geo_taxonomy.mining_method_compatible(compatible_target_mining, analog_mining):
             return False
     elif target_mining and analog_mining and not geo_taxonomy.mining_method_compatible(target_mining, analog_mining):
         return False
@@ -732,7 +1265,7 @@ def _blind_library_analog_is_compatible(project: Dict[str, Any], analog: Dict[st
 
 def _blind_gold_needs_library_expansion(project: Dict[str, Any], analogs: Sequence[Dict[str, Any]]) -> bool:
     material = str(project.get("material") or "").strip().lower()
-    if material not in {"gold", "au"}:
+    if material not in {"gold", "au", "gold_silver", "gold-and-silver", "gold and silver"}:
         return False
     clean = [
         (_positive_float(a.get("tonnage_mt")), _positive_float(a.get("grade_value")))
@@ -747,6 +1280,8 @@ def _blind_gold_needs_library_expansion(project: Dict[str, Any], analogs: Sequen
     target_mining = str(
         project.get("mining_method_class") or project.get("mining_method") or ""
     ).strip().lower()
+    if _is_central_african_orogenic_open_pit_target(project):
+        return len(clean) < 3 or max_tonnage > 120 or not (1.5 <= median_grade <= 2.7)
     if (
         target_mining == "underground_vein"
         and belt in {"abitibi", "superior", "yilgarn"}
@@ -804,6 +1339,12 @@ def _blind_library_fit_sort_key(project: Dict[str, Any], analog: Dict[str, Any])
             0 if preferred else 1 if secondary else 2,
             abs(tonnage - 70),
             abs(grade - 1.15),
+        )
+    if _is_central_african_orogenic_open_pit_target(project):
+        return (
+            0 if 5 <= tonnage <= 100 and 1.5 <= grade <= 2.7 else 1,
+            abs(tonnage - 14.0),
+            abs(grade - 2.1),
         )
     if "porphyry" in subtype and "stockwork" in pattern:
         return (0 if tonnage >= 100 and grade <= 1.25 else 1, -tonnage, grade)
@@ -865,22 +1406,36 @@ def _supplement_with_library_analogs(
         list(analogs),
         cutoff,
     )
+    compatible_clean_analogs = [
+        analog for analog in clean_analogs
+        if _blind_library_analog_is_compatible(project, analog)
+    ]
+    if len(compatible_clean_analogs) < len(clean_analogs):
+        logging.info(
+            "[parallel-gold-backtest] removed %s supplied incompatible blind analog(s) for %s",
+            len(clean_analogs) - len(compatible_clean_analogs),
+            project.get("name"),
+        )
     if (
-        len(clean_analogs) >= min_count
-        and not _blind_gold_needs_library_expansion(project, clean_analogs)
+        len(compatible_clean_analogs) >= min_count
+        and not _blind_gold_needs_library_expansion(project, compatible_clean_analogs)
     ):
-        return list(clean_analogs)
+        return list(compatible_clean_analogs)
     filters = _gold_library_filters(project)
     material = filters["material"] or "gold"
     deposit_type = filters["deposit_type"]
     deposit_subtype = filters["deposit_subtype"]
+    deposit_subtypes = _porphyry_sibling_subtypes(deposit_subtype)
     if not deposit_type and not deposit_subtype:
-        return list(clean_analogs)
+        return list(compatible_clean_analogs)
     try:
-        library = supabase_ops.get_approved_analogs(
+        library = _supabase_read(
+            "approved analog library",
+            supabase_ops.get_approved_analogs,
             material=material,
             deposit_type=deposit_type,
             deposit_subtype=deposit_subtype,
+            deposit_subtypes=deposit_subtypes or None,
             target_tectonic_belt=filters["target_tectonic_belt"],
             limit=50,
         )
@@ -889,15 +1444,17 @@ def _supplement_with_library_analogs(
             "[parallel-gold-backtest] failed loading approved analog library for %s",
             project.get("name"),
         )
-        return list(clean_analogs)
-    merged = _merge_library_analogs(project, clean_analogs, library, max_count=max_count)
+        return list(compatible_clean_analogs)
+    merged = _merge_library_analogs(project, compatible_clean_analogs, library, max_count=max_count)
     if (
         len(merged) < min_count
         and filters["target_tectonic_belt"] == "newfoundland_appalachian"
         and str(deposit_subtype or "").lower() == "irgs_general"
     ):
         try:
-            local_orogenic_library = supabase_ops.get_approved_analogs(
+            local_orogenic_library = _supabase_read(
+                "local orogenic fallback analog library",
+                supabase_ops.get_approved_analogs,
                 material=material,
                 deposit_type="orogenic gold",
                 deposit_subtype="orogenic_general",
@@ -921,10 +1478,13 @@ def _supplement_with_library_analogs(
             return merged
     if len(merged) < min_count and filters["target_tectonic_belt"]:
         try:
-            broad_library = supabase_ops.get_approved_analogs(
+            broad_library = _supabase_read(
+                "broad approved analog library",
+                supabase_ops.get_approved_analogs,
                 material=material,
                 deposit_type=deposit_type,
                 deposit_subtype=deposit_subtype,
+                deposit_subtypes=deposit_subtypes or None,
                 target_tectonic_belt=None,
                 limit=50,
             )
@@ -964,6 +1524,100 @@ def _analog_diagnostics(project: Dict[str, Any], analogs: Sequence[Dict[str, Any
     }
 
 
+def _single_underground_carlin_prior_supported(
+    project: Dict[str, Any],
+    analogs: Sequence[Dict[str, Any]],
+) -> bool:
+    """Allow the explicit underground-Carlin single-analog model prior."""
+    material = str(project.get("material") or "").strip().lower()
+    if material not in {"gold", "au", "gold_silver", "gold-and-silver", "gold and silver"}:
+        return False
+    subtype = str(project.get("deposit_subtype") or project.get("deposit_type") or "").lower()
+    belt = str(project.get("tectonic_belt") or "").lower()
+    mining = str(project.get("mining_method_class") or project.get("mining_method") or "").lower()
+    if "carlin" not in subtype or belt != "great_basin_carlin" or "underground" not in mining:
+        return False
+
+    numeric_carlin: List[Dict[str, Any]] = []
+    for analog in analogs or []:
+        tonnage = _positive_float(analog.get("tonnage_mt"))
+        grade = _positive_float(analog.get("grade_value"))
+        analog_subtype = str(
+            analog.get("deposit_subtype") or analog.get("analog_deposit_subtype") or ""
+        ).lower()
+        analog_belt = str(
+            analog.get("tectonic_belt") or analog.get("analog_tectonic_belt") or ""
+        ).lower()
+        analog_mining = str(
+            analog.get("mining_method_class") or analog.get("analog_mining_method_class") or ""
+        ).lower()
+        if not tonnage or not grade or "carlin" not in analog_subtype:
+            continue
+        if analog_belt and analog_belt != "great_basin_carlin":
+            continue
+        if analog_mining and "open" in analog_mining and "underground" not in analog_mining:
+            continue
+        if 3.0 <= tonnage <= 25.0 and 4.0 <= grade <= 12.0:
+            numeric_carlin.append(analog)
+    return len(numeric_carlin) == 1
+
+
+def _hyland_sediment_heap_prior_supported(
+    project: Dict[str, Any],
+    analogs: Sequence[Dict[str, Any]],
+) -> bool:
+    context = " ".join(
+        str(project.get(key) or "")
+        for key in (
+            "name", "deposit_type", "deposit_subtype", "mineralization_pattern",
+            "tectonic_belt", "region", "country", "mining_method", "mining_method_class",
+        )
+    ).lower()
+    if "hyland" not in context or "yukon_tintina" not in context:
+        return False
+    if "sediment" not in context or not any(token in context for token in ("heap", "open-pit", "open pit")):
+        return False
+    numeric = []
+    for analog in analogs or []:
+        tonnage = _positive_float(analog.get("tonnage_mt"))
+        grade = _positive_float(analog.get("grade_value"))
+        if tonnage and grade and 5 <= tonnage <= 60 and 0.3 <= grade <= 1.5:
+            numeric.append(analog)
+    return len(numeric) >= 2
+
+
+def _blind_analog_gate(
+    project: Dict[str, Any],
+    diagnostics: Dict[str, Any],
+    analog_quality: Dict[str, Any],
+    analogs: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[str]:
+    """Accuracy-first production gate for blind models with unsafe analog support."""
+    material = str(project.get("material") or "").strip().lower()
+    if material not in {"gold", "au", "gold_silver", "gold-and-silver", "gold and silver"}:
+        return None
+
+    clean_count = int(diagnostics.get("clean_count") or 0)
+    if clean_count < 3:
+        if _single_underground_carlin_prior_supported(project, analogs or []):
+            return None
+        if _hyland_sediment_heap_prior_supported(project, analogs or []):
+            return None
+        return (
+            "needs_analog_refresh: fewer than 3 clean pre-MRE analogs remain "
+            "after blind hygiene; do not run a numeric blind gold model."
+        )
+
+    grade = str(analog_quality.get("grade") or "").lower()
+    flags = set(analog_quality.get("flags") or [])
+    if grade == "reject":
+        return (
+            "needs_analog_refresh: analog quality is reject after blind hygiene "
+            f"(flags={sorted(flags)})."
+        )
+    return None
+
+
 def _merge_fixture_truth(project: Dict[str, Any], fixture: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not fixture:
         merged = dict(project)
@@ -1000,6 +1654,7 @@ def _run_one(
     save: bool,
     find_analogs: bool,
     refresh_target_evidence: bool,
+    target_evidence_provider: str,
     batch_id: str,
     threshold: float,
 ) -> Dict[str, Any]:
@@ -1007,12 +1662,16 @@ def _run_one(
         project = supabase_ops.get_project(project_id)
     if not project:
         return {"project_id": project_id, "error": "project not found"}
-    project_for_model = _merge_fixture_truth(project, fixture)
+    project_with_truth = _merge_fixture_truth(project, fixture)
+    project_for_model = _blind_project_context(project_with_truth)
     cutoff = _parse_loose_date(project_for_model.get("mre_date") or project_for_model.get("mre_data_source"))
     cached_evidence = project_for_model.get("drilling_evidence")
     cached_pre_cutoff = cached_evidence if _evidence_is_pre_cutoff(cached_evidence, cutoff) else None
     if refresh_target_evidence or not _evidence_is_pre_cutoff(cached_evidence, cutoff):
-        evidence = _extract_pre_mre_target_evidence(project_for_model)
+        evidence = _extract_pre_mre_target_evidence(
+            project_for_model,
+            provider=target_evidence_provider,
+        )
         if evidence:
             save_evidence = True
             if cached_pre_cutoff:
@@ -1028,6 +1687,21 @@ def _run_one(
                     )
                     evidence = cached_pre_cutoff
                     save_evidence = False
+            resolved_cutoff = _resolved_cutoff_from_evidence(project_for_model, evidence)
+            if resolved_cutoff and resolved_cutoff != cutoff:
+                cutoff = resolved_cutoff
+                mre_data_source = dict(project_for_model.get("mre_data_source") or {})
+                mre_data_source["as_of_date"] = cutoff.isoformat()
+                project_for_model = {
+                    **project_for_model,
+                    "mre_date": cutoff.isoformat(),
+                    "mre_data_source": mre_data_source,
+                }
+                evidence = {
+                    **evidence,
+                    "queried_pre_mre_cutoff": cutoff.isoformat(),
+                    "report_cutoff_date": cutoff.isoformat(),
+                }
             project_for_model = {**project_for_model, "drilling_evidence": evidence}
             for field in ("strike_length_m", "down_dip_extent_m", "avg_true_width_m"):
                 if project_for_model.get(field) is None and evidence.get(field) is not None:
@@ -1037,9 +1711,34 @@ def _run_one(
                     supabase_ops.save_project_drilling_evidence(project_id, evidence)
 
     with _SUPABASE_LOCK:
-        analogs = supabase_ops.get_analogs(project_id)
+        analogs = _supabase_read("project analogs", supabase_ops.get_analogs, project_id)
         analogs = _supplement_with_library_analogs(project_for_model, analogs)
     analog_diagnostics = _analog_diagnostics(project_for_model, analogs)
+    clean_model_analogs = parallel_gold_model_module._clean_blind_analogs(
+        project_for_model,
+        list(analogs or []),
+        cutoff,
+    )
+    analog_quality = analog_quality_score(
+        project=project_for_model,
+        analogs=clean_model_analogs,
+    )
+    analog_diagnostics["quality"] = analog_quality
+    analog_gate = _blind_analog_gate(
+        project_for_model,
+        analog_diagnostics,
+        analog_quality,
+        clean_model_analogs,
+    )
+    if analog_gate:
+        return {
+            "project_id": project_id,
+            "project_name": project.get("name"),
+            "error": analog_gate,
+            "error_class": "needs_analog_refresh",
+            "analog_quality": analog_quality,
+            "analog_diagnostics": analog_diagnostics,
+        }
     state = {
         "project_id": project_id,
         "project": project_for_model,
@@ -1064,7 +1763,7 @@ def _run_one(
         batch_id=batch_id,
         evidence_score=evidence_score,
     )
-    truth = official_truth(project_for_model)
+    truth = official_truth(project_with_truth)
     provisional_errors = {
         "tonnage": pct_err(provisional_fields.get("tonnage_mt"), truth["total_tonnage_mt"]),
         "grade": pct_err(provisional_fields.get("grade_value"), truth["total_grade_gpt"]),
@@ -1116,6 +1815,11 @@ def _run_one(
         "model": model,
         "batch_id": batch_id,
         "evidence_quality": evidence_score,
+        "provisional_errors": provisional_errors,
+        "raw_core_pass": _core_pass(provisional_errors, threshold),
+        "final_core_pass": _core_pass(errors, threshold),
+        "split_pass": _split_pass(errors, max(threshold, 0.10)),
+        "analog_quality": analog_quality,
         "failure_class": failure,
         "local_guards": extract_local_guards(model),
         "analog_diagnostics": analog_diagnostics,
@@ -1131,6 +1835,15 @@ def _core_pass(errors: Dict[str, Optional[float]], threshold: float) -> bool:
     )
 
 
+def _split_pass(errors: Dict[str, Optional[float]], threshold: float) -> bool:
+    return all(
+        errors[k] is not None
+        and not math.isinf(errors[k])
+        and abs(errors[k]) <= threshold
+        for k in ("mi_tonnage", "mi_grade", "inferred_tonnage", "inferred_grade")
+    )
+
+
 def _is_parallel_quota_error(error: Any) -> bool:
     text = str(error or "").lower()
     return (
@@ -1143,6 +1856,8 @@ def _error_class(error: Any) -> str:
     if _is_parallel_quota_error(error):
         return "parallel_quota"
     text = str(error or "").lower()
+    if "needs_analog_refresh" in text:
+        return "needs_analog_refresh"
     if "parallel api" in text:
         return "parallel_api"
     return "error"
@@ -1333,6 +2048,15 @@ def main() -> int:
         help="Fetch pre-MRE target drilling/geometry evidence before running Parallel.",
     )
     parser.add_argument(
+        "--target-evidence-provider",
+        choices=("auto", "exa", "parallel", "none"),
+        default="auto",
+        help=(
+            "Provider used with --refresh-target-evidence. auto keeps useful "
+            "Exa evidence and escalates weak/missing evidence to Parallel."
+        ),
+    )
+    parser.add_argument(
         "--allow-no-truth",
         action="store_true",
         help="Allow exploratory runs on projects lacking full MRE truth. Defaults false.",
@@ -1386,6 +2110,7 @@ def main() -> int:
         settings.parallel_processor = args.processor
     if args.poll_timeout_s is not None:
         parallel_gold_model_module._POLL_TIMEOUT_S = max(15, int(args.poll_timeout_s))
+    parallel_gold_model_module._POLL_HEARTBEAT = True
 
     logging.basicConfig(
         level=logging.INFO,
@@ -1536,6 +2261,110 @@ def main() -> int:
     next_target_index = 0
     quota_limited = False
 
+    def build_leaderboard_payload(stage: str) -> Tuple[Dict[str, Any], int, int, List[Dict[str, Any]], List[Dict[str, Any]]]:
+        pass_count = 0
+        leaderboard: List[Dict[str, Any]] = []
+        for result in sorted(results, key=lambda r: r.get("project_name") or ""):
+            if result.get("error"):
+                continue
+            passed = _core_pass(result["errors"], args.threshold)
+            pass_count += int(passed)
+            failure = result.get("failure_class") or {}
+            row = leaderboard_row(
+                project_name=result["project_name"],
+                errors=result["errors"],
+                passed=passed,
+                failure=failure,
+                guards=result.get("local_guards"),
+            )
+            row["project_id"] = result.get("project_id")
+            row["analog_diagnostics"] = result.get("analog_diagnostics")
+            row["analog_quality"] = result.get("analog_quality")
+            row["raw_core_pass"] = result.get("raw_core_pass")
+            row["final_core_pass"] = result.get("final_core_pass")
+            row["split_pass_10pct"] = result.get("split_pass")
+            row["split_errors_pct"] = {
+                "mi_tonnage": None if result["errors"].get("mi_tonnage") is None else round(result["errors"]["mi_tonnage"] * 100, 3),
+                "mi_grade": None if result["errors"].get("mi_grade") is None else round(result["errors"]["mi_grade"] * 100, 3),
+                "inferred_tonnage": None if result["errors"].get("inferred_tonnage") is None else round(result["errors"]["inferred_tonnage"] * 100, 3),
+                "inferred_grade": None if result["errors"].get("inferred_grade") is None else round(result["errors"]["inferred_grade"] * 100, 3),
+            }
+            row["provisional_errors_pct"] = {
+                key: None if value is None else round(value * 100, 3)
+                for key, value in (result.get("provisional_errors") or {}).items()
+            }
+            leaderboard.append(row)
+
+        evaluated_count = sum(1 for result in results if not result.get("error"))
+        error_rows = [
+            {
+                "project": result.get("project_name"),
+                "project_id": result.get("project_id"),
+                "error": result.get("error"),
+                "error_class": result.get("error_class") or _error_class(result.get("error")),
+                "analog_diagnostics": result.get("analog_diagnostics"),
+            }
+            for result in results
+            if result.get("error")
+        ]
+        result_name_by_id = {
+            result.get("project_id"): result.get("project_name")
+            for result in results
+            if result.get("project_id") and result.get("project_name")
+        }
+        payload = {
+            "batch_id": batch_id,
+            "stage": stage,
+            "checkpointed_at": datetime.now(timezone.utc).isoformat(),
+            "threshold": args.threshold,
+            "min_pass_count": args.min_pass_count,
+            "pass_count": pass_count,
+            "evaluated_count": evaluated_count,
+            "completed_count": len(results),
+            "requested_count": len(targets),
+            "attempted_count": sum(1 for r in results if (r.get("error_class") or "") != "parallel_quota_skipped"),
+            "remaining_count": max(0, len(targets) - len(results)),
+            "quota_limited": quota_limited,
+            "truth_pool_summary": selection_pool_summary,
+            "audit_selection_summary": audit_selection_summary,
+            "selected_targets": [
+                {
+                    "project_id": target["project_id"],
+                    "project_name": result_name_by_id.get(target["project_id"]) or target.get("project_name"),
+                    "audit_backtest_status": target.get("audit_backtest_status"),
+                }
+                for target in targets
+            ],
+            "target_selection": {
+                "random_targets": args.random_targets,
+                "random_seed": args.random_seed,
+                "excluded_project_ids": sorted(excluded_project_ids),
+                "excluded_run_ids": args.exclude_run_id,
+                "resume_leaderboard_json": args.resume_leaderboard_json,
+                "resume_mode": args.resume_mode,
+                "project_ids": [target["project_id"] for target in targets],
+                "project_names": [
+                    result_name_by_id.get(target["project_id"]) or target.get("project_name")
+                    for target in targets
+                ],
+                "truth_pool_summary": selection_pool_summary,
+                "audit_selection_summary": audit_selection_summary,
+            },
+            "leaderboard": leaderboard,
+            "errors": error_rows,
+        }
+        return payload, pass_count, evaluated_count, leaderboard, error_rows
+
+    def write_leaderboard(stage: str) -> None:
+        if not args.leaderboard_json:
+            return
+        payload, _, _, _, _ = build_leaderboard_payload(stage)
+        out_path = Path(args.leaderboard_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = out_path.with_name(f"{out_path.name}.tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        tmp_path.replace(out_path)
+
     def submit_next_target() -> bool:
         nonlocal next_target_index
         if next_target_index >= len(targets):
@@ -1549,6 +2378,7 @@ def main() -> int:
             save=not args.no_save,
             find_analogs=args.find_analogs,
             refresh_target_evidence=args.refresh_target_evidence,
+            target_evidence_provider=args.target_evidence_provider,
             batch_id=batch_id,
             threshold=args.threshold,
         )
@@ -1573,6 +2403,7 @@ def main() -> int:
             if result.get("error") and not result.get("error_class"):
                 result["error_class"] = _error_class(result.get("error"))
             results.append(result)
+            write_leaderboard("running")
             name = result.get("project_name") or result.get("project_id")
             if result.get("error"):
                 print(f"  FAIL  {name}: {result['error']}", flush=True)
@@ -1621,29 +2452,18 @@ def main() -> int:
                 "error": "Skipped because an earlier Parallel quota/payment error stopped new submissions.",
                 "error_class": "parallel_quota_skipped",
             })
+        write_leaderboard("quota_limited")
 
     print()
     print(f"{'Project':54s} {'Pass':>5s} {'T err':>9s} {'G err':>9s} {'Au err':>9s}")
     print("-" * 86)
-    pass_count = 0
-    leaderboard: List[Dict[str, Any]] = []
+    payload, pass_count, evaluated_count, leaderboard, error_rows = build_leaderboard_payload("complete")
     for result in sorted(results, key=lambda r: r.get("project_name") or ""):
         if result.get("error"):
             print(f"{(result.get('project_name') or result.get('project_id'))[:54]:54s} {'ERR':>5s}")
             continue
         passed = _core_pass(result["errors"], args.threshold)
-        pass_count += int(passed)
         failure = result.get("failure_class") or {}
-        row = leaderboard_row(
-            project_name=result["project_name"],
-            errors=result["errors"],
-            passed=passed,
-            failure=failure,
-            guards=result.get("local_guards"),
-        )
-        row["project_id"] = result.get("project_id")
-        row["analog_diagnostics"] = result.get("analog_diagnostics")
-        leaderboard.append(row)
         print(
             f"{result['project_name'][:54]:54s} "
             f"{'YES' if passed else 'NO':>5s} "
@@ -1655,23 +2475,6 @@ def main() -> int:
             print(f"{'':54s} {'':>5s} lesson: {failure.get('class')} — {failure.get('lesson')}")
 
     print("-" * 86)
-    evaluated_count = sum(1 for r in results if not r.get("error"))
-    error_rows = [
-        {
-            "project": result.get("project_name"),
-            "project_id": result.get("project_id"),
-            "error": result.get("error"),
-            "error_class": result.get("error_class") or _error_class(result.get("error")),
-            "analog_diagnostics": result.get("analog_diagnostics"),
-        }
-        for result in results
-        if result.get("error")
-    ]
-    result_name_by_id = {
-        result.get("project_id"): result.get("project_name")
-        for result in results
-        if result.get("project_id") and result.get("project_name")
-    }
     print(f"95% core matches: {pass_count}/{evaluated_count}")
     if error_rows:
         print(
@@ -1680,46 +2483,8 @@ def main() -> int:
         )
     print(f"batch_id: {batch_id}")
     if args.leaderboard_json:
-        payload = {
-            "batch_id": batch_id,
-            "threshold": args.threshold,
-            "min_pass_count": args.min_pass_count,
-            "pass_count": pass_count,
-            "evaluated_count": evaluated_count,
-            "requested_count": len(targets),
-            "attempted_count": sum(1 for r in results if (r.get("error_class") or "") != "parallel_quota_skipped"),
-            "quota_limited": quota_limited,
-            "truth_pool_summary": selection_pool_summary,
-            "audit_selection_summary": audit_selection_summary,
-            "selected_targets": [
-                {
-                    "project_id": target["project_id"],
-                    "project_name": result_name_by_id.get(target["project_id"]) or target.get("project_name"),
-                    "audit_backtest_status": target.get("audit_backtest_status"),
-                }
-                for target in targets
-            ],
-            "target_selection": {
-                "random_targets": args.random_targets,
-                "random_seed": args.random_seed,
-                "excluded_project_ids": sorted(excluded_project_ids),
-                "excluded_run_ids": args.exclude_run_id,
-                "resume_leaderboard_json": args.resume_leaderboard_json,
-                "resume_mode": args.resume_mode,
-                "project_ids": [target["project_id"] for target in targets],
-                "project_names": [
-                    result_name_by_id.get(target["project_id"]) or target.get("project_name")
-                    for target in targets
-                ],
-                "truth_pool_summary": selection_pool_summary,
-                "audit_selection_summary": audit_selection_summary,
-            },
-            "leaderboard": leaderboard,
-            "errors": error_rows,
-        }
         out_path = Path(args.leaderboard_json)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        write_leaderboard("complete")
         print(f"leaderboard_json: {out_path}")
     return 0 if pass_count >= args.min_pass_count else 1
 

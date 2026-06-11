@@ -309,6 +309,21 @@ def _build_profile(row: dict) -> dict:
         row.get("deposit_type"), row.get("mineralization_style"),
         row.get("alteration_signature"), row.get("district") or row.get("location_name"),
     )
+    context_blob = " ".join(
+        str(row.get(k) or "")
+        for k in (
+            "tectonic_belt", "district", "region", "location_name",
+            "mining_method", "mining_method_class", "processing_method",
+            "recovery_method",
+        )
+    ).lower()
+    if (
+        material in {"gold", "au"}
+        and explicit_subtype == "orogenic_general"
+        and str(clean_deposit_type or "").strip().lower() in {"orogenic", "orogenic gold"}
+    ):
+        clean_deposit_type = "orogenic gold"
+        row = {**row, "deposit_type": clean_deposit_type}
     if (
         not clean_deposit_type
         and not explicit_subtype
@@ -326,14 +341,26 @@ def _build_profile(row: dict) -> dict:
         clean_deposit_type = "orogenic gold"
         row = {**row, "deposit_type": clean_deposit_type}
         explicit_subtype = "orogenic_general"
-    context_blob = " ".join(
-        str(row.get(k) or "")
-        for k in (
-            "tectonic_belt", "district", "region", "location_name",
-            "mining_method", "mining_method_class", "processing_method",
-            "recovery_method",
+    if (
+        not explicit_subtype
+        and material in {"gold", "au"}
+        and (
+            belt == "newfoundland_appalachian"
+            or "newfoundland" in context_blob
+            or "appalachian" in context_blob
         )
-    ).lower()
+    ):
+        clean_deposit_type = "orogenic gold"
+        row = {**row, "deposit_type": clean_deposit_type}
+        explicit_subtype = "orogenic_general"
+    if (
+        not explicit_subtype
+        and material in {"gold", "au"}
+        and "open-pit gold" in str(clean_deposit_type or "").lower()
+    ):
+        clean_deposit_type = "orogenic gold"
+        row = {**row, "deposit_type": clean_deposit_type}
+        explicit_subtype = "orogenic_general"
     if (
         not explicit_subtype
         and material in {"gold", "au"}
@@ -398,6 +425,10 @@ def _build_profile(row: dict) -> dict:
     elif not pattern and explicit_subtype == "orogenic_general":
         pattern = "vein_hosted"
     return {
+        "name":                 row.get("name"),
+        "deposit_type":         clean_deposit_type,
+        "mining_method":        row.get("mining_method"),
+        "processing_method":    row.get("processing_method"),
         "material":             material,
         "deposit_type_family":  family,
         "deposit_subtype":      explicit_subtype,
@@ -477,6 +508,54 @@ def _is_gold_like(material: str) -> bool:
     return m in {"gold", "au", "gold_silver", "goldandsilver", "gold_and_silver"}
 
 
+def _context_blob(row: dict, profile: Optional[dict] = None) -> str:
+    profile = profile or {}
+    fields = (
+        "name",
+        "deposit_type",
+        "deposit_subtype",
+        "mineralization_pattern",
+        "mining_method",
+        "mining_method_class",
+        "processing_method",
+        "recovery_method",
+        "stage",
+        "district",
+        "region",
+        "country",
+    )
+    return " ".join(
+        str(source.get(key) or "")
+        for source in (row or {}, profile)
+        for key in fields
+    ).lower()
+
+
+def _is_tailings_context(row: dict, profile: Optional[dict] = None) -> bool:
+    blob = _context_blob(row, profile)
+    return any(token in blob for token in ("tailings", "tailing", "reprocessing", "re-process"))
+
+
+def _is_open_pit_context(row: dict, profile: Optional[dict] = None) -> bool:
+    blob = _context_blob(row, profile)
+    return any(
+        token in blob
+        for token in (
+            "open pit",
+            "open-pit",
+            "open_pit",
+            "openpit",
+            "heap leach",
+            "heap_leach",
+        )
+    )
+
+
+def _is_underground_context(row: dict, profile: Optional[dict] = None) -> bool:
+    blob = _context_blob(row, profile)
+    return any(token in blob for token in ("underground", "ug mine", "narrow vein", "high grade vein"))
+
+
 _MODELLING_CORE_FIELDS = (
     "deposit_subtype",
     "mineralization_pattern",
@@ -541,9 +620,43 @@ def _modellable_resource_issue(candidate: dict, profile: dict, target: dict) -> 
         return f"{name} resource standard is non-compliant ({compliance})"
 
     if _is_gold_like(material):
+        if _is_tailings_context(target) and not _is_tailings_context(candidate, profile):
+            return f"{name} is not a tailings/reprocessing analog for a tailings gold target"
+        if _is_tailings_context(candidate, profile) and not _is_tailings_context(target):
+            return f"{name} is a tailings/reprocessing analog and is unsafe for a non-tailings gold target"
         t_mining = (target.get("mining_method_class") or "").strip().lower()
         c_mining = (profile.get("mining_method_class") or "").strip().lower()
-        if t_mining == "underground_vein":
+        target_open_pit_like = _is_open_pit_context(target) or t_mining == "open_pit_selective"
+        target_underground_like = _is_underground_context(target) or t_mining == "underground_vein"
+        candidate_open_pit_like = _is_open_pit_context(candidate, profile) or "open" in c_mining
+        candidate_underground_like = _is_underground_context(candidate, profile) or "underground" in c_mining
+        target_grade = _as_positive_float(target.get("grade_value"))
+        target_belt = (target.get("tectonic_belt") or "").strip().lower()
+        target_blob = _context_blob(target)
+        target_subtype = (target.get("deposit_subtype") or target.get("deposit_type") or "").lower()
+        if (
+            target_open_pit_like
+            and (
+                target_belt == "central_african_orogenic"
+                or any(token in target_blob for token in ("cameroon", "central african republic", "chad"))
+            )
+            and (
+                any(token in target_subtype for token in ("orogenic", "greenstone", "gold"))
+                or target.get("mineralization_pattern") == "vein_hosted"
+            )
+        ):
+            c_belt = (profile.get("tectonic_belt") or "").strip().lower()
+            if c_belt == "central_african_copperbelt":
+                return (
+                    f"{name} is Central African Copperbelt style; unsafe analog "
+                    "for a Central African orogenic open-pit gold target"
+                )
+            if t > 120 or g < 1.5 or g > 2.7:
+                return (
+                    f"{name} scale/grade ({t:g} Mt at {g:g} g/t) is outside "
+                    "the Central African orogenic open-pit gold calibration band"
+                )
+        if target_underground_like and not target_open_pit_like:
             if c_mining and not geo_taxonomy.mining_method_compatible(t_mining, c_mining):
                 return (
                     f"{name} mining method {c_mining!r} is incompatible with "
@@ -558,6 +671,33 @@ def _modellable_resource_issue(candidate: dict, profile: dict, target: dict) -> 
                 return (
                     f"{name} has no mining-method class and large resource "
                     f"scale ({t:g} Mt); unsafe analog for an underground-vein target"
+                )
+        if target_open_pit_like:
+            compatible_target_mining = "open_pit_selective"
+            if candidate_underground_like and not candidate_open_pit_like:
+                return (
+                    f"{name} is underground/high-grade-vein style and is unsafe "
+                    "for an open-pit-selective gold target"
+                )
+            if c_mining and not geo_taxonomy.mining_method_compatible(compatible_target_mining, c_mining):
+                return (
+                    f"{name} mining method {c_mining!r} is incompatible with "
+                    "an open-pit-selective gold target"
+                )
+            if not c_mining and target_grade and target_grade <= 1.5 and g >= 2.0:
+                return (
+                    f"{name} has no mining-method class and high-grade gold "
+                    f"({g:g} g/t); unsafe analog for a low-grade open-pit-selective target"
+                )
+            if not c_mining and target_grade and target_grade <= 1.5 and t < 10:
+                return (
+                    f"{name} has no mining-method class and narrow/small resource "
+                    f"scale ({t:g} Mt); unsafe analog for an open-pit-selective target"
+                )
+            if not c_mining and not candidate_open_pit_like and g >= 2.5 and t < 25:
+                return (
+                    f"{name} has no mining-method class and high-grade/small-resource "
+                    f"gold ({t:g} Mt at {g:g} g/t); unsafe analog for an open-pit-selective target"
                 )
     return None
 
@@ -652,6 +792,10 @@ def _cascading_match(
         suffix = "" if t_sub == c_sub else f" sibling-of {t_sub}"
         reasons.append(f"L3 sub-type match ({c_sub}{suffix}): {rule_lessons}")
     elif t_sub and not c_sub:
+        if _is_gold_like(target.get("material") or ""):
+            return False, 0, 0, 0, [
+                f"L3 sub-type unknown on gold candidate (target={t_sub}); enrich or reject before modeling: {rule_lessons}"
+            ], "L3"
         # Target has subtype, candidate's is unknown. Don't drop — but record uncertainty.
         evaluated += 1
         reasons.append(f"L3 sub-type unknown on candidate (target={t_sub}): pass-through")
@@ -1050,6 +1194,20 @@ def _derive_rule_inputs(project: Dict) -> tuple:
         project.get("district") or project.get("location_name"),
     )
     belt = geo_taxonomy.detect_belt_from_row(project)
+    context_blob = " ".join(
+        str(project.get(k) or "")
+        for k in (
+            "tectonic_belt", "district", "region", "location_name",
+            "mining_method", "mining_method_class", "processing_method",
+            "recovery_method",
+        )
+    ).lower()
+    if (
+        (material or "").strip().lower() in {"gold", "au"}
+        and deposit_subtype == "orogenic_general"
+        and str(deposit_type or "").strip().lower() in {"orogenic", "orogenic gold"}
+    ):
+        deposit_type = "orogenic gold"
     if (
         not deposit_type
         and not deposit_subtype
@@ -1065,14 +1223,24 @@ def _derive_rule_inputs(project: Dict) -> tuple:
     ):
         deposit_type = "orogenic gold"
         deposit_subtype = "orogenic_general"
-    context_blob = " ".join(
-        str(project.get(k) or "")
-        for k in (
-            "tectonic_belt", "district", "region", "location_name",
-            "mining_method", "mining_method_class", "processing_method",
-            "recovery_method",
+    if (
+        not deposit_subtype
+        and (material or "").strip().lower() in {"gold", "au"}
+        and (
+            belt == "newfoundland_appalachian"
+            or "newfoundland" in context_blob
+            or "appalachian" in context_blob
         )
-    ).lower()
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
+    if (
+        not deposit_subtype
+        and (material or "").strip().lower() in {"gold", "au"}
+        and "open-pit gold" in str(deposit_type or "").lower()
+    ):
+        deposit_type = "orogenic gold"
+        deposit_subtype = "orogenic_general"
     if (
         not deposit_subtype
         and (material or "").strip().lower() in {"gold", "au"}

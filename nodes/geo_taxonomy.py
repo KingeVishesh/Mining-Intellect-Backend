@@ -446,6 +446,17 @@ TECTONIC_BELTS: Dict[str, Dict[str, List[str]]] = {
             "kédougou-kéniéba", "kedougou", "siguiri", "lefa",
         ],
     },
+    "central_african_orogenic": {
+        # Pan-African / Central African fold-belt orogenic gold targets such
+        # as Bibemi in northern Cameroon. Keep this distinct from the
+        # Central African Copperbelt, which is sediment-hosted Cu and gives
+        # bad gold analogs.
+        "countries": ["cameroon", "central african republic", "chad"],
+        "regions": [
+            "north region", "adamawa", "tchollire", "banyo", "bibemi",
+            "rey bouba", "central african fold belt", "pan-african",
+        ],
+    },
     "kibara_belt": {
         # Kibaran / Karagwe-Ankole orogen — Mesoproterozoic orogenic gold +
         # Sn-Ta in DRC South Kivu / Burundi / Rwanda / NW Tanzania. Geology
@@ -629,6 +640,10 @@ BELT_COMPATIBILITY_GROUPS: Dict[str, FrozenSet[str]] = {
         # central_african_copperbelt (sediment-hosted Cu) which blocked
         # all sensible analogs.
         "kibara_belt",
+        # Cameroon / Central African fold-belt gold is not the Lufilian
+        # Copperbelt; allow broad greenstone-orogenic peers, then rely on
+        # analog hygiene/model windows to avoid giant low-grade outliers.
+        "central_african_orogenic",
     }),
     # Guiana Shield — Birimian-equivalent age, but kept strict per the
     # May-2026 Cartier audit (see archean_greenstone note).

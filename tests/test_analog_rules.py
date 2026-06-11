@@ -121,6 +121,139 @@ def test_missing_taxonomy_yilgarn_gold_builds_orogenic_profile():
     assert profile["tectonic_belt"] == "yilgarn"
 
 
+def test_open_pit_gold_deposit_label_routes_to_orogenic_profile_and_rule_inputs():
+    project = {
+        "name": "Goldfields Project",
+        "material": "gold",
+        "deposit_type": "Open-pit gold deposits",
+        "mining_method_class": "open_pit_selective",
+    }
+
+    profile = _build_profile(project)
+    material, deposit_type, deposit_subtype, pattern = _derive_rule_inputs(project)
+
+    assert profile["deposit_type_family"] == "orogenic"
+    assert profile["deposit_subtype"] == "orogenic_general"
+    assert material == "gold"
+    assert deposit_type == "orogenic gold"
+    assert deposit_subtype == "orogenic_general"
+    assert pattern == "disseminated_bulk"
+
+
+def test_gold_cascade_rejects_unknown_candidate_subtype_when_target_has_subtype():
+    rule = _find_rule("analog_sel_gold_orogenic_bulk")
+    target = _build_profile({
+        "name": "Low Grade Orogenic Target",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "mineralization_pattern": "disseminated_bulk",
+        "mining_method_class": "open_pit_selective",
+        "tonnage_mt": 80.0,
+        "grade_value": 1.1,
+        "grade_unit": "g/t Au",
+    })
+    candidate = _build_profile({
+        "name": "Untyped Gold Resource",
+        "material": "gold",
+        "tonnage_mt": 60.0,
+        "grade_value": 1.0,
+        "grade_unit": "g/t Au",
+        "source_url": "https://example.com/resource.pdf",
+    })
+
+    passes, _pts, _matched, _evaluated, reasons, dropped_at = _cascading_match(
+        target, candidate, rule,
+    )
+
+    assert not passes
+    assert dropped_at == "L3"
+    assert any("sub-type unknown" in reason for reason in reasons)
+
+
+def test_gold_modellable_resource_rejects_high_grade_unknown_mining_for_low_grade_open_pit():
+    target = _build_profile({
+        "name": "Low Grade Orogenic Target",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method_class": "open_pit_selective",
+        "tonnage_mt": 80.0,
+        "grade_value": 1.1,
+        "grade_unit": "g/t Au",
+    })
+    candidate = {
+        "name": "High Grade Unknown Mining",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "tonnage_mt": 20.0,
+        "grade_value": 3.5,
+        "grade_unit": "g/t Au",
+        "source_url": "https://example.com/resource.pdf",
+    }
+    profile = _build_profile(candidate)
+
+    issue = _modellable_resource_issue(candidate, profile, target)
+
+    assert issue
+    assert "unsafe analog for a low-grade open-pit-selective target" in issue
+
+
+def test_gold_modellable_resource_rejects_high_grade_unknown_mining_for_open_pit_without_target_grade():
+    target = _build_profile({
+        "name": "Open Pit Orogenic Target",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "mining_method": "Open pit",
+        "grade_unit": "g/t Au",
+    })
+    candidate = {
+        "name": "Small High Grade Unknown Mining",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "tonnage_mt": 8.0,
+        "grade_value": 4.2,
+        "grade_unit": "g/t Au",
+        "source_url": "https://example.com/resource.pdf",
+    }
+
+    issue = _modellable_resource_issue(candidate, _build_profile(candidate), target)
+
+    assert issue
+    assert "high-grade/small-resource" in issue
+
+
+def test_gold_modellable_resource_rejects_tailings_cross_contamination():
+    tailings_target = _build_profile({
+        "name": "Historic Mine Tailings Project",
+        "material": "gold",
+        "deposit_type": "Historic mine tailings",
+        "mining_method": "Reprocessing Tailings",
+    })
+    ordinary_candidate = {
+        "name": "Open Pit Orogenic Mine",
+        "material": "gold",
+        "deposit_type": "orogenic gold",
+        "deposit_subtype": "orogenic_general",
+        "tonnage_mt": 50.0,
+        "grade_value": 1.1,
+        "grade_unit": "g/t Au",
+        "source_url": "https://example.com/resource.pdf",
+    }
+
+    issue = _modellable_resource_issue(
+        ordinary_candidate,
+        _build_profile(ordinary_candidate),
+        tailings_target,
+    )
+
+    assert issue
+    assert "not a tailings/reprocessing analog" in issue
+
+
 def test_irgs_sibling_subtypes_soft_pass_oxidation_variants():
     rule = _find_rule("analog_sel_gold_irgs")
     target = _build_profile({
@@ -1625,6 +1758,55 @@ def test_gold_guiana_shear_hosted_routes_to_orogenic():
     assert profile["deposit_subtype"] == "orogenic_general"
     assert deposit_type == "orogenic gold"
     assert deposit_subtype == "orogenic_general"
+
+
+def test_cameroon_orogenic_gold_routes_to_central_african_belt():
+    project = {
+        "name": "Bibemi Project",
+        "material": "Gold",
+        "country": "Cameroon",
+        "region": "North region",
+        "deposit_type": "Orogenic",
+        "mineralization_pattern": "vein_hosted",
+        "mining_method_class": "open_pit_selective",
+    }
+
+    profile = _build_profile(project)
+    _material, deposit_type, deposit_subtype, _pattern = _derive_rule_inputs(project)
+
+    assert profile["tectonic_belt"] == "central_african_orogenic"
+    assert profile["deposit_subtype"] == "orogenic_general"
+    assert deposit_type == "orogenic gold"
+    assert deposit_subtype == "orogenic_general"
+
+
+def test_central_african_orogenic_target_rejects_giant_low_grade_analog():
+    target = _build_profile({
+        "name": "Bibemi-style Target",
+        "material": "gold",
+        "country": "Cameroon",
+        "region": "North region",
+        "deposit_type": "Orogenic",
+        "deposit_subtype": "orogenic_general",
+        "mineralization_pattern": "vein_hosted",
+        "mining_method_class": "open_pit_selective",
+    })
+    candidate = {
+        "name": "Bullabulling",
+        "material": "gold",
+        "country": "Australia",
+        "region": "Western Australia",
+        "deposit_type": "Orogenic",
+        "deposit_subtype": "orogenic_general",
+        "tonnage_mt": 130.0,
+        "grade_value": 1.0,
+        "grade_unit": "g/t Au",
+    }
+
+    issue = _modellable_resource_issue(candidate, _build_profile(candidate), target)
+
+    assert issue is not None
+    assert "Central African orogenic open-pit" in issue
 
 
 def test_self_analog_filter_rejects_omai_wenot_variant():

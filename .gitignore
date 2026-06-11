@@ -30,6 +30,9 @@ env/
 # Analog quality judge per-run output (commit the script, not the runs)
 reports/judge/
 
+# Backtest artifacts are generated run outputs, not production code
+artifacts/
+
 # OS
 .DS_Store
 Thumbs.db
