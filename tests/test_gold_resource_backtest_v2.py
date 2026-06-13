@@ -49,6 +49,74 @@ def test_truth_builder_selects_earliest_validated_full_split_mre():
     assert "cutoff_date" not in truth
 
 
+def test_truth_builder_rejects_updated_mre_sources():
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Updated MRE Gold",
+        "mre_mi_tonnage_mt": 10,
+        "mre_mi_grade": 2,
+        "mre_inferred_tonnage_mt": 20,
+        "mre_inferred_grade": 1,
+    }
+    truth, reason = build_truth_row(project, [
+        {
+            "id": "updated",
+            "effective_date": "2025-05-21",
+            "mi_tonnage_mt": 12,
+            "mi_grade": 2,
+            "inferred_tonnage_mt": 24,
+            "inferred_grade": 1,
+            "source_url": "https://example.com/updated-mre-technical-report",
+        }
+    ])
+
+    assert truth is None
+    assert reason is not None
+    assert "non_first_or_updated_mre_source" in reason
+
+
+def test_truth_builder_rejects_year_end_placeholder_dates():
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Placeholder MRE Gold",
+        "mre_mi_tonnage_mt": 10,
+        "mre_mi_grade": 2,
+        "mre_inferred_tonnage_mt": 20,
+        "mre_inferred_grade": 1,
+    }
+    truth, reason = build_truth_row(project, [
+        {
+            "id": "placeholder",
+            "effective_date": "2025-12-31",
+            "mi_tonnage_mt": 12,
+            "mi_grade": 2,
+            "inferred_tonnage_mt": 24,
+            "inferred_grade": 1,
+            "source_url": "https://example.com/mineral-resource-estimate",
+        }
+    ])
+
+    assert truth is None
+    assert reason is not None
+    assert "year_end_placeholder_mre_date" in reason
+
+
+def test_truth_builder_does_not_use_project_mre_mirror_as_fallback():
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Mirror Only Gold",
+        "resource_vintage_year": 2024,
+        "mre_mi_tonnage_mt": 10,
+        "mre_mi_grade": 2,
+        "mre_inferred_tonnage_mt": 20,
+        "mre_inferred_grade": 1,
+    }
+    truth, reason = build_truth_row(project, [])
+
+    assert truth is None
+    assert reason == "no_validated_first_mre_with_full_split_and_date"
+
+
 def test_evidence_builder_stores_rejected_payloads_without_post_cutoff_source_date():
     rows = evidence_rows_from_payload(
         project_id="project-1",

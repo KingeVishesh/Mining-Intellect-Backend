@@ -94,7 +94,9 @@ support is insufficient, the result is `no_prediction`.
 
 A project will return `no_prediction` unless it has:
 
-- one validated `gold_mre_truths` row for scoring
+- one validated first-MRE `gold_mre_truths` row for scoring; updated MREs,
+  post-MRE study sources, year-end placeholder dates, missing source URLs, and
+  legacy project MRE mirrors are rejected
 - pre-MRE accepted evidence for tonnage and grade
 - at least three clean analogs
 - at least three split-ready analogs with M&I and inferred tonnage/grade

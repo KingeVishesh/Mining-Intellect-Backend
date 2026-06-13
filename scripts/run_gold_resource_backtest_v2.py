@@ -66,6 +66,8 @@ from nodes.parallel_gold_model import _run_parallel_task  # noqa: E402
 
 LOGGER = logging.getLogger("gold_resource_backtest_v2")
 DATE_RE = re.compile(r"\b(19|20)\d{2}(?:[-/](?:0?[1-9]|1[0-2])(?:[-/](?:0?[1-9]|[12]\d|3[01]))?)?\b")
+UPDATED_MRE_RE = re.compile(r"\b(updated|update|supersedes|latest|revised|revision)\b", re.IGNORECASE)
+POST_MRE_STUDY_RE = re.compile(r"\b(pea|pfs|pre[- ]?feasibility|feasibility|fs|mine[- ]?plan)\b", re.IGNORECASE)
 UUID_NS = uuid.uuid5(uuid.NAMESPACE_URL, "mining-intellect-gold-resource-predictor-v2")
 LEGACY_PROJECT_SELECT = (
     "id,name,company_name,material,country,region,district,location_name,"
@@ -211,30 +213,49 @@ def build_gold_project_row(project: Dict[str, Any], *, data_status: str = "candi
     }
 
 
+def truth_run_rejection_reasons(run: Dict[str, Any], effective: Optional[date]) -> List[str]:
+    reasons: List[str] = []
+    source_url = str(run.get("source_url") or "").strip()
+    source_text = " ".join(
+        str(value or "")
+        for value in (
+            run.get("source_url"),
+            run.get("source"),
+            run.get("notes"),
+        )
+    )
+    if not source_url:
+        reasons.append("missing_mre_source_url")
+    if effective is None:
+        reasons.append("missing_mre_effective_date")
+    elif effective.month == 12 and effective.day == 31:
+        reasons.append("year_end_placeholder_mre_date")
+    if UPDATED_MRE_RE.search(source_text):
+        reasons.append("non_first_or_updated_mre_source")
+    if POST_MRE_STUDY_RE.search(source_text) and not re.search(r"\bmre\b|\bmineral resource\b", source_text, re.IGNORECASE):
+        reasons.append("post_mre_study_source")
+    return reasons
+
+
 def build_truth_row(project: Dict[str, Any], runs: Sequence[Dict[str, Any]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     candidates: List[Tuple[date, Dict[str, Any], Dict[str, float]]] = []
+    rejected_reasons: Counter[str] = Counter()
     for run in runs:
         effective = parse_loose_date(run.get("effective_date"))
-        if not effective:
+        reasons = truth_run_rejection_reasons(run, effective)
+        if reasons:
+            rejected_reasons.update(reasons)
             continue
         values = full_split_values(project, run)
         if values:
             candidates.append((effective, run, values))
+        else:
+            rejected_reasons["missing_full_mre_split"] += 1
 
     if not candidates:
-        vintage_cutoff = parse_loose_date(project.get("resource_vintage_year"))
-        values = full_split_values(project)
-        if vintage_cutoff and values:
-            run = {
-                "id": None,
-                "effective_date": vintage_cutoff.isoformat(),
-                "source": "legacy_projects_mre_mirror",
-                "source_url": None,
-                "notes": "Used legacy project MRE mirror with resource_vintage_year as first-MRE date.",
-            }
-            candidates.append((vintage_cutoff, run, values))
-
-    if not candidates:
+        if rejected_reasons:
+            detail = ",".join(f"{reason}:{count}" for reason, count in sorted(rejected_reasons.items()))
+            return None, f"no_validated_first_mre_with_full_split_and_date:{detail}"
         return None, "no_validated_first_mre_with_full_split_and_date"
 
     effective, run, values = sorted(candidates, key=lambda item: item[0])[0]
