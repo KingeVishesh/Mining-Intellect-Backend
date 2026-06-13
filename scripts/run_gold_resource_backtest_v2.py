@@ -731,6 +731,48 @@ def cache_key_for(task_kind: str, request_payload: Dict[str, Any]) -> str:
     return hashlib.sha256(f"{task_kind}:{payload}".encode("utf-8")).hexdigest()
 
 
+def comparable_parallel_request_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in (payload or {}).items()
+        if key != "predictor_version"
+    }
+
+
+def find_reusable_parallel_cache(
+    *,
+    task_kind: str,
+    project_id: str,
+    cutoff_date: Optional[date],
+    request_payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    target_payload = comparable_parallel_request_payload(request_payload)
+    query = (
+        supabase_ops.get_client()
+        .table(GOLD_TABLES["parallel_cache"])
+        .select("*")
+        .eq("task_kind", task_kind)
+        .eq("project_id", project_id)
+        .eq("response_status", "complete")
+        .order("created_at", desc=True)
+        .limit(20)
+    )
+    if cutoff_date is None:
+        query = query.is_("cutoff_date", "null")
+    else:
+        query = query.eq("cutoff_date", cutoff_date.isoformat())
+    rows = query.execute().data or []
+    for row in rows:
+        if comparable_parallel_request_payload(row.get("request_payload") or {}) == target_payload:
+            return row
+    return None
+
+
+def provider_task_id_from_error(error: str) -> Optional[str]:
+    match = re.search(r"\brun_id=([A-Za-z0-9_-]+)", error or "")
+    return match.group(1) if match else None
+
+
 def run_parallel_cached(
     *,
     task_kind: str,
@@ -751,11 +793,20 @@ def run_parallel_cached(
     cached = get_parallel_cache(key)
     if cached and cached.get("response_status") == "complete":
         return cached.get("response_payload"), False
+    reusable = find_reusable_parallel_cache(
+        task_kind=task_kind,
+        project_id=project_id,
+        cutoff_date=cutoff_date,
+        request_payload=request_payload,
+    )
+    if reusable:
+        return reusable.get("response_payload"), False
     if not allow_paid:
         return None, False
     try:
         response = _run_parallel_task(prompt=prompt, output_schema=output_schema)
     except Exception as exc:
+        provider_error = str(exc)
         if save:
             upsert_parallel_cache({
                 "task_kind": task_kind,
@@ -765,7 +816,8 @@ def run_parallel_cached(
                 "request_payload": request_payload,
                 "response_payload": {},
                 "response_status": "failed",
-                "provider_error": str(exc),
+                "provider_error": provider_error,
+                "provider_task_id": provider_task_id_from_error(provider_error),
             })
         return None, True
     if save and response is not None:

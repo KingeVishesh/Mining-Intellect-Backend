@@ -236,6 +236,7 @@ def test_parallel_cache_replays_when_paid_calls_are_disallowed(monkeypatch):
 
 def test_parallel_cache_miss_does_not_spend_when_paid_calls_are_disallowed(monkeypatch):
     monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: None)
+    monkeypatch.setattr(backtest_v2, "find_reusable_parallel_cache", lambda **kwargs: None)
 
     def fail_parallel_call(**kwargs):
         raise AssertionError("paid Parallel call should be gated off")
@@ -256,13 +257,42 @@ def test_parallel_cache_miss_does_not_spend_when_paid_calls_are_disallowed(monke
     assert paid_call is False
 
 
+def test_parallel_cache_replays_equivalent_complete_cache_before_paid_call(monkeypatch):
+    payload = {"total_holes": 176}
+    monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: {"response_status": "failed"})
+    monkeypatch.setattr(
+        backtest_v2,
+        "find_reusable_parallel_cache",
+        lambda **kwargs: {"response_status": "complete", "response_payload": payload},
+    )
+
+    def fail_parallel_call(**kwargs):
+        raise AssertionError("equivalent cached Parallel replay should not call provider")
+
+    monkeypatch.setattr(backtest_v2, "_run_parallel_task", fail_parallel_call)
+
+    response, paid_call = backtest_v2.run_parallel_cached(
+        task_kind="pre_mre_evidence",
+        project_id="project-1",
+        cutoff_date=date(2021, 4, 1),
+        prompt="prompt",
+        output_schema={"type": "object"},
+        save=True,
+        allow_paid=True,
+    )
+
+    assert response == payload
+    assert paid_call is False
+
+
 def test_parallel_cache_failed_paid_call_counts_and_caches(monkeypatch):
     writes = []
     monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: None)
+    monkeypatch.setattr(backtest_v2, "find_reusable_parallel_cache", lambda **kwargs: None)
     monkeypatch.setattr(backtest_v2, "upsert_parallel_cache", lambda row: writes.append(row) or row)
 
     def fail_parallel_call(**kwargs):
-        raise RuntimeError("Parallel task did not complete within 300s")
+        raise RuntimeError("Parallel task did not complete within 300s (status=running, run_id=trun_timeout)")
 
     monkeypatch.setattr(backtest_v2, "_run_parallel_task", fail_parallel_call)
 
@@ -280,6 +310,7 @@ def test_parallel_cache_failed_paid_call_counts_and_caches(monkeypatch):
     assert paid_call is True
     assert writes[0]["response_status"] == "failed"
     assert "Parallel task did not complete" in writes[0]["provider_error"]
+    assert writes[0]["provider_task_id"] == "trun_timeout"
 
 
 def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch):
