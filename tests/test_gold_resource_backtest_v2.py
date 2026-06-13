@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 
 import scripts.run_gold_resource_backtest_v2 as backtest_v2
 from scripts.run_gold_resource_backtest_v2 import (
@@ -226,6 +227,55 @@ def test_parallel_cache_miss_does_not_spend_when_paid_calls_are_disallowed(monke
 
     assert response is None
     assert paid_call is False
+
+
+def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch):
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Missing First MRE Gold",
+        "company_name": "Example Gold",
+        "material": "gold",
+        "mre_mi_tonnage_mt": 10,
+        "mre_mi_grade": 1.0,
+        "mre_inferred_tonnage_mt": 2,
+        "mre_inferred_grade": 1.1,
+    }
+    events = []
+
+    monkeypatch.setattr(backtest_v2, "gold_table_counts", lambda: {})
+    monkeypatch.setattr(backtest_v2, "fetch_legacy_truth_projects", lambda limit=None, project_ids=None: [project])
+    monkeypatch.setattr(backtest_v2, "fetch_mre_runs", lambda project_ids: {project["id"]: []})
+    monkeypatch.setattr(backtest_v2, "create_gold_backtest_batch", lambda row: {"id": "batch-1"})
+    monkeypatch.setattr(backtest_v2, "update_gold_backtest_batch", lambda batch_id, patch: {})
+    monkeypatch.setattr(backtest_v2, "upsert_gold_project", lambda row: {})
+    monkeypatch.setattr(
+        backtest_v2,
+        "ensure_project_for_parallel_cache",
+        lambda project, *, data_status: events.append(("ensure_project", data_status)),
+    )
+
+    def fake_run_parallel_cached(**kwargs):
+        assert events == [("ensure_project", "candidate")]
+        return {"status": "no_validated_first_mre", "confidence": "high"}, False
+
+    monkeypatch.setattr(backtest_v2, "run_parallel_cached", fake_run_parallel_cached)
+
+    summary = backtest_v2.run(SimpleNamespace(
+        processor=None,
+        poll_timeout_s=None,
+        project_id=[project["id"]],
+        limit=None,
+        no_save=False,
+        research_missing_truth=True,
+        max_parallel_truth_projects=1,
+        research_missing_evidence=False,
+        max_parallel_projects=0,
+        threshold=0.05,
+        run_label="test-run",
+    ))
+
+    assert summary["excluded"] == 1
+    assert summary["parallel_truth_research_calls"] == 0
 
 
 def test_evidence_builder_stores_rejected_payloads_without_post_cutoff_source_date():

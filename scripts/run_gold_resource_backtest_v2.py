@@ -213,6 +213,10 @@ def build_gold_project_row(project: Dict[str, Any], *, data_status: str = "candi
     }
 
 
+def ensure_project_for_parallel_cache(project: Dict[str, Any], *, data_status: str) -> None:
+    upsert_gold_project(build_gold_project_row(project, data_status=data_status))
+
+
 def truth_run_rejection_reasons(run: Dict[str, Any], effective: Optional[date]) -> List[str]:
     reasons: List[str] = []
     source_url = str(run.get("source_url") or "").strip()
@@ -967,6 +971,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             if args.research_missing_truth:
                 prompt, schema = parallel_truth_prompt(project, mre_runs_by_project.get(project["id"], []))
                 try:
+                    if not args.no_save:
+                        ensure_project_for_parallel_cache(project, data_status="candidate")
                     response, paid_call = run_parallel_cached(
                         task_kind="mre_truth",
                         project_id=project["id"],
@@ -1022,6 +1028,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         if needs_parallel_evidence:
             prompt, schema = parallel_evidence_prompt(project, cutoff)
             try:
+                if not args.no_save:
+                    ensure_project_for_parallel_cache(project, data_status="candidate")
                 response, paid_call = run_parallel_cached(
                     task_kind="pre_mre_evidence",
                     project_id=project["id"],

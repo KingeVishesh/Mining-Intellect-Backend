@@ -9,7 +9,10 @@ Gold v2 is a clean, gold-only prediction path. It does not rely on legacy
 - `no_prediction` is better than a weak estimate.
 - Target MRE data is never used in blind mode.
 - Evidence must have a source date before the target MRE cutoff.
-- MRE-tainted evidence is rejected.
+- MRE-tainted evidence is rejected. Pre-cutoff drilling releases are allowed
+  when they merely say the drilling is ahead of, prior to, or supporting a
+  future maiden resource and do not disclose MRE tables, technical reports,
+  M&I/Inferred resources, or resource-estimate values.
 - Analog candidates must pass deterministic gates before they can influence a
   prediction.
 - Cached DB rows can be replayed without Parallel.

@@ -74,6 +74,20 @@ def test_rejects_post_cutoff_and_mre_tainted_evidence():
     assert "mre_tainted_source" in reasons
 
 
+def test_accepts_pre_cutoff_drilling_release_ahead_of_maiden_resource():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "average_intercept_grade_gpt",
+        1.64,
+        source_title="Further Strong Drilling Results at Mandilla Ahead of Maiden Mineral Resource",
+        source_url="https://example.com/mandilla-drilling-ahead-of-maiden-resource.pdf",
+        source_date=date(2024, 12, 1),
+        confidence="medium",
+    ))
+
+    assert ok is True
+    assert reasons == []
+
+
 def test_missing_source_date_blocks_evidence():
     ok, reasons = validate_pre_mre_evidence(_evidence(
         "geometry_tonnage_mt",

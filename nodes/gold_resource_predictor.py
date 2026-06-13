@@ -44,6 +44,20 @@ _TAINT_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_PRE_MRE_DRILLING_CONTEXT_RE = re.compile(
+    r"\b("
+    r"ahead of|prior to|before|pre[- ]?resource|pre[- ]?mre|towards?|supporting"
+    r")\b.{0,80}\b(maiden\s+)?(mineral\s+)?resource\b|"
+    r"\bresource drilling\b",
+    re.IGNORECASE,
+)
+_HARD_RESOURCE_DISCLOSURE_RE = re.compile(
+    r"\b("
+    r"technical report|resource estimate|mineral resource estimate|"
+    r"measured and indicated|inferred resource|ni[- ]?43[- ]?101|jorc|sk[- ]?1300"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _LOW_QUALITY_RESOURCE_STANDARDS = {
     "historical",
@@ -148,6 +162,19 @@ def evidence_is_mre_tainted(fact: GoldEvidenceFact | Dict[str, Any]) -> bool:
     fact_model = _as_evidence(fact)
     if fact_model.is_mre_tainted:
         return True
+    title_blob = _source_blob(
+        fact_model.source_url,
+        fact_model.source_title,
+        fact_model.source_document_type,
+    )
+    normalized_title_blob = re.sub(r"[-_/]+", " ", title_blob)
+    if (
+        fact_model.source_date is not None
+        and fact_model.source_date < fact_model.cutoff_date
+        and _PRE_MRE_DRILLING_CONTEXT_RE.search(normalized_title_blob)
+        and not _HARD_RESOURCE_DISCLOSURE_RE.search(normalized_title_blob)
+    ):
+        return False
     blob = _source_blob(
         fact_model.source_url,
         fact_model.source_title,
