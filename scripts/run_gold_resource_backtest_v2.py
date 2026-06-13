@@ -1159,6 +1159,311 @@ than filling fields from memory.
     return prompt, schema
 
 
+def truth_cutoff(truth: Optional[Dict[str, Any]]) -> Optional[date]:
+    if not truth:
+        return None
+    return parse_loose_date(truth.get("cutoff_date") or truth.get("effective_date") or truth.get("publication_date"))
+
+
+def gold_target_proxy_state(
+    project: Dict[str, Any],
+    truth: Optional[Dict[str, Any]],
+) -> Tuple[Optional[date], List[Dict[str, Any]], Optional[float], Optional[float]]:
+    cutoff = truth_cutoff(truth)
+    if not cutoff:
+        return None, [], None, None
+
+    evidence_rows: List[Dict[str, Any]] = []
+    try:
+        bundle = load_gold_case_bundle(project["id"])
+        evidence_rows.extend(bundle.get("evidence") or [])
+    except Exception as exc:
+        LOGGER.debug("failed to replay DB evidence for %s before Parallel spend: %s", project.get("name"), exc)
+
+    evidence_rows.extend(
+        evidence_rows_from_payload(
+            project_id=project["id"],
+            truth_id=truth.get("id") if isinstance(truth, dict) else None,
+            cutoff_date=cutoff,
+            evidence=project.get("drilling_evidence"),
+        )
+    )
+    accepted_evidence, _rejected = split_evidence(row for row in evidence_rows if row.get("evidence_status") == "accepted")
+    tonnage, _ = evidence_tonnage_proxy(accepted_evidence)
+    grade, _ = evidence_grade_proxy(accepted_evidence)
+    return cutoff, accepted_evidence, tonnage, grade
+
+
+def needs_parallel_evidence_research(project: Dict[str, Any], truth: Optional[Dict[str, Any]]) -> bool:
+    cutoff, _accepted_evidence, tonnage, grade = gold_target_proxy_state(project, truth)
+    if not cutoff:
+        return False
+    return tonnage is None or grade is None
+
+
+def prefetch_parallel_evidence_project(
+    project: Dict[str, Any],
+    *,
+    truth: Dict[str, Any],
+    save: bool,
+    allow_paid: bool,
+) -> Tuple[str, bool]:
+    cutoff, _accepted_evidence, tonnage, grade = gold_target_proxy_state(project, truth)
+    if not cutoff or (tonnage is not None and grade is not None):
+        return project["id"], False
+    if save:
+        ensure_project_for_parallel_cache(project, data_status="candidate")
+    prompt, schema = parallel_evidence_prompt(project, cutoff)
+    _response, paid_call = run_parallel_cached(
+        task_kind="pre_mre_evidence",
+        project_id=project["id"],
+        cutoff_date=cutoff,
+        prompt=prompt,
+        output_schema=schema,
+        save=save,
+        allow_paid=allow_paid,
+    )
+    return project["id"], paid_call
+
+
+def prefetch_parallel_evidence_cache(
+    projects: Sequence[Dict[str, Any]],
+    *,
+    validated_gold_truths: Dict[str, Dict[str, Any]],
+    max_paid: int,
+    max_workers: int,
+    save: bool,
+) -> int:
+    if not save or max_workers <= 1:
+        return 0
+    worker_count = max(1, min(10, int(max_workers)))
+    candidates = [
+        project
+        for project in projects
+        if validated_gold_truths.get(project["id"]) and needs_parallel_evidence_research(project, validated_gold_truths[project["id"]])
+    ]
+    if not candidates:
+        return 0
+
+    paid_count = 0
+    next_index = 0
+    pending: Dict[Future[Tuple[str, bool]], Dict[str, Any]] = {}
+
+    def can_submit_more() -> bool:
+        if next_index >= len(candidates) or len(pending) >= worker_count:
+            return False
+        if max_paid <= 0:
+            return True
+        return paid_count + len(pending) < max_paid
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        while can_submit_more():
+            project = candidates[next_index]
+            next_index += 1
+            pending[
+                executor.submit(
+                    prefetch_parallel_evidence_project,
+                    project,
+                    truth=validated_gold_truths[project["id"]],
+                    save=save,
+                    allow_paid=max_paid > 0,
+                )
+            ] = project
+
+        while pending:
+            done, _not_done = wait(set(pending), return_when=FIRST_COMPLETED)
+            for future in done:
+                project = pending.pop(future)
+                try:
+                    project_id, paid_call = future.result()
+                    if paid_call:
+                        paid_count += 1
+                    LOGGER.info(
+                        "Parallel evidence prefetch finished for %s paid_call=%s",
+                        project_id,
+                        paid_call,
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Parallel evidence prefetch failed for %s: %s",
+                        project.get("name"),
+                        exc,
+                    )
+            while can_submit_more():
+                project = candidates[next_index]
+                next_index += 1
+                pending[
+                    executor.submit(
+                        prefetch_parallel_evidence_project,
+                        project,
+                        truth=validated_gold_truths[project["id"]],
+                        save=save,
+                        allow_paid=max_paid > 0,
+                    )
+                ] = project
+
+    return paid_count
+
+
+def analog_candidate_rows_for_prefetch(project: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    project_row = build_gold_project_row(project, data_status="truth_validated")
+    rows: List[Dict[str, Any]] = []
+    try:
+        bundle = load_gold_case_bundle(project["id"])
+        if bundle.get("project"):
+            project_row = bundle["project"]
+        rows.extend(bundle.get("analog_candidates") or [])
+    except Exception as exc:
+        LOGGER.debug("failed to replay DB analogs for %s before Parallel spend: %s", project.get("name"), exc)
+
+    rows.extend(
+        row for row in (analog_candidate_row(project["id"], analog) for analog in load_legacy_analogs(project))
+        if row is not None
+    )
+    deduped: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        row_id = str(row.get("id") or "")
+        if not row_id or row_id in seen:
+            continue
+        seen.add(row_id)
+        deduped.append(row)
+    return project_row, deduped
+
+
+def needs_parallel_analog_research(project: Dict[str, Any], truth: Optional[Dict[str, Any]]) -> bool:
+    cutoff, _accepted_evidence, target_tonnage, target_grade = gold_target_proxy_state(project, truth)
+    if not cutoff or target_tonnage is None or target_grade is None:
+        return False
+    project_row, analog_rows = analog_candidate_rows_for_prefetch(project)
+    clean_rows, _ = clean_analog_cohort(
+        project_row,
+        analog_rows,
+        cutoff_date=cutoff,
+        target_tonnage_mt=target_tonnage,
+        target_grade_gpt=target_grade,
+    )
+    split_ready_rows = [
+        row for row in clean_rows
+        if all(
+            positive_float(row.get(field)) is not None
+            for field in ("mi_tonnage_mt", "mi_grade_gpt", "inferred_tonnage_mt", "inferred_grade_gpt")
+        )
+    ]
+    return len(clean_rows) < 3 or len(split_ready_rows) < 3
+
+
+def prefetch_parallel_analog_project(
+    project: Dict[str, Any],
+    *,
+    truth: Dict[str, Any],
+    save: bool,
+    allow_paid: bool,
+) -> Tuple[str, bool]:
+    cutoff, _accepted_evidence, target_tonnage, target_grade = gold_target_proxy_state(project, truth)
+    if not cutoff or target_tonnage is None or target_grade is None:
+        return project["id"], False
+    if not needs_parallel_analog_research(project, truth):
+        return project["id"], False
+    if save:
+        ensure_project_for_parallel_cache(project, data_status="candidate")
+    prompt, schema = parallel_analog_prompt(
+        project,
+        cutoff,
+        target_tonnage_mt=target_tonnage,
+        target_grade_gpt=target_grade,
+    )
+    _response, paid_call = run_parallel_cached(
+        task_kind="analog_research",
+        project_id=project["id"],
+        cutoff_date=cutoff,
+        prompt=prompt,
+        output_schema=schema,
+        save=save,
+        allow_paid=allow_paid,
+    )
+    return project["id"], paid_call
+
+
+def prefetch_parallel_analog_cache(
+    projects: Sequence[Dict[str, Any]],
+    *,
+    validated_gold_truths: Dict[str, Dict[str, Any]],
+    max_paid: int,
+    max_workers: int,
+    save: bool,
+) -> int:
+    if not save or max_workers <= 1:
+        return 0
+    worker_count = max(1, min(10, int(max_workers)))
+    candidates = [
+        project
+        for project in projects
+        if validated_gold_truths.get(project["id"]) and needs_parallel_analog_research(project, validated_gold_truths[project["id"]])
+    ]
+    if not candidates:
+        return 0
+
+    paid_count = 0
+    next_index = 0
+    pending: Dict[Future[Tuple[str, bool]], Dict[str, Any]] = {}
+
+    def can_submit_more() -> bool:
+        if next_index >= len(candidates) or len(pending) >= worker_count:
+            return False
+        if max_paid <= 0:
+            return True
+        return paid_count + len(pending) < max_paid
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        while can_submit_more():
+            project = candidates[next_index]
+            next_index += 1
+            pending[
+                executor.submit(
+                    prefetch_parallel_analog_project,
+                    project,
+                    truth=validated_gold_truths[project["id"]],
+                    save=save,
+                    allow_paid=max_paid > 0,
+                )
+            ] = project
+
+        while pending:
+            done, _not_done = wait(set(pending), return_when=FIRST_COMPLETED)
+            for future in done:
+                project = pending.pop(future)
+                try:
+                    project_id, paid_call = future.result()
+                    if paid_call:
+                        paid_count += 1
+                    LOGGER.info(
+                        "Parallel analog prefetch finished for %s paid_call=%s",
+                        project_id,
+                        paid_call,
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Parallel analog prefetch failed for %s: %s",
+                        project.get("name"),
+                        exc,
+                    )
+            while can_submit_more():
+                project = candidates[next_index]
+                next_index += 1
+                pending[
+                    executor.submit(
+                        prefetch_parallel_analog_project,
+                        project,
+                        truth=validated_gold_truths[project["id"]],
+                        save=save,
+                        allow_paid=max_paid > 0,
+                    )
+                ] = project
+
+    return paid_count
+
+
 def fetch_legacy_truth_projects(limit: Optional[int] = None, project_ids: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     offset = 0
@@ -1297,6 +1602,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
         parallel_gold_model._POLL_TIMEOUT_S = max(15, int(args.poll_timeout_s))
     truth_concurrency = max(1, min(10, int(getattr(args, "max_parallel_truth_concurrency", 1) or 1)))
+    evidence_concurrency = max(1, min(10, int(getattr(args, "max_parallel_evidence_concurrency", 1) or 1)))
+    analog_concurrency = max(1, min(10, int(getattr(args, "max_parallel_analog_concurrency", 1) or 1)))
 
     before_counts = gold_table_counts()
     project_ids = args.project_id or None
@@ -1319,8 +1626,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 "max_parallel_truth_concurrency": truth_concurrency,
                 "research_missing_evidence": args.research_missing_evidence,
                 "max_parallel_projects": args.max_parallel_projects,
+                "max_parallel_evidence_concurrency": evidence_concurrency,
                 "research_missing_analogs": args.research_missing_analogs,
                 "max_parallel_analog_projects": args.max_parallel_analog_projects,
+                "max_parallel_analog_concurrency": analog_concurrency,
             },
             "started_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -1337,6 +1646,22 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             mre_runs_by_project=mre_runs_by_project,
             max_paid=args.max_parallel_truth_projects,
             max_workers=truth_concurrency,
+            save=not args.no_save,
+        )
+    if args.research_missing_evidence and evidence_concurrency > 1:
+        parallel_spend_count += prefetch_parallel_evidence_cache(
+            legacy_projects,
+            validated_gold_truths=validated_gold_truths,
+            max_paid=args.max_parallel_projects,
+            max_workers=evidence_concurrency,
+            save=not args.no_save,
+        )
+    if args.research_missing_analogs and analog_concurrency > 1:
+        parallel_analog_spend_count += prefetch_parallel_analog_cache(
+            legacy_projects,
+            validated_gold_truths=validated_gold_truths,
+            max_paid=args.max_parallel_analog_projects,
+            max_workers=analog_concurrency,
             save=not args.no_save,
         )
 
@@ -1399,9 +1724,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             cutoff_date=cutoff,
             evidence=project.get("drilling_evidence"),
         )
-        accepted_evidence, _rejected = split_evidence(row for row in evidence_rows if row.get("evidence_status") == "accepted")
-        tonnage, _ = evidence_tonnage_proxy(accepted_evidence)
-        grade, _ = evidence_grade_proxy(accepted_evidence)
+        _replayed_cutoff, _accepted_evidence, tonnage, grade = gold_target_proxy_state(project, truth)
         needs_parallel_evidence = args.research_missing_evidence and (tonnage is None or grade is None)
         if needs_parallel_evidence:
             prompt, schema = parallel_evidence_prompt(project, cutoff)
@@ -1669,8 +1992,10 @@ def main() -> int:
     parser.add_argument("--max-parallel-truth-concurrency", type=int, default=1, help="Concurrent Parallel MRE truth calls/recoveries, capped at 10.")
     parser.add_argument("--research-missing-evidence", action="store_true", help="Use cached/Parallel research when target evidence is insufficient.")
     parser.add_argument("--max-parallel-projects", type=int, default=0, help="Maximum paid Parallel evidence calls for this run.")
+    parser.add_argument("--max-parallel-evidence-concurrency", type=int, default=1, help="Concurrent Parallel evidence calls/recoveries, capped at 10.")
     parser.add_argument("--research-missing-analogs", action="store_true", help="Use cached/Parallel research when the clean analog cohort is insufficient.")
     parser.add_argument("--max-parallel-analog-projects", type=int, default=0, help="Maximum paid Parallel analog research calls for this run.")
+    parser.add_argument("--max-parallel-analog-concurrency", type=int, default=1, help="Concurrent Parallel analog calls/recoveries, capped at 10.")
     parser.add_argument("--processor", default=None, help="Override PARALLEL_PROCESSOR.")
     parser.add_argument("--poll-timeout-s", type=int, default=None, help="Override Parallel poll timeout.")
     parser.add_argument("--json-out", default=None, help="Optional path for the machine-readable summary.")

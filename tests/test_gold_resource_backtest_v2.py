@@ -421,6 +421,187 @@ def test_parallel_truth_prefetch_caps_concurrency_and_paid_budget(monkeypatch):
     ]
 
 
+def test_parallel_evidence_prefetch_caps_concurrency_and_paid_budget(monkeypatch):
+    projects = [
+        {"id": f"project-{idx}", "name": f"Project {idx}", "material": "gold"}
+        for idx in range(4)
+    ]
+    truths = {
+        project["id"]: {"id": f"truth-{idx}", "effective_date": date(2021, 1, 1)}
+        for idx, project in enumerate(projects)
+    }
+    started = []
+    ensured = []
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    monkeypatch.setattr(backtest_v2, "load_gold_case_bundle", lambda project_id: {"evidence": []})
+    monkeypatch.setattr(backtest_v2, "parallel_evidence_prompt", lambda project, cutoff: ("prompt", {"type": "object"}))
+    monkeypatch.setattr(
+        backtest_v2,
+        "ensure_project_for_parallel_cache",
+        lambda project, *, data_status: ensured.append((project["id"], data_status)),
+    )
+
+    def fake_run_parallel_cached(**kwargs):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            time.sleep(0.02)
+            started.append(kwargs["project_id"])
+            return {"confidence": "high"}, True
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(backtest_v2, "run_parallel_cached", fake_run_parallel_cached)
+
+    paid_count = backtest_v2.prefetch_parallel_evidence_cache(
+        projects,
+        validated_gold_truths=truths,
+        max_paid=3,
+        max_workers=2,
+        save=True,
+    )
+
+    assert paid_count == 3
+    assert sorted(started) == ["project-0", "project-1", "project-2"]
+    assert max_active <= 2
+    assert ensured == [
+        ("project-0", "candidate"),
+        ("project-1", "candidate"),
+        ("project-2", "candidate"),
+    ]
+
+
+def test_parallel_evidence_prefetch_replays_db_evidence_before_paid_call(monkeypatch):
+    project = {"id": "project-1", "name": "Project 1", "material": "gold"}
+    truth = {"id": "truth-1", "effective_date": date(2021, 1, 1)}
+    db_evidence = [
+        {
+            "id": "e-tonnage",
+            "project_id": project["id"],
+            "mre_truth_id": truth["id"],
+            "cutoff_date": date(2021, 1, 1),
+            "source_url": "https://example.com/pre-mre-field-estimate",
+            "source_title": "Pre-MRE field estimate",
+            "source_date": date(2020, 1, 1),
+            "source_document_type": "news_release",
+            "evidence_status": "accepted",
+            "fact_type": "geometry_tonnage_mt",
+            "value_num": 10,
+            "confidence": "high",
+            "is_mre_tainted": False,
+            "fact_payload": {},
+        },
+        {
+            "id": "e-grade",
+            "project_id": project["id"],
+            "mre_truth_id": truth["id"],
+            "cutoff_date": date(2021, 1, 1),
+            "source_url": "https://example.com/pre-mre-field-estimate",
+            "source_title": "Pre-MRE field estimate",
+            "source_date": date(2020, 1, 1),
+            "source_document_type": "news_release",
+            "evidence_status": "accepted",
+            "fact_type": "weighted_grade_gpt",
+            "value_num": 1.2,
+            "confidence": "high",
+            "is_mre_tainted": False,
+            "fact_payload": {},
+        },
+    ]
+    monkeypatch.setattr(backtest_v2, "load_gold_case_bundle", lambda project_id: {"evidence": db_evidence})
+
+    def fail_parallel_call(**kwargs):
+        raise AssertionError("DB evidence replay should prevent a paid evidence call")
+
+    monkeypatch.setattr(backtest_v2, "run_parallel_cached", fail_parallel_call)
+
+    paid_count = backtest_v2.prefetch_parallel_evidence_cache(
+        [project],
+        validated_gold_truths={project["id"]: truth},
+        max_paid=1,
+        max_workers=2,
+        save=True,
+    )
+
+    assert paid_count == 0
+
+
+def test_parallel_analog_prefetch_caps_concurrency_and_paid_budget(monkeypatch):
+    projects = [
+        {"id": f"project-{idx}", "name": f"Project {idx}", "material": "gold"}
+        for idx in range(4)
+    ]
+    truths = {
+        project["id"]: {"id": f"truth-{idx}", "effective_date": date(2021, 1, 1)}
+        for idx, project in enumerate(projects)
+    }
+    started = []
+    ensured = []
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    monkeypatch.setattr(
+        backtest_v2,
+        "gold_target_proxy_state",
+        lambda project, truth: (date(2021, 1, 1), [], 10.0, 1.0),
+    )
+    monkeypatch.setattr(
+        backtest_v2,
+        "analog_candidate_rows_for_prefetch",
+        lambda project: ({"id": project["id"]}, []),
+    )
+    monkeypatch.setattr(backtest_v2, "clean_analog_cohort", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(
+        backtest_v2,
+        "parallel_analog_prompt",
+        lambda project, cutoff, *, target_tonnage_mt, target_grade_gpt: ("prompt", {"type": "object"}),
+    )
+    monkeypatch.setattr(
+        backtest_v2,
+        "ensure_project_for_parallel_cache",
+        lambda project, *, data_status: ensured.append((project["id"], data_status)),
+    )
+
+    def fake_run_parallel_cached(**kwargs):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            time.sleep(0.02)
+            started.append(kwargs["project_id"])
+            return {"analogs": []}, True
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(backtest_v2, "run_parallel_cached", fake_run_parallel_cached)
+
+    paid_count = backtest_v2.prefetch_parallel_analog_cache(
+        projects,
+        validated_gold_truths=truths,
+        max_paid=3,
+        max_workers=2,
+        save=True,
+    )
+
+    assert paid_count == 3
+    assert sorted(started) == ["project-0", "project-1", "project-2"]
+    assert max_active <= 2
+    assert ensured == [
+        ("project-0", "candidate"),
+        ("project-1", "candidate"),
+        ("project-2", "candidate"),
+    ]
+
+
 def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch):
     project = {
         "id": "00000000-0000-0000-0000-000000000001",

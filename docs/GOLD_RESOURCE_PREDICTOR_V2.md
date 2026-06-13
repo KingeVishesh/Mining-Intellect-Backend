@@ -74,7 +74,8 @@ cannot support a prediction:
 python3 scripts/run_gold_resource_backtest_v2.py \
   --project-id <legacy-project-uuid> \
   --research-missing-evidence \
-  --max-parallel-projects 1
+  --max-parallel-projects 1 \
+  --max-parallel-evidence-concurrency 1
 ```
 
 Permit cached/Parallel first-MRE truth repair only when a project has no
@@ -117,6 +118,18 @@ python3 scripts/run_gold_resource_backtest_v2.py \
   --poll-timeout-s 7200
 ```
 
+Evidence and analog research use the same cache-first/recover-first path. For
+multi-project batches, cap both paid-call budget and concurrency explicitly
+instead of letting long Parallel tasks run one-by-one:
+
+```bash
+python3 scripts/run_gold_resource_backtest_v2.py \
+  --research-missing-evidence \
+  --max-parallel-projects 10 \
+  --max-parallel-evidence-concurrency 10 \
+  --poll-timeout-s 7200
+```
+
 Permit cached/Parallel analog research only after truth and pre-MRE target
 evidence are available but the deterministic clean/split-ready cohort is too
 thin:
@@ -127,7 +140,8 @@ python3 scripts/run_gold_resource_backtest_v2.py \
   --research-missing-truth \
   --research-missing-evidence \
   --research-missing-analogs \
-  --max-parallel-analog-projects 1
+  --max-parallel-analog-projects 1 \
+  --max-parallel-analog-concurrency 1
 ```
 
 Analog research is cached as `task_kind = 'analog_research'`; returned
