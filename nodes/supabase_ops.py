@@ -68,8 +68,9 @@ def search_projects_by_criteria(
 
 
 _LIBRARY_SELECT = (
-    "analog_name,analog_material,analog_deposit_type,analog_country,"
+    "id,source,analog_name,analog_material,analog_deposit_type,analog_country,"
     "analog_tonnage_mt,analog_grade_value,analog_grade_unit,source_url,"
+    "analog_inferred_tonnage_mt,analog_inferred_grade,"
     "similarity_score,analog_project_stage,"
     "analog_host_rock,analog_mineralization_style,analog_district,"
     "analog_deposit_subtype,analog_mineralization_mode,analog_tectonic_belt,"
