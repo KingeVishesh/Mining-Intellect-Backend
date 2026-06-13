@@ -33,6 +33,15 @@ def get_client() -> Client:
     return client
 
 
+def reset_thread_client() -> None:
+    """Drop the current thread's Supabase client after a transport failure."""
+    global _client
+    if hasattr(_thread_clients, "client"):
+        delattr(_thread_clients, "client")
+    if threading.current_thread() is threading.main_thread():
+        _client = None
+
+
 # ── Projects ──────────────────────────────────────────────────────────────────
 
 def get_project(project_id: str) -> Optional[Dict]:
