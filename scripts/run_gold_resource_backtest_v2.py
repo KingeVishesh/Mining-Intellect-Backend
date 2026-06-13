@@ -1044,8 +1044,18 @@ facts. If a pre-MRE source gives an explicit exploration geometry tonnage or
 inventory tonnage estimate that is not an MRE/resource estimate, put it in
 geometry_tonnage_mt and explain the basis in notes. If that same non-MRE source
 gives an explicit grade range or grade proxy, return its midpoint in
-grade_proxy_g_t and explain the basis in notes. Include rejected sources you
-inspected and why they were rejected.
+grade_proxy_g_t and explain the basis in notes.
+
+Prioritize the deterministic volume inputs needed by the blind calculator:
+strike_length_m, down_dip_extent_m, avg_true_width_m, bulk_density_t_m3, and
+mineralized_continuity_factor. Extract them only when a pre-cutoff public source
+states them directly, or when a source explicitly states a non-resource
+inventory/target/stockpile/tailings tonnage. Do not invent widths, densities,
+continuity factors, or tonnage from drill intercepts. Search issuer news
+releases, presentations, annual/quarterly reports, exchange announcements, and
+historic production summaries that were published before the cutoff. Include
+rejected sources you inspected and why they were rejected, especially close
+sources rejected for MRE taint or publication date.
 """.strip()
     schema = {
         "type": "object",
