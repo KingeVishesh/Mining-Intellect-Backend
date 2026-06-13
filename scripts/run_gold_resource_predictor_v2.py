@@ -14,9 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -39,7 +40,16 @@ def _parse_date(value: Any) -> date:
     return date.fromisoformat(str(value))
 
 
-def _prediction_run_row(project_id: str, truth: Dict[str, Any], prediction: Dict[str, Any]) -> Dict[str, Any]:
+def _prediction_run_row(
+    project_id: str,
+    truth: Dict[str, Any],
+    prediction: Dict[str, Any],
+    analog_decisions: Sequence[Dict[str, Any]] = (),
+) -> Dict[str, Any]:
+    accepted_decisions = [
+        row for row in analog_decisions
+        if row.get("decision") == "accepted"
+    ]
     return {
         "project_id": project_id,
         "mre_truth_id": truth.get("id"),
@@ -53,11 +63,15 @@ def _prediction_run_row(project_id: str, truth: Dict[str, Any], prediction: Dict
             if item.get("id")
         ],
         "analog_candidate_ids": [
-            decision.get("analog_candidate_id")
-            for decision in prediction.get("analog_decisions", [])
-            if decision.get("decision") == "accepted" and decision.get("analog_candidate_id")
+            row.get("analog_candidate_id")
+            for row in accepted_decisions
+            if row.get("analog_candidate_id")
         ],
-        "analog_decision_ids": [],
+        "analog_decision_ids": [
+            row.get("id")
+            for row in analog_decisions
+            if row.get("id")
+        ],
         "no_prediction_reasons": prediction.get("no_prediction_reasons") or [],
         "predicted_total_tonnage_mt": prediction.get("predicted_total_tonnage_mt"),
         "predicted_total_grade_gpt": prediction.get("predicted_total_grade_gpt"),
@@ -68,6 +82,46 @@ def _prediction_run_row(project_id: str, truth: Dict[str, Any], prediction: Dict
         "predicted_inferred_grade_gpt": prediction.get("predicted_inferred_grade_gpt"),
         "predictor_version": prediction["predictor_version"],
         "calculator_trace": prediction.get("calculator_trace") or {},
+    }
+
+
+def _audit_summary(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    all_evidence = bundle.get("all_evidence") or bundle.get("evidence") or []
+    rejected_evidence = bundle.get("rejected_evidence") or []
+    accepted_evidence = [
+        row for row in all_evidence
+        if row.get("evidence_status") == "accepted"
+    ]
+    analog_decisions = bundle.get("analog_decisions") or []
+    decision_counts = Counter(row.get("decision") or "unknown" for row in analog_decisions)
+    analog_reasons = Counter(
+        reason
+        for row in analog_decisions
+        for reason in (row.get("rejection_reasons") or [])
+    )
+    evidence_reasons = Counter(
+        reason
+        for row in rejected_evidence
+        for reason in str(row.get("rejection_reason") or "").split(";")
+        if reason
+    )
+    return {
+        "evidence": {
+            "accepted_count": len(accepted_evidence),
+            "rejected_count": len(rejected_evidence),
+            "rejection_reasons": dict(evidence_reasons),
+            "accepted_fact_types": sorted({
+                row.get("fact_type") for row in accepted_evidence if row.get("fact_type")
+            }),
+            "rejected_fact_types": sorted({
+                row.get("fact_type") for row in rejected_evidence if row.get("fact_type")
+            }),
+        },
+        "analogs": {
+            "candidate_count": len(bundle.get("analog_candidates") or []),
+            "decision_counts": dict(decision_counts),
+            "rejection_reasons": dict(analog_reasons),
+        },
     }
 
 
@@ -102,7 +156,14 @@ def main() -> int:
 
     saved = {}
     if args.save:
-        run = insert_gold_prediction_run(_prediction_run_row(args.project_id, truth, prediction))
+        run = insert_gold_prediction_run(
+            _prediction_run_row(
+                args.project_id,
+                truth,
+                prediction,
+                bundle.get("analog_decisions") or [],
+            )
+        )
         saved["prediction_run"] = run
         if run.get("id") and truth.get("id"):
             score_row = {
@@ -114,6 +175,7 @@ def main() -> int:
 
     print(json.dumps({
         "project_id": args.project_id,
+        "audit": _audit_summary(bundle),
         "prediction": prediction,
         "score": score,
         "saved": saved,

@@ -220,33 +220,41 @@ def upsert_parallel_cache(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_gold_case_bundle(project_id: str) -> Dict[str, Any]:
     client = get_client()
-    project = (
+    project_res = (
         client.table(GOLD_TABLES["projects"])
         .select("*")
         .eq("id", project_id)
         .maybe_single()
         .execute()
-        .data
     )
-    truth = (
+    project = project_res.data if project_res is not None else None
+    truth_res = (
         client.table(GOLD_TABLES["mre_truths"])
         .select("*")
         .eq("project_id", project_id)
         .eq("truth_status", "validated")
         .maybe_single()
         .execute()
-        .data
     )
+    truth = truth_res.data if truth_res is not None else None
     cutoff_date = truth.get("cutoff_date") if truth else None
-    evidence_query = (
+
+    all_evidence_query = (
         client.table(GOLD_TABLES["pre_mre_evidence"])
         .select("*")
         .eq("project_id", project_id)
-        .eq("evidence_status", "accepted")
     )
     if cutoff_date:
-        evidence_query = evidence_query.eq("cutoff_date", cutoff_date)
-    evidence = evidence_query.execute().data or []
+        all_evidence_query = all_evidence_query.eq("cutoff_date", cutoff_date)
+    all_evidence = all_evidence_query.execute().data or []
+    evidence = [
+        row for row in all_evidence
+        if row.get("evidence_status") == "accepted"
+    ]
+    rejected_evidence = [
+        row for row in all_evidence
+        if row.get("evidence_status") == "rejected"
+    ]
 
     analogs = (
         client.table(GOLD_TABLES["analog_candidates"])
@@ -268,6 +276,8 @@ def load_gold_case_bundle(project_id: str) -> Dict[str, Any]:
         "project": project,
         "truth": truth,
         "evidence": evidence,
+        "all_evidence": all_evidence,
+        "rejected_evidence": rejected_evidence,
         "analog_candidates": analogs,
         "analog_decisions": decisions,
     }

@@ -51,6 +51,11 @@ python3 scripts/run_gold_resource_predictor_v2.py --project-id <gold_projects.id
 python3 scripts/run_gold_resource_predictor_v2.py --project-id <gold_projects.id> --save
 ```
 
+Replay output includes an `audit` block with accepted/rejected evidence counts,
+evidence rejection reasons, analog candidate counts, analog decision counts, and
+analog rejection reasons. Use this before deciding whether a `no_prediction`
+needs more research or is the correct strict outcome.
+
 ## Run The DB-Backed Batch Loop
 
 Replay from DB first, without paid Parallel research:

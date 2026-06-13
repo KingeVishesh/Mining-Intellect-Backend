@@ -8,6 +8,7 @@ from scripts.run_gold_resource_backtest_v2 import (
     decision_rows_for_candidates,
     evidence_rows_from_payload,
 )
+from scripts.run_gold_resource_predictor_v2 import _audit_summary, _prediction_run_row
 
 
 def test_truth_builder_selects_earliest_validated_full_split_mre():
@@ -110,3 +111,70 @@ def test_decision_builder_rejects_analogs_when_target_evidence_missing():
     assert decisions[0]["decision"] == "rejected"
     assert "target_missing_pre_mre_tonnage_proxy" in decisions[0]["rejection_reasons"]
     assert "target_missing_pre_mre_grade_proxy" in decisions[0]["rejection_reasons"]
+
+
+def test_replay_audit_summary_reports_rejected_evidence_and_analog_reasons():
+    bundle = {
+        "all_evidence": [
+            {"evidence_status": "accepted", "fact_type": "weighted_grade_gpt"},
+            {
+                "evidence_status": "rejected",
+                "fact_type": "strike_length_m",
+                "rejection_reason": "mre_tainted_source;low_confidence_weak_fact",
+            },
+        ],
+        "rejected_evidence": [
+            {
+                "evidence_status": "rejected",
+                "fact_type": "strike_length_m",
+                "rejection_reason": "mre_tainted_source;low_confidence_weak_fact",
+            },
+        ],
+        "analog_candidates": [{"id": "analog-1"}],
+        "analog_decisions": [
+            {
+                "id": "decision-1",
+                "decision": "rejected",
+                "rejection_reasons": ["target_missing_pre_mre_tonnage_proxy"],
+            }
+        ],
+    }
+
+    audit = _audit_summary(bundle)
+
+    assert audit["evidence"]["accepted_count"] == 1
+    assert audit["evidence"]["rejected_count"] == 1
+    assert audit["evidence"]["rejection_reasons"]["mre_tainted_source"] == 1
+    assert audit["analogs"]["candidate_count"] == 1
+    assert audit["analogs"]["decision_counts"]["rejected"] == 1
+    assert audit["analogs"]["rejection_reasons"]["target_missing_pre_mre_tonnage_proxy"] == 1
+
+
+def test_replay_prediction_row_persists_existing_analog_decision_ids():
+    row = _prediction_run_row(
+        "project-1",
+        {"id": "truth-1"},
+        {
+            "run_status": "no_prediction",
+            "input_hash": "hash-1",
+            "cutoff_date": "2024-01-01",
+            "predictor_version": "test",
+            "no_prediction_reasons": ["insufficient_pre_mre_tonnage_evidence"],
+            "calculator_trace": {},
+        },
+        [
+            {
+                "id": "decision-1",
+                "decision": "rejected",
+                "analog_candidate_id": "analog-1",
+            },
+            {
+                "id": "decision-2",
+                "decision": "accepted",
+                "analog_candidate_id": "analog-2",
+            },
+        ],
+    )
+
+    assert row["analog_decision_ids"] == ["decision-1", "decision-2"]
+    assert row["analog_candidate_ids"] == ["analog-2"]
