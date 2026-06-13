@@ -297,6 +297,7 @@ def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch)
 
     monkeypatch.setattr(backtest_v2, "gold_table_counts", lambda: {})
     monkeypatch.setattr(backtest_v2, "fetch_legacy_truth_projects", lambda limit=None, project_ids=None: [project])
+    monkeypatch.setattr(backtest_v2, "fetch_validated_gold_truths", lambda project_ids: {})
     monkeypatch.setattr(backtest_v2, "fetch_mre_runs", lambda project_ids: {project["id"]: []})
     monkeypatch.setattr(backtest_v2, "create_gold_backtest_batch", lambda row: {"id": "batch-1"})
     monkeypatch.setattr(backtest_v2, "update_gold_backtest_batch", lambda batch_id, patch: {})
@@ -331,6 +332,110 @@ def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch)
 
     assert summary["excluded"] == 1
     assert summary["parallel_truth_research_calls"] == 0
+
+
+def test_run_replays_validated_gold_truth_before_legacy_placeholder(monkeypatch):
+    project = {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "name": "Validated DB Gold",
+        "company_name": "Example Gold",
+        "material": "gold",
+        "country": "Australia",
+        "deposit_type": "orogenic",
+        "deposit_subtype": "greenstone_orogenic",
+        "tectonic_belt": "yilgarn",
+        "mining_method_class": "open_pit_bulk",
+        "project_stage_class": "exploration",
+        "mre_mi_tonnage_mt": 10,
+        "mre_mi_grade": 1.0,
+        "mre_inferred_tonnage_mt": 10,
+        "mre_inferred_grade": 1.0,
+        "resource_compliance_standard": "JORC 2012",
+        "drilling_evidence": {
+            "source_url": "https://example.com/drilling-results",
+            "source_date": "2025-01-01",
+            "geometry_tonnage_mt": 20,
+            "weighted_grade_g_t": 1.0,
+            "confidence": "high",
+        },
+    }
+    db_truth = {
+        "id": "truth-validated",
+        "project_id": project["id"],
+        "truth_status": "validated",
+        "effective_date": date(2026, 5, 14),
+        "publication_date": date(2026, 5, 14),
+        "source_url": "https://example.com/validated-first-mre",
+        "resource_standard": "JORC 2012",
+        "mi_tonnage_mt": 10,
+        "mi_grade_gpt": 1.0,
+        "inferred_tonnage_mt": 10,
+        "inferred_grade_gpt": 1.0,
+        "total_tonnage_mt": 20,
+        "total_grade_gpt": 1.0,
+        "total_contained_oz": 643014.932,
+    }
+    analogs = [
+        {
+            "analog_name": f"Analog {idx}",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "open_pit_bulk",
+            "project_stage_class": "resource_m_and_i",
+            "analog_tonnage_mt": 20,
+            "analog_grade_value": 1.0,
+            "analog_mi_tonnage_mt": 10,
+            "analog_mi_grade": 1.0,
+            "analog_inferred_tonnage_mt": 10,
+            "analog_inferred_grade": 1.0,
+            "analog_resource_compliance_standard": "JORC 2012",
+            "source_url": f"https://example.com/analog-{idx}",
+            "source_date": "2025-06-01",
+        }
+        for idx in range(3)
+    ]
+
+    monkeypatch.setattr(backtest_v2, "gold_table_counts", lambda: {})
+    monkeypatch.setattr(backtest_v2, "fetch_legacy_truth_projects", lambda limit=None, project_ids=None: [project])
+    monkeypatch.setattr(backtest_v2, "fetch_validated_gold_truths", lambda project_ids: {project["id"]: db_truth})
+    monkeypatch.setattr(
+        backtest_v2,
+        "fetch_mre_runs",
+        lambda project_ids: {
+            project["id"]: [
+                {
+                    "effective_date": "2026-01-01",
+                    "source_url": "https://example.com/legacy-placeholder",
+                    "mi_tonnage_mt": 10,
+                    "mi_grade": 1.0,
+                    "inferred_tonnage_mt": 10,
+                    "inferred_grade": 1.0,
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(backtest_v2, "load_legacy_analogs", lambda project: analogs)
+
+    summary = backtest_v2.run(SimpleNamespace(
+        processor=None,
+        poll_timeout_s=None,
+        project_id=[project["id"]],
+        limit=None,
+        no_save=True,
+        research_missing_truth=False,
+        max_parallel_truth_projects=0,
+        research_missing_evidence=False,
+        max_parallel_projects=0,
+        research_missing_analogs=False,
+        max_parallel_analog_projects=0,
+        threshold=0.05,
+        run_label="test-db-truth-replay",
+    ))
+
+    assert summary["truth_validated"] == 1
+    assert summary["excluded"] == 0
+    assert summary["predicted"] == 1
+    assert summary["production_like_pass"] == 1
 
 
 def test_evidence_builder_stores_rejected_payloads_without_post_cutoff_source_date():
@@ -406,6 +511,30 @@ def test_analog_candidate_derives_mi_split_from_total_and_inferred():
     assert row["source_date"] == date(2022, 12, 31)
 
 
+def test_analog_candidate_normalizes_freeform_project_stage_classes():
+    producing = analog_candidate_row("target-1", {
+        "analog_name": "Producing Analog",
+        "analog_tonnage_mt": 3,
+        "analog_grade_value": 1.6,
+        "project_stage_class": "producing",
+        "source_url": "https://example.com/producing",
+        "source_date": "2024-01-01",
+    })
+    development = analog_candidate_row("target-1", {
+        "analog_name": "Development Analog",
+        "analog_tonnage_mt": 4,
+        "analog_grade_value": 1.8,
+        "project_stage_class": "development",
+        "source_url": "https://example.com/development",
+        "source_date": "2024-01-01",
+    })
+
+    assert producing is not None
+    assert producing["candidate_project_stage_class"] == "production"
+    assert development is not None
+    assert development["candidate_project_stage_class"] == "resource_m_and_i"
+
+
 def test_parallel_analog_prompt_requests_auditable_split_ready_fields():
     prompt, schema = parallel_analog_prompt(
         {
@@ -453,6 +582,53 @@ def test_decision_builder_rejects_analogs_when_target_evidence_missing():
     assert decisions[0]["decision"] == "rejected"
     assert "target_missing_pre_mre_tonnage_proxy" in decisions[0]["rejection_reasons"]
     assert "target_missing_pre_mre_grade_proxy" in decisions[0]["rejection_reasons"]
+
+
+def test_decision_builder_reports_exploration_target_anchor_quality_reasons():
+    project = {
+        "id": "target-1",
+        "project_name": "Target",
+        "deposit_subtype": "greenstone_orogenic",
+        "tectonic_belt": "yilgarn",
+        "mining_method_class": "open_pit_bulk",
+        "project_stage_class": "exploration",
+    }
+    evidence_context = {
+        "project_id": "target-1",
+        "cutoff_date": date(2026, 5, 14),
+        "source_url": "https://example.com/revere-resource-definition.pdf",
+        "source_date": date(2023, 10, 5),
+        "source_title": "High Grade Reef for JORC Resource Definition",
+        "evidence_status": "accepted",
+        "confidence": "medium",
+        "fact_payload": {
+            "notes": "JORC Exploration Target of 2.5-4.1 Mt at 1-2.5 g/t Au.",
+        },
+    }
+    candidate = {
+        "id": "analog-1",
+        "target_project_id": "target-1",
+        "candidate_project_name": "Analog",
+        "source_url": "https://example.com/analog",
+        "source_date": date(2020, 1, 1),
+        "resource_standard": "JORC 2012",
+        "total_tonnage_mt": 3,
+        "total_grade_gpt": 1.5,
+    }
+
+    decisions = decision_rows_for_candidates(
+        project,
+        [
+            {**evidence_context, "id": "evidence-tonnage", "fact_type": "geometry_tonnage_mt", "value_num": 3.3},
+            {**evidence_context, "id": "evidence-grade", "fact_type": "grade_proxy_gpt", "value_num": 1.75},
+        ],
+        [candidate],
+        cutoff_date=date(2026, 5, 14),
+    )
+
+    assert decisions[0]["decision"] == "rejected"
+    assert "exploration_target_tonnage_anchor_insufficient" in decisions[0]["rejection_reasons"]
+    assert "exploration_target_grade_anchor_insufficient" in decisions[0]["rejection_reasons"]
 
 
 def test_replay_audit_summary_reports_rejected_evidence_and_analog_reasons():

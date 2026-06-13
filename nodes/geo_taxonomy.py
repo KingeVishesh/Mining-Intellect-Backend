@@ -1890,7 +1890,7 @@ def detect_stage_class(
     blob = " ".join(filter(None, [s, _norm(description)]))
     if not blob:
         return None
-    if any(k in blob for k in ("production", "operating", "in operation", "producing mine")):
+    if any(k in blob for k in ("production", "operating", "in operation", "producing mine", "producing")):
         return "production"
     if any(k in blob for k in ("construction", "under construction")):
         return "construction"
@@ -1910,7 +1910,7 @@ def detect_stage_class(
         return "closed"
     if any(k in blob for k in ("measured and indicated", "m+i", "m&i", "indicated resource",
                                  "measured resource", "ni 43-101 resource",
-                                 "compliant resource")):
+                                 "compliant resource", "development")):
         return "resource_m_and_i"
     if any(k in blob for k in ("inferred resource", "initial resource", "maiden resource")):
         return "resource_inferred"

@@ -573,6 +573,16 @@ def analog_name(analog: Dict[str, Any]) -> str:
     return str(analog.get("name") or analog.get("analog_name") or analog.get("candidate_project_name") or "").strip()
 
 
+def analog_stage_class(analog: Dict[str, Any]) -> Optional[str]:
+    value = analog.get("project_stage_class") or analog.get("analog_project_stage_class")
+    if value in geo_taxonomy.ALL_STAGE_SLUGS:
+        return value
+    return geo_taxonomy.detect_stage_class(
+        project_stage=str(value or ""),
+        description=str(analog.get("notes") or ""),
+    )
+
+
 def analog_candidate_row(project_id: str, analog: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     name = analog_name(analog)
     if not name:
@@ -605,7 +615,7 @@ def analog_candidate_row(project_id: str, analog: Dict[str, Any]) -> Optional[Di
         "candidate_mineralization_pattern": analog.get("mineralization_pattern") or analog.get("analog_mineralization_pattern"),
         "candidate_host_rock_class": analog.get("host_rock_class") or analog.get("analog_host_rock_class"),
         "candidate_mining_method_class": analog.get("mining_method_class") or analog.get("analog_mining_method_class"),
-        "candidate_project_stage_class": analog.get("project_stage_class") or analog.get("analog_project_stage_class"),
+        "candidate_project_stage_class": analog_stage_class(analog),
         "candidate_recovery_method": analog.get("recovery_method") or analog.get("analog_recovery_method"),
         "source_url": source_url,
         "source_date": analog_source_date(analog),
@@ -672,15 +682,18 @@ def decision_rows_for_candidates(
     cutoff_date: date,
 ) -> List[Dict[str, Any]]:
     accepted_evidence, _ = split_evidence(row for row in evidence_rows if row.get("evidence_status") == "accepted")
-    tonnage, _ = evidence_tonnage_proxy(accepted_evidence)
-    grade, _ = evidence_grade_proxy(accepted_evidence)
+    tonnage, tonnage_trace = evidence_tonnage_proxy(accepted_evidence)
+    grade, grade_trace = evidence_grade_proxy(accepted_evidence)
     decisions: List[Dict[str, Any]] = []
     if tonnage is None or grade is None:
         reasons = []
         if tonnage is None:
             reasons.append("target_missing_pre_mre_tonnage_proxy")
+            reasons.extend(str(reason) for reason in tonnage_trace.get("quality_reasons") or [] if reason)
         if grade is None:
             reasons.append("target_missing_pre_mre_grade_proxy")
+            reasons.extend(str(reason) for reason in grade_trace.get("quality_reasons") or [] if reason)
+        reasons = sorted(set(reasons))
         for candidate in candidate_rows:
             decisions.append({
                 "id": stable_uuid("analog_decision", candidate["id"]),
@@ -952,6 +965,29 @@ def fetch_mre_runs(project_ids: Sequence[str]) -> Dict[str, List[Dict[str, Any]]
     return by_project
 
 
+def fetch_validated_gold_truths(project_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+    by_project: Dict[str, Dict[str, Any]] = {}
+    client = supabase_ops.get_client()
+    for idx in range(0, len(project_ids), 100):
+        batch = list(project_ids[idx : idx + 100])
+        if not batch:
+            continue
+        rows = (
+            client.table(GOLD_TABLES["mre_truths"])
+            .select("*")
+            .in_("project_id", batch)
+            .eq("truth_status", "validated")
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            project_id = row.get("project_id")
+            if project_id and project_id not in by_project:
+                by_project[project_id] = row
+    return by_project
+
+
 def gold_table_counts() -> Dict[str, int]:
     client = supabase_ops.get_client()
     counts: Dict[str, int] = {}
@@ -1025,6 +1061,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     before_counts = gold_table_counts()
     project_ids = args.project_id or None
     legacy_projects = fetch_legacy_truth_projects(limit=args.limit, project_ids=project_ids)
+    validated_gold_truths = fetch_validated_gold_truths([project["id"] for project in legacy_projects])
     mre_runs_by_project = fetch_mre_runs([project["id"] for project in legacy_projects])
 
     run_label = args.run_label or f"gold_v2_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
@@ -1054,7 +1091,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     parallel_analog_spend_count = 0
 
     for project in legacy_projects:
-        truth, exclusion_reason = build_truth_row(project, mre_runs_by_project.get(project["id"], []))
+        truth = validated_gold_truths.get(project["id"])
+        exclusion_reason = None
+        if not truth:
+            truth, exclusion_reason = build_truth_row(project, mre_runs_by_project.get(project["id"], []))
         if exclusion_reason or not truth:
             if args.research_missing_truth:
                 prompt, schema = parallel_truth_prompt(project, mre_runs_by_project.get(project["id"], []))

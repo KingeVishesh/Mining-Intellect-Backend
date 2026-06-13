@@ -30,7 +30,7 @@ from schemas.gold_resource_predictor import (
 )
 
 
-PREDICTOR_VERSION = "gold_resource_predictor_v2.0"
+PREDICTOR_VERSION = "gold_resource_predictor_v2.1"
 TROY_OZ_PER_MT_GPT = 32150.7466
 MIN_CLEAN_ANALOGS = 3
 MIN_SPLIT_ANALOGS = 3
@@ -81,6 +81,11 @@ _DIRECT_TONNAGE_FACT_TYPES = (
     "tonnage_proxy_mt",
     "tailings_inventory_tonnage_mt",
 )
+_EXPLORATION_TARGET_ANCHOR_FACT_TYPES = {
+    "geometry_tonnage_mt",
+    "tonnage_proxy_mt",
+    "grade_proxy_gpt",
+}
 
 _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1}
 
@@ -162,10 +167,32 @@ def _source_blob(*parts: Optional[str]) -> str:
     return " ".join(part or "" for part in parts).strip()
 
 
+def _normalized_source_blob(*parts: Optional[str]) -> str:
+    return re.sub(r"[-_/]+", " ", _source_blob(*parts))
+
+
 def _has_hard_resource_disclosure(blob: str) -> bool:
     if _PRE_MRE_EXPLORATION_TARGET_RE.search(blob):
         blob = re.sub(r"\bjorc\b", "", blob, flags=re.IGNORECASE)
     return bool(_HARD_RESOURCE_DISCLOSURE_RE.search(blob))
+
+
+def _fact_payload_text(fact: GoldEvidenceFact) -> str:
+    return json.dumps(fact.fact_payload, sort_keys=True, default=str)
+
+
+def _exploration_target_anchor_reason(fact: GoldEvidenceFact, proxy_kind: str) -> Optional[str]:
+    if fact.fact_type not in _EXPLORATION_TARGET_ANCHOR_FACT_TYPES:
+        return None
+    blob = _normalized_source_blob(
+        fact.source_title,
+        fact.source_document_type,
+        fact.value_text,
+        _fact_payload_text(fact),
+    )
+    if not _PRE_MRE_EXPLORATION_TARGET_RE.search(blob):
+        return None
+    return f"exploration_target_{proxy_kind}_anchor_insufficient"
 
 
 def evidence_is_mre_tainted(fact: GoldEvidenceFact | Dict[str, Any]) -> bool:
@@ -266,13 +293,51 @@ def _best_numeric_fact(facts: Sequence[GoldEvidenceFact], fact_types: Sequence[s
     )[0]
 
 
+def _best_prediction_anchor(
+    facts: Sequence[GoldEvidenceFact],
+    fact_types: Sequence[str],
+    *,
+    proxy_kind: str,
+) -> Tuple[Optional[GoldEvidenceFact], List[Dict[str, Any]]]:
+    candidates = [
+        fact for fact in facts
+        if fact.fact_type in fact_types and fact.value_num is not None and fact.value_num > 0
+    ]
+    candidates = sorted(
+        candidates,
+        key=lambda fact: (
+            _CONFIDENCE_RANK.get(fact.confidence, 0),
+            fact.source_date or date.min,
+            fact.value_num or 0,
+        ),
+        reverse=True,
+    )
+    rejected: List[Dict[str, Any]] = []
+    for fact in candidates:
+        reason = _exploration_target_anchor_reason(fact, proxy_kind)
+        if reason:
+            rejected.append({
+                "fact_type": fact.fact_type,
+                "source_url": fact.source_url,
+                "source_date": fact.source_date.isoformat() if fact.source_date else None,
+                "reason": reason,
+            })
+            continue
+        return fact, rejected
+    return None, rejected
+
+
 def _numeric_fact_value(facts: Sequence[GoldEvidenceFact], fact_type: str) -> Optional[float]:
     fact = _best_numeric_fact(facts, (fact_type,))
     return float(fact.value_num) if fact and fact.value_num is not None else None
 
 
 def evidence_tonnage_proxy(facts: Sequence[GoldEvidenceFact]) -> Tuple[Optional[float], Dict[str, Any]]:
-    direct = _best_numeric_fact(facts, _DIRECT_TONNAGE_FACT_TYPES)
+    direct, rejected_direct = _best_prediction_anchor(
+        facts,
+        _DIRECT_TONNAGE_FACT_TYPES,
+        proxy_kind="tonnage",
+    )
     if direct and direct.value_num is not None:
         return float(direct.value_num), {
             "method": "direct_tonnage_fact",
@@ -304,7 +369,7 @@ def evidence_tonnage_proxy(facts: Sequence[GoldEvidenceFact]) -> Tuple[Optional[
             "mineralized_continuity_factor": continuity_factor,
         }
 
-    return None, {
+    trace = {
         "method": "no_tonnage_proxy",
         "missing_required_fact_types": [
             name for name, value in (
@@ -318,20 +383,36 @@ def evidence_tonnage_proxy(facts: Sequence[GoldEvidenceFact]) -> Tuple[Optional[
             if value is None
         ],
     }
+    if rejected_direct:
+        trace["rejected_anchor_facts"] = rejected_direct
+        trace["quality_reasons"] = sorted({row["reason"] for row in rejected_direct})
+    return None, trace
 
 
 def evidence_grade_proxy(facts: Sequence[GoldEvidenceFact]) -> Tuple[Optional[float], Dict[str, Any]]:
-    fact = _best_numeric_fact(facts, _GRADE_FACT_TYPES)
+    fact, rejected = _best_prediction_anchor(
+        facts,
+        _GRADE_FACT_TYPES,
+        proxy_kind="grade",
+    )
     if fact and fact.value_num is not None:
         return float(fact.value_num), {
             "method": "grade_fact",
             "fact_type": fact.fact_type,
             "source_url": fact.source_url,
         }
-    return None, {
+    trace = {
         "method": "no_grade_proxy",
         "missing_required_fact_types": list(_GRADE_FACT_TYPES),
     }
+    if rejected:
+        trace["rejected_anchor_facts"] = rejected
+        trace["quality_reasons"] = sorted({row["reason"] for row in rejected})
+    return None, trace
+
+
+def _trace_quality_reasons(trace: Dict[str, Any]) -> List[str]:
+    return [str(reason) for reason in trace.get("quality_reasons") or [] if reason]
 
 
 def _resource_standard_ok(standard: Optional[str]) -> bool:
@@ -560,8 +641,10 @@ def predict_gold_resource(
     early_reasons: List[str] = []
     if tonnage_mt is None:
         early_reasons.append("insufficient_pre_mre_tonnage_evidence")
+        early_reasons.extend(_trace_quality_reasons(tonnage_trace))
     if grade_gpt is None:
         early_reasons.append("insufficient_pre_mre_grade_evidence")
+        early_reasons.extend(_trace_quality_reasons(grade_trace))
     if early_reasons:
         return _no_prediction(
             reasons=early_reasons,

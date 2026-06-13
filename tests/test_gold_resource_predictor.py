@@ -106,6 +106,39 @@ def test_accepts_pre_cutoff_jorc_exploration_target_context():
     assert reasons == []
 
 
+def test_no_prediction_when_only_anchor_is_exploration_target_midpoint():
+    target_context = {
+        "source_title": "Bulk Sampling of High Grade Reef for JORC Resource Definition",
+        "source_url": "https://example.com/revere-resource-definition.pdf",
+        "source_date": date(2024, 10, 5),
+        "confidence": "medium",
+        "fact_payload": {
+            "notes": "JORC Exploration Target of 2.5-4.1 Mt at 1-2.5 g/t Au; not a mineral resource estimate.",
+        },
+    }
+
+    prediction = predict_gold_resource(
+        _project(tectonic_belt="yilgarn"),
+        [
+            _evidence("geometry_tonnage_mt", 3.3, **target_context),
+            _evidence("grade_proxy_gpt", 1.75, **target_context),
+        ],
+        [
+            _analog("Analog A", tonnage=3.1, grade=1.6, candidate_tectonic_belt="yilgarn"),
+            _analog("Analog B", tonnage=3.5, grade=1.7, candidate_tectonic_belt="yilgarn"),
+            _analog("Analog C", tonnage=4.0, grade=1.5, candidate_tectonic_belt="yilgarn"),
+        ],
+        cutoff_date=CUTOFF,
+    )
+
+    assert prediction["run_status"] == "no_prediction"
+    assert "exploration_target_tonnage_anchor_insufficient" in prediction["no_prediction_reasons"]
+    assert "exploration_target_grade_anchor_insufficient" in prediction["no_prediction_reasons"]
+    assert prediction["calculator_trace"]["accepted_evidence_count"] == 2
+    assert prediction["calculator_trace"]["evidence_tonnage"]["rejected_anchor_facts"][0]["fact_type"] == "geometry_tonnage_mt"
+    assert prediction["calculator_trace"]["evidence_grade"]["rejected_anchor_facts"][0]["fact_type"] == "grade_proxy_gpt"
+
+
 def test_rejects_pre_cutoff_jorc_resource_estimate_context():
     ok, reasons = validate_pre_mre_evidence(_evidence(
         "geometry_tonnage_mt",
