@@ -1630,10 +1630,16 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     before_counts = gold_table_counts()
     project_ids = args.project_id or None
+    require_legacy_split = not (
+        project_ids
+        or args.research_missing_truth
+        or args.research_missing_evidence
+        or args.research_missing_analogs
+    )
     legacy_projects = fetch_gold_truth_projects(
         limit=args.limit,
         project_ids=project_ids,
-        require_legacy_split=not args.research_missing_truth,
+        require_legacy_split=require_legacy_split,
     )
     validated_gold_truths = fetch_validated_gold_truths([project["id"] for project in legacy_projects])
     mre_runs_by_project = fetch_mre_runs([project["id"] for project in legacy_projects])

@@ -721,7 +721,7 @@ def test_run_replays_validated_gold_truth_before_legacy_placeholder(monkeypatch)
 
     monkeypatch.setattr(backtest_v2, "gold_table_counts", lambda: {})
     def fake_fetch_projects(limit=None, project_ids=None, *, require_legacy_split=True):
-        assert require_legacy_split is True
+        assert require_legacy_split is False
         return [project]
 
     monkeypatch.setattr(backtest_v2, "fetch_gold_truth_projects", fake_fetch_projects)
