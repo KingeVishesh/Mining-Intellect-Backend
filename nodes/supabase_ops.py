@@ -6,6 +6,7 @@ Uses supabase-py (REST API) — no SQLAlchemy, no SQLite.
 from __future__ import annotations
 import logging
 import re
+import threading
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -18,13 +19,18 @@ from nodes import geo_taxonomy
 logger = logging.getLogger(__name__)
 
 _client: Optional[Client] = None
+_thread_clients = threading.local()
 
 
 def get_client() -> Client:
     global _client
-    if _client is None:
-        _client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-    return _client
+    client = getattr(_thread_clients, "client", None)
+    if client is None:
+        client = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        _thread_clients.client = client
+        if threading.current_thread() is threading.main_thread():
+            _client = client
+    return client
 
 
 # ── Projects ──────────────────────────────────────────────────────────────────
