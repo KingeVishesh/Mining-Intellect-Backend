@@ -106,6 +106,49 @@ def test_accepts_pre_cutoff_jorc_exploration_target_context():
     assert reasons == []
 
 
+def test_accepts_pre_cutoff_drilling_fact_with_rejected_mre_context_in_payload():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "total_drill_meters",
+        8539,
+        source_title="Landore Resources: Progress Report BAM East Gold Prospect Junior Lake Property",
+        source_url="https://example.com/bam-progress-report",
+        source_date=date(2017, 1, 12),
+        cutoff_date=date(2017, 1, 27),
+        confidence="medium",
+        fact_payload={
+            "notes": (
+                "PRIMARY SOURCE: pre-MRE drilling progress report with 44 diamond "
+                "drill holes for 8,539m. MAIDEN MRE CONTEXT: post-cutoff resource "
+                "estimate excluded."
+            ),
+            "rejected_sources": [
+                {"source_title": "Updated Mineral Resource Estimate - BAM East"}
+            ],
+        },
+    ))
+
+    assert ok is True
+    assert reasons == []
+
+
+def test_rejects_pre_cutoff_fact_when_payload_itself_quotes_resource_estimate():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "total_drill_meters",
+        8539,
+        source_title="BAM East Gold Project",
+        source_url="https://example.com/bam-resource-summary",
+        source_date=date(2017, 1, 12),
+        cutoff_date=date(2017, 1, 27),
+        confidence="medium",
+        fact_payload={
+            "notes": "The same source quotes a NI 43-101 mineral resource estimate.",
+        },
+    ))
+
+    assert ok is False
+    assert "mre_tainted_source" in reasons
+
+
 def test_no_prediction_when_only_anchor_is_exploration_target_midpoint():
     target_context = {
         "source_title": "Bulk Sampling of High Grade Reef for JORC Resource Definition",

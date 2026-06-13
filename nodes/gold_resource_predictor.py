@@ -30,7 +30,7 @@ from schemas.gold_resource_predictor import (
 )
 
 
-PREDICTOR_VERSION = "gold_resource_predictor_v2.1"
+PREDICTOR_VERSION = "gold_resource_predictor_v2.2"
 TROY_OZ_PER_MT_GPT = 32150.7466
 MIN_CLEAN_ANALOGS = 3
 MIN_SPLIT_ANALOGS = 3
@@ -39,7 +39,7 @@ ANALOG_WEIGHT = 0.20
 
 _TAINT_RE = re.compile(
     r"\b("
-    r"mre|mineral resource|resource estimate|technical report|ni[- ]?43[- ]?101|"
+    r"(?<!pre )mre|mineral resource|resource estimate|technical report|ni[- ]?43[- ]?101|"
     r"jorc|sk[- ]?1300|measured and indicated|inferred resource"
     r")\b",
     re.IGNORECASE,
@@ -181,6 +181,21 @@ def _fact_payload_text(fact: GoldEvidenceFact) -> str:
     return json.dumps(fact.fact_payload, sort_keys=True, default=str)
 
 
+def _taint_payload_text(fact: GoldEvidenceFact) -> str:
+    payload = dict(fact.fact_payload or {})
+    payload.pop("rejected_sources", None)
+    notes = payload.get("notes")
+    if isinstance(notes, str):
+        notes = re.split(
+            r"\b(?:maiden\s+mre\s+context|target\s+mre|mre\s+context|rejected\s+sources)\b",
+            notes,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        payload["notes"] = notes
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
 def _exploration_target_anchor_reason(fact: GoldEvidenceFact, proxy_kind: str) -> Optional[str]:
     if fact.fact_type not in _EXPLORATION_TARGET_ANCHOR_FACT_TYPES:
         return None
@@ -220,7 +235,7 @@ def evidence_is_mre_tainted(fact: GoldEvidenceFact | Dict[str, Any]) -> bool:
         fact_model.source_title,
         fact_model.source_document_type,
         fact_model.value_text,
-        json.dumps(fact_model.fact_payload, sort_keys=True, default=str),
+        _taint_payload_text(fact_model),
     )
     blob = re.sub(r"[-_/]+", " ", blob)
     return bool(_TAINT_RE.search(blob))
