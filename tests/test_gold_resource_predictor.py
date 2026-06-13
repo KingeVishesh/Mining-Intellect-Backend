@@ -88,6 +88,37 @@ def test_accepts_pre_cutoff_drilling_release_ahead_of_maiden_resource():
     assert reasons == []
 
 
+def test_accepts_pre_cutoff_jorc_exploration_target_context():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "geometry_tonnage_mt",
+        3.3,
+        source_title="Bulk Sampling of High Grade Reef for JORC Resource Definition",
+        source_url="https://example.com/revere-resource-definition.pdf",
+        source_date=date(2024, 10, 5),
+        confidence="medium",
+        fact_payload={
+            "notes": "JORC Exploration Target of 2.5-4.1 Mt at 1-2.5 g/t Au; not a mineral resource estimate.",
+            "rejected_sources": [{"source_title": "Maiden Mineral Resource Estimate"}],
+        },
+    ))
+
+    assert ok is True
+    assert reasons == []
+
+
+def test_rejects_pre_cutoff_jorc_resource_estimate_context():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "geometry_tonnage_mt",
+        3.3,
+        source_title="JORC Mineral Resource Estimate",
+        source_url="https://example.com/jorc-mineral-resource-estimate.pdf",
+        source_date=date(2024, 10, 5),
+    ))
+
+    assert ok is False
+    assert "mre_tainted_source" in reasons
+
+
 def test_missing_source_date_blocks_evidence():
     ok, reasons = validate_pre_mre_evidence(_evidence(
         "geometry_tonnage_mt",

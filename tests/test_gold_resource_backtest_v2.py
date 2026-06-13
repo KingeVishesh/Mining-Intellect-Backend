@@ -9,6 +9,7 @@ from scripts.run_gold_resource_backtest_v2 import (
     build_truth_row,
     decision_rows_for_candidates,
     evidence_rows_from_payload,
+    parallel_analog_prompt,
     truth_row_from_parallel,
 )
 from scripts.run_gold_resource_predictor_v2 import _audit_summary, _prediction_run_row
@@ -26,7 +27,7 @@ def test_truth_builder_selects_earliest_validated_full_split_mre():
     truth, reason = build_truth_row(project, [
         {
             "id": "later",
-            "effective_date": "2024-01-01",
+            "effective_date": "2024-01-15",
             "mi_tonnage_mt": 12,
             "mi_grade": 2,
             "inferred_tonnage_mt": 24,
@@ -35,7 +36,7 @@ def test_truth_builder_selects_earliest_validated_full_split_mre():
         },
         {
             "id": "first",
-            "effective_date": "2023-01-01",
+            "effective_date": "2023-01-15",
             "mi_tonnage_mt": 10,
             "mi_grade": 2,
             "inferred_tonnage_mt": 20,
@@ -46,7 +47,7 @@ def test_truth_builder_selects_earliest_validated_full_split_mre():
 
     assert reason is None
     assert truth is not None
-    assert truth["publication_date"] == date(2023, 1, 1)
+    assert truth["publication_date"] == date(2023, 1, 15)
     assert truth["mi_tonnage_mt"] == 10
     assert truth["inferred_tonnage_mt"] == 20
     assert "cutoff_date" not in truth
@@ -102,6 +103,32 @@ def test_truth_builder_rejects_year_end_placeholder_dates():
     assert truth is None
     assert reason is not None
     assert "year_end_placeholder_mre_date" in reason
+
+
+def test_truth_builder_rejects_year_start_placeholder_dates():
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Placeholder MRE Gold",
+        "mre_mi_tonnage_mt": 10,
+        "mre_mi_grade": 2,
+        "mre_inferred_tonnage_mt": 20,
+        "mre_inferred_grade": 1,
+    }
+    truth, reason = build_truth_row(project, [
+        {
+            "id": "placeholder",
+            "effective_date": "2025-01-01",
+            "mi_tonnage_mt": 12,
+            "mi_grade": 2,
+            "inferred_tonnage_mt": 24,
+            "inferred_grade": 1,
+            "source_url": "https://example.com/mineral-resource-estimate",
+        }
+    ])
+
+    assert truth is None
+    assert reason is not None
+    assert "year_start_placeholder_mre_date" in reason
 
 
 def test_truth_builder_does_not_use_project_mre_mirror_as_fallback():
@@ -229,6 +256,32 @@ def test_parallel_cache_miss_does_not_spend_when_paid_calls_are_disallowed(monke
     assert paid_call is False
 
 
+def test_parallel_cache_failed_paid_call_counts_and_caches(monkeypatch):
+    writes = []
+    monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: None)
+    monkeypatch.setattr(backtest_v2, "upsert_parallel_cache", lambda row: writes.append(row) or row)
+
+    def fail_parallel_call(**kwargs):
+        raise RuntimeError("Parallel task did not complete within 300s")
+
+    monkeypatch.setattr(backtest_v2, "_run_parallel_task", fail_parallel_call)
+
+    response, paid_call = backtest_v2.run_parallel_cached(
+        task_kind="analog_research",
+        project_id="project-1",
+        cutoff_date=date(2026, 5, 14),
+        prompt="prompt",
+        output_schema={"type": "object"},
+        save=True,
+        allow_paid=True,
+    )
+
+    assert response is None
+    assert paid_call is True
+    assert writes[0]["response_status"] == "failed"
+    assert "Parallel task did not complete" in writes[0]["provider_error"]
+
+
 def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch):
     project = {
         "id": "00000000-0000-0000-0000-000000000001",
@@ -270,6 +323,8 @@ def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch)
         max_parallel_truth_projects=1,
         research_missing_evidence=False,
         max_parallel_projects=0,
+        research_missing_analogs=False,
+        max_parallel_analog_projects=0,
         threshold=0.05,
         run_label="test-run",
     ))
@@ -314,6 +369,25 @@ def test_evidence_builder_normalizes_legacy_confidence_objects():
     assert rows[0]["confidence"] == "high"
 
 
+def test_evidence_builder_stores_direct_geometry_tonnage_proxy():
+    rows = evidence_rows_from_payload(
+        project_id="project-1",
+        truth_id="truth-1",
+        cutoff_date=date(2024, 1, 1),
+        evidence={
+            "source_url": "https://example.com/2023-drilling",
+            "source_date": "2023-02-01",
+            "geometry_tonnage_mt": 18.5,
+            "grade_proxy_g_t": 1.7,
+            "confidence": "medium",
+        },
+    )
+
+    assert [row["fact_type"] for row in rows] == ["grade_proxy_gpt", "geometry_tonnage_mt"]
+    assert all(row["evidence_status"] == "accepted" for row in rows)
+    assert [row["value_num"] for row in rows] == [1.7, 18.5]
+
+
 def test_analog_candidate_derives_mi_split_from_total_and_inferred():
     row = analog_candidate_row("target-1", {
         "analog_name": "Split Analog",
@@ -330,6 +404,28 @@ def test_analog_candidate_derives_mi_split_from_total_and_inferred():
     assert row["mi_tonnage_mt"] == 20
     assert row["mi_grade_gpt"] == 2.5
     assert row["source_date"] == date(2022, 12, 31)
+
+
+def test_parallel_analog_prompt_requests_auditable_split_ready_fields():
+    prompt, schema = parallel_analog_prompt(
+        {
+            "name": "Target Gold",
+            "country": "Australia",
+            "deposit_subtype": "greenstone_orogenic",
+            "tectonic_belt": "yilgarn",
+            "mining_method_class": "open_pit_bulk",
+            "project_stage_class": "exploration",
+        },
+        date(2026, 5, 14),
+        target_tonnage_mt=3.3,
+        target_grade_gpt=1.75,
+    )
+
+    analog_schema = schema["properties"]["analogs"]["items"]["properties"]
+    assert "target MRE/resource information" in prompt
+    assert "mi_tonnage_mt" in analog_schema
+    assert "inferred_grade" in analog_schema
+    assert "resource_compliance_standard" in schema["properties"]["analogs"]["items"]["required"]
 
 
 def test_decision_builder_rejects_analogs_when_target_evidence_missing():

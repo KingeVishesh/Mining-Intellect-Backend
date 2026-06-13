@@ -232,6 +232,8 @@ def truth_run_rejection_reasons(run: Dict[str, Any], effective: Optional[date]) 
         reasons.append("missing_mre_source_url")
     if effective is None:
         reasons.append("missing_mre_effective_date")
+    elif effective.month == 1 and effective.day == 1:
+        reasons.append("year_start_placeholder_mre_date")
     elif effective.month == 12 and effective.day == 31:
         reasons.append("year_end_placeholder_mre_date")
     if UPDATED_MRE_RE.search(source_text):
@@ -508,7 +510,9 @@ def evidence_rows_from_payload(
         ("total_drill_meters", evidence.get("total_meters_drilled"), "m"),
         ("drill_holes", evidence.get("total_holes"), "holes"),
         ("weighted_grade_gpt", evidence.get("weighted_grade_g_t"), "g/t"),
+        ("grade_proxy_gpt", evidence.get("grade_proxy_g_t"), "g/t"),
         ("average_intercept_grade_gpt", evidence.get("average_intercept_grade_g_t"), "g/t"),
+        ("geometry_tonnage_mt", evidence.get("geometry_tonnage_mt"), "Mt"),
         ("tailings_inventory_tonnage_mt", evidence.get("tailings_inventory_tonnage_mt"), "Mt"),
         ("strike_length_m", evidence.get("strike_length_m"), "m"),
         ("down_dip_extent_m", evidence.get("down_dip_extent_m"), "m"),
@@ -750,7 +754,7 @@ def run_parallel_cached(
                 "response_status": "failed",
                 "provider_error": str(exc),
             })
-        raise
+        return None, True
     if save and response is not None:
         upsert_parallel_cache({
             "task_kind": task_kind,
@@ -784,7 +788,12 @@ HARD CUTOFF: use only public information published before {cutoff_date.isoformat
 Find pre-MRE evidence only. Do not use or quote target MRE/resource tonnes,
 grade, ounces, categories, resource tables, PEA/PFS/FS resource summaries, or
 technical reports dated on or after the cutoff. Return null for unavailable
-facts. Include rejected sources you inspected and why they were rejected.
+facts. If a pre-MRE source gives an explicit exploration geometry tonnage or
+inventory tonnage estimate that is not an MRE/resource estimate, put it in
+geometry_tonnage_mt and explain the basis in notes. If that same non-MRE source
+gives an explicit grade range or grade proxy, return its midpoint in
+grade_proxy_g_t and explain the basis in notes. Include rejected sources you
+inspected and why they were rejected.
 """.strip()
     schema = {
         "type": "object",
@@ -792,7 +801,9 @@ facts. Include rejected sources you inspected and why they were rejected.
             "total_holes": {"type": ["integer", "null"]},
             "total_meters_drilled": {"type": ["number", "null"]},
             "weighted_grade_g_t": {"type": ["number", "null"]},
+            "grade_proxy_g_t": {"type": ["number", "null"]},
             "average_intercept_grade_g_t": {"type": ["number", "null"]},
+            "geometry_tonnage_mt": {"type": ["number", "null"]},
             "tailings_inventory_tonnage_mt": {"type": ["number", "null"]},
             "strike_length_m": {"type": ["number", "null"]},
             "down_dip_extent_m": {"type": ["number", "null"]},
@@ -818,6 +829,99 @@ facts. Include rejected sources you inspected and why they were rejected.
             },
         },
         "required": ["total_holes", "total_meters_drilled", "weighted_grade_g_t", "confidence"],
+    }
+    return prompt, schema
+
+
+def parallel_analog_prompt(
+    project: Dict[str, Any],
+    cutoff_date: date,
+    *,
+    target_tonnage_mt: float,
+    target_grade_gpt: float,
+) -> Tuple[str, Dict[str, Any]]:
+    safe_project = {
+        key: project.get(key)
+        for key in (
+            "name", "company_name", "country", "region", "district",
+            "deposit_type", "deposit_subtype", "tectonic_belt",
+            "host_rock_class", "mining_method_class", "project_stage_class",
+            "recovery_method",
+        )
+    }
+    prompt = f"""
+You are a mining analog research auditor for a strict blind gold backtest.
+
+TARGET GOLD PROJECT:
+{json.dumps(safe_project, indent=2, sort_keys=True, default=str)}
+
+BLIND TARGET PRE-MRE SCALE EVIDENCE:
+- tonnage proxy: {target_tonnage_mt} Mt
+- grade proxy: {target_grade_gpt} g/t Au
+
+HARD CUTOFF: use only public analog information published before {cutoff_date.isoformat()}.
+
+Find gold analog candidates that can be deterministically gated later. Do not use
+target MRE/resource information. Prefer analogs with source URLs, source dates,
+resource standard, M&I and inferred split tonnes/grades, deposit subtype, tectonic
+belt, mining method class, project stage class, and comparable tonnage/grade band.
+Return only analogs with enough cited data to audit; omit weak candidates rather
+than filling fields from memory.
+""".strip()
+    analog_schema = {
+        "type": "object",
+        "properties": {
+            "analog_name": {"type": "string"},
+            "company_name": {"type": ["string", "null"]},
+            "country": {"type": ["string", "null"]},
+            "region": {"type": ["string", "null"]},
+            "district": {"type": ["string", "null"]},
+            "deposit_type": {"type": ["string", "null"]},
+            "deposit_subtype": {"type": ["string", "null"]},
+            "tectonic_belt": {"type": ["string", "null"]},
+            "host_rock_class": {"type": ["string", "null"]},
+            "mining_method_class": {"type": ["string", "null"]},
+            "project_stage_class": {"type": ["string", "null"]},
+            "recovery_method": {"type": ["string", "null"]},
+            "source_url": {"type": "string"},
+            "source_date": {"type": "string"},
+            "source_title": {"type": ["string", "null"]},
+            "resource_compliance_standard": {"type": "string"},
+            "total_tonnage_mt": {"type": "number"},
+            "total_grade_gpt": {"type": "number"},
+            "mi_tonnage_mt": {"type": ["number", "null"]},
+            "mi_grade_gpt": {"type": ["number", "null"]},
+            "inferred_tonnage_mt": {"type": ["number", "null"]},
+            "inferred_grade": {"type": ["number", "null"]},
+            "notes": {"type": ["string", "null"]},
+        },
+        "required": [
+            "analog_name", "source_url", "source_date",
+            "resource_compliance_standard", "total_tonnage_mt", "total_grade_gpt",
+        ],
+    }
+    schema = {
+        "type": "object",
+        "properties": {
+            "analogs": {
+                "type": "array",
+                "items": analog_schema,
+            },
+            "rejected_candidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": ["string", "null"]},
+                        "source_url": {"type": ["string", "null"]},
+                        "reason": {"type": "string"},
+                    },
+                },
+            },
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "notes": {"type": ["string", "null"]},
+        },
+        "required": ["analogs", "confidence"],
     }
     return prompt, schema
 
@@ -956,6 +1060,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 "max_parallel_truth_projects": args.max_parallel_truth_projects,
                 "research_missing_evidence": args.research_missing_evidence,
                 "max_parallel_projects": args.max_parallel_projects,
+                "research_missing_analogs": args.research_missing_analogs,
+                "max_parallel_analog_projects": args.max_parallel_analog_projects,
             },
             "started_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -964,6 +1070,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     excluded: List[Dict[str, Any]] = []
     parallel_truth_spend_count = 0
     parallel_spend_count = 0
+    parallel_analog_spend_count = 0
 
     for project in legacy_projects:
         truth, exclusion_reason = build_truth_row(project, mre_runs_by_project.get(project["id"], []))
@@ -1080,6 +1187,59 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             row for row in (analog_candidate_row(project["id"], analog) for analog in analogs)
             if row is not None
         ]
+        accepted_evidence, _ = split_evidence(row for row in evidence_rows if row.get("evidence_status") == "accepted")
+        target_tonnage, _ = evidence_tonnage_proxy(accepted_evidence)
+        target_grade, _ = evidence_grade_proxy(accepted_evidence)
+        if args.research_missing_analogs and target_tonnage is not None and target_grade is not None:
+            clean_rows, _ = clean_analog_cohort(
+                project_row,
+                analog_rows,
+                cutoff_date=cutoff,
+                target_tonnage_mt=target_tonnage,
+                target_grade_gpt=target_grade,
+            )
+            split_ready_rows = [
+                row for row in clean_rows
+                if all(
+                    positive_float(row.get(field)) is not None
+                    for field in ("mi_tonnage_mt", "mi_grade_gpt", "inferred_tonnage_mt", "inferred_grade_gpt")
+                )
+            ]
+            if len(clean_rows) < 3 or len(split_ready_rows) < 3:
+                prompt, schema = parallel_analog_prompt(
+                    project,
+                    cutoff,
+                    target_tonnage_mt=target_tonnage,
+                    target_grade_gpt=target_grade,
+                )
+                try:
+                    if not args.no_save:
+                        ensure_project_for_parallel_cache(project, data_status="candidate")
+                    response, paid_call = run_parallel_cached(
+                        task_kind="analog_research",
+                        project_id=project["id"],
+                        cutoff_date=cutoff,
+                        prompt=prompt,
+                        output_schema=schema,
+                        save=not args.no_save,
+                        allow_paid=parallel_analog_spend_count < args.max_parallel_analog_projects,
+                    )
+                    if paid_call:
+                        parallel_analog_spend_count += 1
+                except Exception as exc:
+                    LOGGER.warning("Parallel analog research failed for %s: %s", project.get("name"), exc)
+                    response = None
+                if isinstance(response, dict):
+                    researched_analogs = []
+                    for analog in response.get("analogs") or []:
+                        if isinstance(analog, dict):
+                            researched_analogs.append({**analog, "raw_parallel_output": response})
+                    if researched_analogs:
+                        analogs = merge_analogs([*analogs, *researched_analogs])
+                        analog_rows = [
+                            row for row in (analog_candidate_row(project["id"], analog) for analog in analogs)
+                            if row is not None
+                        ]
         decision_rows = decision_rows_for_candidates(project_row, evidence_rows, analog_rows, cutoff_date=cutoff)
 
         truth_row = truth
@@ -1190,9 +1350,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "core_pass": core_pass_count,
         "split_pass": split_pass_count,
         "production_like_pass": production_like_pass_count,
-        "parallel_research_calls": parallel_truth_spend_count + parallel_spend_count,
+        "parallel_research_calls": parallel_truth_spend_count + parallel_spend_count + parallel_analog_spend_count,
         "parallel_truth_research_calls": parallel_truth_spend_count,
         "parallel_evidence_research_calls": parallel_spend_count,
+        "parallel_analog_research_calls": parallel_analog_spend_count,
         "no_prediction_reasons": dict(Counter(reason for row in results for reason in row["no_prediction_reasons"])),
         "pass_project_names_metrics": [
             {
@@ -1236,6 +1397,8 @@ def main() -> int:
     parser.add_argument("--max-parallel-truth-projects", type=int, default=0, help="Maximum paid Parallel MRE truth calls for this run.")
     parser.add_argument("--research-missing-evidence", action="store_true", help="Use cached/Parallel research when target evidence is insufficient.")
     parser.add_argument("--max-parallel-projects", type=int, default=0, help="Maximum paid Parallel evidence calls for this run.")
+    parser.add_argument("--research-missing-analogs", action="store_true", help="Use cached/Parallel research when the clean analog cohort is insufficient.")
+    parser.add_argument("--max-parallel-analog-projects", type=int, default=0, help="Maximum paid Parallel analog research calls for this run.")
     parser.add_argument("--processor", default=None, help="Override PARALLEL_PROCESSOR.")
     parser.add_argument("--poll-timeout-s", type=int, default=None, help="Override Parallel poll timeout.")
     parser.add_argument("--json-out", default=None, help="Optional path for the machine-readable summary.")

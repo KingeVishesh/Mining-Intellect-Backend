@@ -93,6 +93,23 @@ Cached hits replay without counting as new Parallel spend, even when
 updated/revised/latest MREs, post-MRE study sources, year-end placeholder dates,
 missing source URLs, and incomplete M&I/Inferred split outputs remain excluded.
 
+Permit cached/Parallel analog research only after truth and pre-MRE target
+evidence are available but the deterministic clean/split-ready cohort is too
+thin:
+
+```bash
+python3 scripts/run_gold_resource_backtest_v2.py \
+  --project-id <legacy-project-uuid> \
+  --research-missing-truth \
+  --research-missing-evidence \
+  --research-missing-analogs \
+  --max-parallel-analog-projects 1
+```
+
+Analog research is cached as `task_kind = 'analog_research'`; returned
+candidates are still stored in `gold_analog_candidates` and rejected or accepted
+only by deterministic analog rules.
+
 The runner writes all artifacts to `gold_*` tables. Rejected evidence and analog
 decisions are persisted with reasons. If pre-MRE tonnage, grade, or analog
 support is insufficient, the result is `no_prediction`.
@@ -114,9 +131,15 @@ support is insufficient, the result is `no_prediction`.
 A project will return `no_prediction` unless it has:
 
 - one validated first-MRE `gold_mre_truths` row for scoring; updated MREs,
-  post-MRE study sources, year-end placeholder dates, missing source URLs, and
-  legacy project MRE mirrors are rejected
-- pre-MRE accepted evidence for tonnage and grade
+  post-MRE study sources, year-start/year-end placeholder dates, missing source
+  URLs, and legacy project MRE mirrors are rejected
+- pre-MRE accepted evidence for tonnage and grade. Tonnage can be a direct
+  non-MRE geometry/inventory proxy (`geometry_tonnage_mt`,
+  `tailings_inventory_tonnage_mt`) or the complete strict geometry set
+  (`strike_length_m`, `down_dip_extent_m`, `avg_true_width_m`,
+  `bulk_density_t_m3`, `mineralized_continuity_factor`). Grade can be a
+  pre-MRE weighted/average intercept or explicit non-MRE grade proxy
+  (`grade_proxy_gpt`), such as a published exploration-target midpoint
 - at least three clean analogs
 - at least three split-ready analogs with M&I and inferred tonnage/grade
 - compatible subtype, belt, mining method, stage, tonnage band, and grade band

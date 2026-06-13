@@ -51,6 +51,10 @@ _PRE_MRE_DRILLING_CONTEXT_RE = re.compile(
     r"\bresource drilling\b",
     re.IGNORECASE,
 )
+_PRE_MRE_EXPLORATION_TARGET_RE = re.compile(
+    r"\b(exploration target|resource definition)\b",
+    re.IGNORECASE,
+)
 _HARD_RESOURCE_DISCLOSURE_RE = re.compile(
     r"\b("
     r"technical report|resource estimate|mineral resource estimate|"
@@ -158,6 +162,12 @@ def _source_blob(*parts: Optional[str]) -> str:
     return " ".join(part or "" for part in parts).strip()
 
 
+def _has_hard_resource_disclosure(blob: str) -> bool:
+    if _PRE_MRE_EXPLORATION_TARGET_RE.search(blob):
+        blob = re.sub(r"\bjorc\b", "", blob, flags=re.IGNORECASE)
+    return bool(_HARD_RESOURCE_DISCLOSURE_RE.search(blob))
+
+
 def evidence_is_mre_tainted(fact: GoldEvidenceFact | Dict[str, Any]) -> bool:
     fact_model = _as_evidence(fact)
     if fact_model.is_mre_tainted:
@@ -171,8 +181,11 @@ def evidence_is_mre_tainted(fact: GoldEvidenceFact | Dict[str, Any]) -> bool:
     if (
         fact_model.source_date is not None
         and fact_model.source_date < fact_model.cutoff_date
-        and _PRE_MRE_DRILLING_CONTEXT_RE.search(normalized_title_blob)
-        and not _HARD_RESOURCE_DISCLOSURE_RE.search(normalized_title_blob)
+        and (
+            _PRE_MRE_DRILLING_CONTEXT_RE.search(normalized_title_blob)
+            or _PRE_MRE_EXPLORATION_TARGET_RE.search(normalized_title_blob)
+        )
+        and not _has_hard_resource_disclosure(normalized_title_blob)
     ):
         return False
     blob = _source_blob(
