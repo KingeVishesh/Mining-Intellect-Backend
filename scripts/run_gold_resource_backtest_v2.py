@@ -872,20 +872,13 @@ than filling fields from memory.
         "type": "object",
         "properties": {
             "analog_name": {"type": "string"},
-            "company_name": {"type": ["string", "null"]},
             "country": {"type": ["string", "null"]},
-            "region": {"type": ["string", "null"]},
-            "district": {"type": ["string", "null"]},
-            "deposit_type": {"type": ["string", "null"]},
             "deposit_subtype": {"type": ["string", "null"]},
             "tectonic_belt": {"type": ["string", "null"]},
-            "host_rock_class": {"type": ["string", "null"]},
             "mining_method_class": {"type": ["string", "null"]},
             "project_stage_class": {"type": ["string", "null"]},
-            "recovery_method": {"type": ["string", "null"]},
             "source_url": {"type": "string"},
             "source_date": {"type": "string"},
-            "source_title": {"type": ["string", "null"]},
             "resource_compliance_standard": {"type": "string"},
             "total_tonnage_mt": {"type": "number"},
             "total_grade_gpt": {"type": "number"},
@@ -907,21 +900,9 @@ than filling fields from memory.
                 "type": "array",
                 "items": analog_schema,
             },
-            "rejected_candidates": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": ["string", "null"]},
-                        "source_url": {"type": ["string", "null"]},
-                        "reason": {"type": "string"},
-                    },
-                },
-            },
-            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
             "notes": {"type": ["string", "null"]},
         },
-        "required": ["analogs", "confidence"],
+        "required": ["analogs"],
     }
     return prompt, schema
 
