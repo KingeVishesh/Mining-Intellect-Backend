@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import date
 
+import scripts.run_gold_resource_backtest_v2 as backtest_v2
 from scripts.run_gold_resource_backtest_v2 import (
     analog_candidate_row,
     build_truth_row,
     decision_rows_for_candidates,
     evidence_rows_from_payload,
+    truth_row_from_parallel,
 )
 from scripts.run_gold_resource_predictor_v2 import _audit_summary, _prediction_run_row
 
@@ -115,6 +117,115 @@ def test_truth_builder_does_not_use_project_mre_mirror_as_fallback():
 
     assert truth is None
     assert reason == "no_validated_first_mre_with_full_split_and_date"
+
+
+def test_parallel_truth_builder_accepts_valid_first_mre_response():
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Parallel First MRE Gold",
+        "mre_mi_tonnage_mt": 999,
+        "mre_mi_grade": 99,
+        "mre_inferred_tonnage_mt": 999,
+        "mre_inferred_grade": 99,
+    }
+    truth, reason = truth_row_from_parallel(project, {
+        "status": "validated",
+        "effective_date": "2023-06-15",
+        "publication_date": "2023-07-01",
+        "source_url": "https://example.com/first-mineral-resource-estimate",
+        "source_title": "First Mineral Resource Estimate",
+        "source_publisher": "Example Mining",
+        "resource_standard": "ni_43_101",
+        "mi_tonnage_mt": 10,
+        "mi_grade_gpt": 2,
+        "inferred_tonnage_mt": 20,
+        "inferred_grade_gpt": 1,
+        "confidence": "high",
+        "validation_notes": "First MRE press release.",
+    })
+
+    assert reason is None
+    assert truth is not None
+    assert truth["publication_date"] == date(2023, 7, 1)
+    assert truth["effective_date"] == date(2023, 6, 15)
+    assert truth["mi_tonnage_mt"] == 10
+    assert truth["total_tonnage_mt"] == 30
+    assert truth["raw_parallel_output"]["source"] == "parallel_mre_truth"
+
+
+def test_parallel_truth_builder_rejects_updated_or_weak_response():
+    project = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "name": "Parallel Weak MRE Gold",
+        "mre_mi_tonnage_mt": 999,
+        "mre_mi_grade": 99,
+        "mre_inferred_tonnage_mt": 999,
+        "mre_inferred_grade": 99,
+    }
+    truth, reason = truth_row_from_parallel(project, {
+        "status": "validated",
+        "effective_date": "2025-05-21",
+        "publication_date": "2025-07-07",
+        "source_url": "https://example.com/updated-mre-technical-report",
+        "mi_tonnage_mt": 10,
+        "mi_grade_gpt": 2,
+        "inferred_tonnage_mt": 20,
+        "inferred_grade_gpt": 1,
+        "confidence": "high",
+    })
+
+    assert truth is None
+    assert reason is not None
+    assert "non_first_or_updated_mre_source" in reason
+
+
+def test_parallel_cache_replays_when_paid_calls_are_disallowed(monkeypatch):
+    payload = {"status": "validated"}
+    monkeypatch.setattr(
+        backtest_v2,
+        "get_parallel_cache",
+        lambda key: {"response_status": "complete", "response_payload": payload},
+    )
+
+    def fail_parallel_call(**kwargs):
+        raise AssertionError("cached Parallel replay should not call provider")
+
+    monkeypatch.setattr(backtest_v2, "_run_parallel_task", fail_parallel_call)
+
+    response, paid_call = backtest_v2.run_parallel_cached(
+        task_kind="mre_truth",
+        project_id="project-1",
+        cutoff_date=None,
+        prompt="prompt",
+        output_schema={"type": "object"},
+        save=False,
+        allow_paid=False,
+    )
+
+    assert response == payload
+    assert paid_call is False
+
+
+def test_parallel_cache_miss_does_not_spend_when_paid_calls_are_disallowed(monkeypatch):
+    monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: None)
+
+    def fail_parallel_call(**kwargs):
+        raise AssertionError("paid Parallel call should be gated off")
+
+    monkeypatch.setattr(backtest_v2, "_run_parallel_task", fail_parallel_call)
+
+    response, paid_call = backtest_v2.run_parallel_cached(
+        task_kind="mre_truth",
+        project_id="project-1",
+        cutoff_date=None,
+        prompt="prompt",
+        output_schema={"type": "object"},
+        save=False,
+        allow_paid=False,
+    )
+
+    assert response is None
+    assert paid_call is False
 
 
 def test_evidence_builder_stores_rejected_payloads_without_post_cutoff_source_date():

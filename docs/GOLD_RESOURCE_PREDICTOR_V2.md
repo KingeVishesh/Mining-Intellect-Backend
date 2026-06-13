@@ -74,6 +74,22 @@ python3 scripts/run_gold_resource_backtest_v2.py \
   --max-parallel-projects 1
 ```
 
+Permit cached/Parallel first-MRE truth repair only when a project has no
+validated first-MRE truth after deterministic screening:
+
+```bash
+python3 scripts/run_gold_resource_backtest_v2.py \
+  --project-id <legacy-project-uuid> \
+  --research-missing-truth \
+  --max-parallel-truth-projects 1
+```
+
+Truth repair is cached as `task_kind = 'mre_truth'` in `gold_parallel_cache`.
+Cached hits replay without counting as new Parallel spend, even when
+`--max-parallel-truth-projects 0` blocks new paid calls. Low-confidence,
+updated/revised/latest MREs, post-MRE study sources, year-end placeholder dates,
+missing source URLs, and incomplete M&I/Inferred split outputs remain excluded.
+
 The runner writes all artifacts to `gold_*` tables. Rejected evidence and analog
 decisions are persisted with reasons. If pre-MRE tonnage, grade, or analog
 support is insufficient, the result is `no_prediction`.

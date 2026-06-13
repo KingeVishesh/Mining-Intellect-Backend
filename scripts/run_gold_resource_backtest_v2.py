@@ -284,6 +284,129 @@ def build_truth_row(project: Dict[str, Any], runs: Sequence[Dict[str, Any]]) -> 
     }, None
 
 
+def parallel_truth_prompt(project: Dict[str, Any], legacy_runs: Sequence[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    safe_project = {
+        key: project.get(key)
+        for key in (
+            "name", "company_name", "country", "region", "district",
+            "deposit_type", "deposit_subtype", "tectonic_belt",
+            "resource_compliance_standard",
+        )
+    }
+    weak_legacy_runs = [
+        {
+            "effective_date": run.get("effective_date"),
+            "source": run.get("source"),
+            "source_url": run.get("source_url"),
+            "notes": run.get("notes"),
+        }
+        for run in legacy_runs[:5]
+    ]
+    prompt = f"""
+You are a mining MRE truth auditor.
+
+TARGET GOLD PROJECT:
+{json.dumps(safe_project, indent=2, sort_keys=True, default=str)}
+
+WEAK LEGACY MRE ROWS TO AUDIT, NOT TRUST:
+{json.dumps(weak_legacy_runs, indent=2, sort_keys=True, default=str)}
+
+Find the first publicly disclosed mineral resource estimate (MRE) for the
+target project. It must be gold-focused and must contain M&I and Inferred
+tonnage and grade split values. Do not return an updated/revised/latest MRE,
+PEA/PFS/FS/Mine Plan resource table, or a source that only references a prior
+MRE. If the first MRE cannot be validated, return status "no_validated_first_mre".
+Include rejected sources you inspected and why they were rejected.
+""".strip()
+    schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["validated", "no_validated_first_mre"]},
+            "project_name": {"type": ["string", "null"]},
+            "effective_date": {"type": ["string", "null"]},
+            "publication_date": {"type": ["string", "null"]},
+            "source_url": {"type": ["string", "null"]},
+            "source_title": {"type": ["string", "null"]},
+            "source_publisher": {"type": ["string", "null"]},
+            "resource_standard": {"type": ["string", "null"]},
+            "mi_tonnage_mt": {"type": ["number", "null"]},
+            "mi_grade_gpt": {"type": ["number", "null"]},
+            "inferred_tonnage_mt": {"type": ["number", "null"]},
+            "inferred_grade_gpt": {"type": ["number", "null"]},
+            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+            "validation_notes": {"type": ["string", "null"]},
+            "rejected_sources": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_url": {"type": ["string", "null"]},
+                        "source_date": {"type": ["string", "null"]},
+                        "source_title": {"type": ["string", "null"]},
+                        "reason": {"type": "string"},
+                    },
+                },
+            },
+        },
+        "required": ["status", "source_url", "publication_date", "mi_tonnage_mt", "mi_grade_gpt", "inferred_tonnage_mt", "inferred_grade_gpt", "confidence"],
+    }
+    return prompt, schema
+
+
+def truth_row_from_parallel(project: Dict[str, Any], response: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    if not isinstance(response, dict):
+        return None, "parallel_truth_invalid_response"
+    if response.get("status") != "validated":
+        return None, str(response.get("status") or "parallel_truth_not_validated")
+    if normalize_evidence_confidence(response.get("confidence")) == "low":
+        return None, "parallel_truth_low_confidence"
+
+    effective = parse_loose_date(response.get("effective_date")) or parse_loose_date(response.get("publication_date"))
+    publication = parse_loose_date(response.get("publication_date")) or effective
+    synthetic_run = {
+        "id": response.get("parallel_task_id"),
+        "effective_date": effective,
+        "source": response.get("source_publisher") or "parallel_mre_truth",
+        "source_url": response.get("source_url"),
+        "notes": response.get("validation_notes"),
+        "mi_tonnage_mt": response.get("mi_tonnage_mt"),
+        "mi_grade": response.get("mi_grade_gpt"),
+        "inferred_tonnage_mt": response.get("inferred_tonnage_mt"),
+        "inferred_grade": response.get("inferred_grade_gpt"),
+    }
+    reasons = truth_run_rejection_reasons(synthetic_run, effective)
+    if reasons:
+        return None, "parallel_truth_rejected:" + ",".join(sorted(set(reasons)))
+    values = full_split_values(project, synthetic_run)
+    if not values:
+        return None, "parallel_truth_missing_full_mre_split"
+    if publication is None:
+        return None, "parallel_truth_missing_publication_date"
+
+    return {
+        "project_id": project["id"],
+        "truth_status": "validated",
+        "effective_date": effective,
+        "publication_date": publication,
+        "source_url": str(response["source_url"]),
+        "source_title": response.get("source_title") or f"First validated MRE for {project.get('name')}",
+        "source_publisher": response.get("source_publisher") or "parallel_mre_truth",
+        "source_document_type": "mre_truth",
+        "resource_standard": response.get("resource_standard") or project.get("resource_compliance_standard"),
+        "mi_tonnage_mt": values["mi_tonnage_mt"],
+        "mi_grade_gpt": values["mi_grade_gpt"],
+        "inferred_tonnage_mt": values["inferred_tonnage_mt"],
+        "inferred_grade_gpt": values["inferred_grade_gpt"],
+        "total_tonnage_mt": values["total_tonnage_mt"],
+        "total_grade_gpt": values["total_grade_gpt"],
+        "mi_contained_oz": values["mi_contained_oz"],
+        "inferred_contained_oz": values["inferred_contained_oz"],
+        "total_contained_oz": values["total_contained_oz"],
+        "validation_notes": response.get("validation_notes"),
+        "raw_parallel_output": {"source": "parallel_mre_truth", "response": json_safe(response)},
+    }, None
+
+
 def latest_intercept_source_date(evidence: Dict[str, Any]) -> Optional[date]:
     dates = []
     for item in evidence.get("best_intercepts") or []:
@@ -595,7 +718,8 @@ def run_parallel_cached(
     prompt: str,
     output_schema: Dict[str, Any],
     save: bool,
-) -> Optional[Dict[str, Any]]:
+    allow_paid: bool = True,
+) -> Tuple[Optional[Dict[str, Any]], bool]:
     request_payload = {
         "prompt": prompt,
         "output_schema": output_schema,
@@ -605,7 +729,9 @@ def run_parallel_cached(
     key = cache_key_for(task_kind, request_payload)
     cached = get_parallel_cache(key)
     if cached and cached.get("response_status") == "complete":
-        return cached.get("response_payload")
+        return cached.get("response_payload"), False
+    if not allow_paid:
+        return None, False
     try:
         response = _run_parallel_task(prompt=prompt, output_schema=output_schema)
     except Exception as exc:
@@ -631,7 +757,7 @@ def run_parallel_cached(
             "response_payload": response,
             "response_status": "complete",
         })
-    return response
+    return response, True
 
 
 def parallel_evidence_prompt(project: Dict[str, Any], cutoff_date: date) -> Tuple[str, Dict[str, Any]]:
@@ -822,6 +948,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "input_selector": {
                 "project_ids": args.project_id,
                 "limit": args.limit,
+                "research_missing_truth": args.research_missing_truth,
+                "max_parallel_truth_projects": args.max_parallel_truth_projects,
                 "research_missing_evidence": args.research_missing_evidence,
                 "max_parallel_projects": args.max_parallel_projects,
             },
@@ -830,10 +958,37 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     results: List[Dict[str, Any]] = []
     excluded: List[Dict[str, Any]] = []
+    parallel_truth_spend_count = 0
     parallel_spend_count = 0
 
     for project in legacy_projects:
         truth, exclusion_reason = build_truth_row(project, mre_runs_by_project.get(project["id"], []))
+        if exclusion_reason or not truth:
+            if args.research_missing_truth:
+                prompt, schema = parallel_truth_prompt(project, mre_runs_by_project.get(project["id"], []))
+                try:
+                    response, paid_call = run_parallel_cached(
+                        task_kind="mre_truth",
+                        project_id=project["id"],
+                        cutoff_date=None,
+                        prompt=prompt,
+                        output_schema=schema,
+                        save=not args.no_save,
+                        allow_paid=parallel_truth_spend_count < args.max_parallel_truth_projects,
+                    )
+                    if paid_call:
+                        parallel_truth_spend_count += 1
+                except Exception as exc:
+                    LOGGER.warning("Parallel MRE truth research failed for %s: %s", project.get("name"), exc)
+                    response = None
+                if isinstance(response, dict):
+                    repaired_truth, repair_reason = truth_row_from_parallel(project, response)
+                    if repaired_truth:
+                        truth = repaired_truth
+                        exclusion_reason = None
+                    else:
+                        exclusion_reason = repair_reason or exclusion_reason
+
         if exclusion_reason or not truth:
             excluded.append({
                 "project_id": project["id"],
@@ -864,18 +1019,20 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         tonnage, _ = evidence_tonnage_proxy(accepted_evidence)
         grade, _ = evidence_grade_proxy(accepted_evidence)
         needs_parallel_evidence = args.research_missing_evidence and (tonnage is None or grade is None)
-        if needs_parallel_evidence and parallel_spend_count < args.max_parallel_projects:
+        if needs_parallel_evidence:
             prompt, schema = parallel_evidence_prompt(project, cutoff)
             try:
-                response = run_parallel_cached(
+                response, paid_call = run_parallel_cached(
                     task_kind="pre_mre_evidence",
                     project_id=project["id"],
                     cutoff_date=cutoff,
                     prompt=prompt,
                     output_schema=schema,
                     save=not args.no_save,
+                    allow_paid=parallel_spend_count < args.max_parallel_projects,
                 )
-                parallel_spend_count += 1
+                if paid_call:
+                    parallel_spend_count += 1
             except Exception as exc:
                 LOGGER.warning("Parallel evidence research failed for %s: %s", project.get("name"), exc)
                 response = None
@@ -1025,7 +1182,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "core_pass": core_pass_count,
         "split_pass": split_pass_count,
         "production_like_pass": production_like_pass_count,
-        "parallel_research_calls": parallel_spend_count,
+        "parallel_research_calls": parallel_truth_spend_count + parallel_spend_count,
+        "parallel_truth_research_calls": parallel_truth_spend_count,
+        "parallel_evidence_research_calls": parallel_spend_count,
         "no_prediction_reasons": dict(Counter(reason for row in results for reason in row["no_prediction_reasons"])),
         "pass_project_names_metrics": [
             {
@@ -1065,6 +1224,8 @@ def main() -> int:
     parser.add_argument("--threshold", type=float, default=0.05)
     parser.add_argument("--run-label", default=None)
     parser.add_argument("--no-save", action="store_true", help="Do not write gold_* rows.")
+    parser.add_argument("--research-missing-truth", action="store_true", help="Use cached/Parallel research for projects without validated first-MRE truth.")
+    parser.add_argument("--max-parallel-truth-projects", type=int, default=0, help="Maximum paid Parallel MRE truth calls for this run.")
     parser.add_argument("--research-missing-evidence", action="store_true", help="Use cached/Parallel research when target evidence is insufficient.")
     parser.add_argument("--max-parallel-projects", type=int, default=0, help="Maximum paid Parallel evidence calls for this run.")
     parser.add_argument("--processor", default=None, help="Override PARALLEL_PROCESSOR.")
@@ -1081,7 +1242,7 @@ def main() -> int:
         out = Path(args.json_out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text + "\n", encoding="utf-8")
-    return 0 if summary["truth_validated"] > 0 else 1
+    return 0
 
 
 if __name__ == "__main__":

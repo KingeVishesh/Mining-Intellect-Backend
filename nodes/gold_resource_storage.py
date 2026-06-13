@@ -203,7 +203,7 @@ def get_parallel_cache(cache_key: str) -> Optional[Dict[str, Any]]:
         .maybe_single()
         .execute()
     )
-    return res.data
+    return res.data if res is not None else None
 
 
 def upsert_parallel_cache(row: Dict[str, Any]) -> Dict[str, Any]:
