@@ -131,6 +131,52 @@ def test_accepts_pre_cutoff_drilling_fact_with_rejected_mre_context_in_payload()
     assert reasons == []
 
 
+def test_accepts_pre_cutoff_fact_when_notes_only_mention_excluded_first_mre_context():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "total_drill_meters",
+        50000,
+        source_title="Sunward intercepts gold and strong copper mineralization at Titiribi",
+        source_url="https://example.com/titiribi-drilling",
+        source_date=date(2011, 7, 25),
+        cutoff_date=date(2011, 9, 8),
+        confidence="medium",
+        fact_payload={
+            "notes": (
+                "Pre-MRE exploration evidence from verified pre-cutoff press releases. "
+                "TOTAL METERS DRILLED: Over 50,000 m as of July 25, 2011. "
+                "No bulk density, weighted grade, or non-MRE tonnage estimates were found. "
+                "The first NI 43-101 MRE was dated May 19, 2010, but contains "
+                "MRE data that cannot be quoted."
+            ),
+        },
+    ))
+
+    assert ok is True
+    assert reasons == []
+
+
+def test_accepts_pre_cutoff_fact_when_notes_only_mention_excluded_post_mre_sources():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "drill_holes",
+        16,
+        source_title="Omai Gold Announces Final Wenot 2021 Drill Results",
+        source_url="https://example.com/omai-2021-drilling",
+        source_date=date(2021, 12, 8),
+        cutoff_date=date(2022, 1, 4),
+        confidence="medium",
+        fact_payload={
+            "notes": (
+                "PRIMARY SOURCE: Dec 8, 2021 press release before the initial MRE cutoff. "
+                "The program comprised 16 diamond drill holes totalling 8,181 m. "
+                "Post-MRE sources state bulk density values, but those are excluded."
+            ),
+        },
+    ))
+
+    assert ok is True
+    assert reasons == []
+
+
 def test_rejects_pre_cutoff_fact_when_payload_itself_quotes_resource_estimate():
     ok, reasons = validate_pre_mre_evidence(_evidence(
         "total_drill_meters",

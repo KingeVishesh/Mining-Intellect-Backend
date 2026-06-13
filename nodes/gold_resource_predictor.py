@@ -30,7 +30,7 @@ from schemas.gold_resource_predictor import (
 )
 
 
-PREDICTOR_VERSION = "gold_resource_predictor_v2.2"
+PREDICTOR_VERSION = "gold_resource_predictor_v2.3"
 TROY_OZ_PER_MT_GPT = 32150.7466
 MIN_CLEAN_ANALOGS = 3
 MIN_SPLIT_ANALOGS = 3
@@ -39,7 +39,7 @@ ANALOG_WEIGHT = 0.20
 
 _TAINT_RE = re.compile(
     r"\b("
-    r"(?<!pre )mre|mineral resource|resource estimate|technical report|ni[- ]?43[- ]?101|"
+    r"(?<!pre )(?<!non )mre|mineral resource|resource estimate|technical report|ni[- ]?43[- ]?101|"
     r"jorc|sk[- ]?1300|measured and indicated|inferred resource"
     r")\b",
     re.IGNORECASE,
@@ -187,11 +187,21 @@ def _taint_payload_text(fact: GoldEvidenceFact) -> str:
     notes = payload.get("notes")
     if isinstance(notes, str):
         notes = re.split(
-            r"\b(?:maiden\s+mre\s+context|target\s+mre|mre\s+context|rejected\s+sources)\b",
+            r"\b(?:"
+            r"maiden[-\s]+mre[-\s]+context|target[-\s]+mre|mre[-\s]+context|rejected[-\s]+sources|"
+            r"the\s+first\s+(?:ni[-\s]*43[-\s]*101\s+)?mre\s+was|"
+            r"post[-\s]+mre\s+sources?|post[-\s]+cutoff\s+mre|historical\s+(?:resource|reserve)s?"
+            r")\b",
             notes,
             maxsplit=1,
             flags=re.IGNORECASE,
         )[0]
+        notes = re.sub(
+            r"\b(?:pre|initial|target)[-\s]+mre\s+cutoff\b",
+            "cutoff",
+            notes,
+            flags=re.IGNORECASE,
+        )
         payload["notes"] = notes
     return json.dumps(payload, sort_keys=True, default=str)
 
