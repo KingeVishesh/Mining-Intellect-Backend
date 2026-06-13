@@ -139,7 +139,8 @@ A project will return `no_prediction` unless it has:
   (`strike_length_m`, `down_dip_extent_m`, `avg_true_width_m`,
   `bulk_density_t_m3`, `mineralized_continuity_factor`). Grade can be a
   pre-MRE weighted/average intercept or explicit non-MRE grade proxy
-  (`grade_proxy_gpt`), such as a published exploration-target midpoint
+  (`grade_proxy_gpt`). Exploration-target midpoint facts are stored for audit,
+  but they are not sufficient prediction anchors on their own.
 - at least three clean analogs
 - at least three split-ready analogs with M&I and inferred tonnage/grade
 - compatible subtype, belt, mining method, stage, tonnage band, and grade band

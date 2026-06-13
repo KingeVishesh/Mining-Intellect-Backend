@@ -6,7 +6,7 @@ All functions target the new `gold_*` schema. They do not read or write legacy
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from nodes.supabase_ops import get_client
@@ -218,6 +218,20 @@ def upsert_parallel_cache(row: Dict[str, Any]) -> Dict[str, Any]:
     return _first(res.data)
 
 
+def truth_cutoff_date(truth: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not truth:
+        return None
+    for key in ("cutoff_date", "effective_date", "publication_date"):
+        value = truth.get(key)
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if value:
+            return str(value)
+    return None
+
+
 def load_gold_case_bundle(project_id: str) -> Dict[str, Any]:
     client = get_client()
     project_res = (
@@ -237,7 +251,7 @@ def load_gold_case_bundle(project_id: str) -> Dict[str, Any]:
         .execute()
     )
     truth = truth_res.data if truth_res is not None else None
-    cutoff_date = truth.get("cutoff_date") if truth else None
+    cutoff_date = truth_cutoff_date(truth)
 
     all_evidence_query = (
         client.table(GOLD_TABLES["pre_mre_evidence"])

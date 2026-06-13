@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
+
 from nodes import gold_resource_storage as storage
 
 
@@ -24,3 +26,10 @@ def test_get_parallel_cache_handles_empty_maybe_single(monkeypatch):
     monkeypatch.setattr(storage, "get_client", lambda: Client())
 
     assert storage.get_parallel_cache("missing-cache-key") is None
+
+
+def test_truth_cutoff_date_prefers_persisted_cutoff_then_truth_dates():
+    assert storage.truth_cutoff_date({"cutoff_date": date(2024, 1, 2)}) == "2024-01-02"
+    assert storage.truth_cutoff_date({"effective_date": datetime(2024, 3, 4, tzinfo=timezone.utc)}) == "2024-03-04"
+    assert storage.truth_cutoff_date({"publication_date": "2024-05-06"}) == "2024-05-06"
+    assert storage.truth_cutoff_date({}) is None
