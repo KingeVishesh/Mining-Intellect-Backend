@@ -1474,7 +1474,12 @@ def prefetch_parallel_analog_cache(
     return paid_count
 
 
-def fetch_legacy_truth_projects(limit: Optional[int] = None, project_ids: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
+def fetch_gold_truth_projects(
+    limit: Optional[int] = None,
+    project_ids: Optional[Sequence[str]] = None,
+    *,
+    require_legacy_split: bool = True,
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     offset = 0
     client = supabase_ops.get_client()
@@ -1483,11 +1488,15 @@ def fetch_legacy_truth_projects(limit: Optional[int] = None, project_ids: Option
             client.table("projects")
             .select(LEGACY_PROJECT_SELECT)
             .ilike("material", "gold")
-            .not_.is_("mre_mi_tonnage_mt", "null")
-            .not_.is_("mre_mi_grade", "null")
-            .not_.is_("mre_inferred_tonnage_mt", "null")
-            .not_.is_("mre_inferred_grade", "null")
         )
+        if require_legacy_split:
+            query = (
+                query
+                .not_.is_("mre_mi_tonnage_mt", "null")
+                .not_.is_("mre_mi_grade", "null")
+                .not_.is_("mre_inferred_tonnage_mt", "null")
+                .not_.is_("mre_inferred_grade", "null")
+            )
         if project_ids:
             query = query.in_("id", list(project_ids))
         upper = offset + 999
@@ -1504,6 +1513,10 @@ def fetch_legacy_truth_projects(limit: Optional[int] = None, project_ids: Option
             break
         offset += 1000
     return rows[:limit] if limit is not None else rows
+
+
+def fetch_legacy_truth_projects(limit: Optional[int] = None, project_ids: Optional[Sequence[str]] = None) -> List[Dict[str, Any]]:
+    return fetch_gold_truth_projects(limit=limit, project_ids=project_ids, require_legacy_split=True)
 
 
 def fetch_mre_runs(project_ids: Sequence[str]) -> Dict[str, List[Dict[str, Any]]]:
@@ -1617,7 +1630,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     before_counts = gold_table_counts()
     project_ids = args.project_id or None
-    legacy_projects = fetch_legacy_truth_projects(limit=args.limit, project_ids=project_ids)
+    legacy_projects = fetch_gold_truth_projects(
+        limit=args.limit,
+        project_ids=project_ids,
+        require_legacy_split=not args.research_missing_truth,
+    )
     validated_gold_truths = fetch_validated_gold_truths([project["id"] for project in legacy_projects])
     mre_runs_by_project = fetch_mre_runs([project["id"] for project in legacy_projects])
 

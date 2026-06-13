@@ -616,7 +616,11 @@ def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch)
     events = []
 
     monkeypatch.setattr(backtest_v2, "gold_table_counts", lambda: {})
-    monkeypatch.setattr(backtest_v2, "fetch_legacy_truth_projects", lambda limit=None, project_ids=None: [project])
+    def fake_fetch_projects(limit=None, project_ids=None, *, require_legacy_split=True):
+        assert require_legacy_split is False
+        return [project]
+
+    monkeypatch.setattr(backtest_v2, "fetch_gold_truth_projects", fake_fetch_projects)
     monkeypatch.setattr(backtest_v2, "fetch_validated_gold_truths", lambda project_ids: {})
     monkeypatch.setattr(backtest_v2, "fetch_mre_runs", lambda project_ids: {project["id"]: []})
     monkeypatch.setattr(backtest_v2, "create_gold_backtest_batch", lambda row: {"id": "batch-1"})
@@ -716,7 +720,11 @@ def test_run_replays_validated_gold_truth_before_legacy_placeholder(monkeypatch)
     ]
 
     monkeypatch.setattr(backtest_v2, "gold_table_counts", lambda: {})
-    monkeypatch.setattr(backtest_v2, "fetch_legacy_truth_projects", lambda limit=None, project_ids=None: [project])
+    def fake_fetch_projects(limit=None, project_ids=None, *, require_legacy_split=True):
+        assert require_legacy_split is True
+        return [project]
+
+    monkeypatch.setattr(backtest_v2, "fetch_gold_truth_projects", fake_fetch_projects)
     monkeypatch.setattr(backtest_v2, "fetch_validated_gold_truths", lambda project_ids: {project["id"]: db_truth})
     monkeypatch.setattr(
         backtest_v2,
