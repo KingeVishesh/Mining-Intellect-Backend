@@ -181,6 +181,7 @@ def full_split_values(project: Dict[str, Any], run: Optional[Dict[str, Any]] = N
 
 
 def build_gold_project_row(project: Dict[str, Any], *, data_status: str = "candidate", exclusion_reason: Optional[str] = None) -> Dict[str, Any]:
+    stored_exclusion_reason = exclusion_reason if data_status == "excluded" else ""
     safe_payload = {
         "legacy_project_id": project.get("id"),
         "legacy_name": project.get("name"),
@@ -208,7 +209,7 @@ def build_gold_project_row(project: Dict[str, Any], *, data_status: str = "candi
         "project_stage_class": project.get("project_stage_class"),
         "recovery_method": project.get("recovery_method"),
         "data_status": data_status,
-        "exclusion_reason": exclusion_reason,
+        "exclusion_reason": stored_exclusion_reason,
         "source_payload": safe_payload,
     }
 

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import scripts.run_gold_resource_backtest_v2 as backtest_v2
 from scripts.run_gold_resource_backtest_v2 import (
     analog_candidate_row,
+    build_gold_project_row,
     build_truth_row,
     decision_rows_for_candidates,
     evidence_rows_from_payload,
@@ -145,6 +146,17 @@ def test_truth_builder_does_not_use_project_mre_mirror_as_fallback():
 
     assert truth is None
     assert reason == "no_validated_first_mre_with_full_split_and_date"
+
+
+def test_project_row_clears_stale_exclusion_reason_when_truth_validated():
+    row = build_gold_project_row(
+        {"id": "00000000-0000-0000-0000-000000000001", "name": "Recovered Gold"},
+        data_status="truth_validated",
+        exclusion_reason="old_failure_reason",
+    )
+
+    assert row["data_status"] == "truth_validated"
+    assert row["exclusion_reason"] == ""
 
 
 def test_parallel_truth_builder_accepts_valid_first_mre_response():
