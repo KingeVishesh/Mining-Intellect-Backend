@@ -177,6 +177,33 @@ def test_accepts_pre_cutoff_fact_when_notes_only_mention_excluded_post_mre_sourc
     assert reasons == []
 
 
+def test_accepts_pre_cutoff_fact_when_notes_audit_rejected_post_cutoff_sources():
+    ok, reasons = validate_pre_mre_evidence(_evidence(
+        "total_drill_meters",
+        45600,
+        source_title="Teuton expands Goldstorm mineralization along the Northeast Axis",
+        source_url="https://example.com/treaty-creek-2020-drilling",
+        source_date=date(2020, 9, 10),
+        cutoff_date=date(2021, 3, 1),
+        confidence="low",
+        fact_payload={
+            "notes": (
+                "Pre-MRE evidence for Treaty Creek. STRIKE LENGTH: 1,100 m along "
+                "the northeast axis, stated in the September 10, 2020 release. "
+                "BULK DENSITY: 2.80 t/m3 appears in the April 26, 2021 NI 43-101 "
+                "Technical Report (POST-CUTOFF) and was rejected. "
+                "Current website references 2026 MRE data and is excluded."
+            ),
+            "rejected_sources": [
+                {"source_title": "Initial Mineral Resource Estimate", "source_date": "2021-04-26"}
+            ],
+        },
+    ))
+
+    assert ok is True
+    assert reasons == []
+
+
 def test_rejects_pre_cutoff_fact_when_payload_itself_quotes_resource_estimate():
     ok, reasons = validate_pre_mre_evidence(_evidence(
         "total_drill_meters",

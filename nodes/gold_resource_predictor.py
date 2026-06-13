@@ -186,6 +186,18 @@ def _taint_payload_text(fact: GoldEvidenceFact) -> str:
     payload.pop("rejected_sources", None)
     notes = payload.get("notes")
     if isinstance(notes, str):
+        note_parts = re.split(r"(?<=[.!?])\s+", notes)
+        notes = " ".join(
+            part for part in note_parts
+            if not re.search(
+                r"\b(?:"
+                r"post[-\s]+cutoff|post[-\s]+mre|mre[-\s]+tainted|rejected|excluded|"
+                r"cannot\s+be\s+(?:used|quoted)|all\s+data\s+mre[-\s]+tainted"
+                r")\b",
+                part,
+                flags=re.IGNORECASE,
+            )
+        )
         notes = re.split(
             r"\b(?:"
             r"maiden[-\s]+mre[-\s]+context|target[-\s]+mre|mre[-\s]+context|rejected[-\s]+sources|"
