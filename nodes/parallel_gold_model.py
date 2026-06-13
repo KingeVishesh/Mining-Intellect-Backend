@@ -6441,6 +6441,61 @@ def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optiona
     return None
 
 
+def recover_parallel_task_result(run_id: str) -> Optional[Dict[str, Any]]:
+    """Poll an existing Parallel task run and parse its result.
+
+    This is used when a local process timed out after Parallel accepted the
+    paid task. Recovering by run_id prevents duplicate spend and lets
+    gold_parallel_cache be promoted from failed/timeout to complete.
+    """
+    headers = {
+        "x-api-key": settings.parallel_api_key,
+        "Content-Type": "application/json",
+    }
+    base = settings.parallel_base_url.rstrip("/")
+    start = time.time()
+    deadline = start + _POLL_TIMEOUT_S
+    status: Optional[str] = None
+    last_heartbeat = 0.0
+
+    while time.time() < deadline:
+        poll = _parallel_request("get", f"{base}/v1/tasks/runs/{run_id}", headers=headers, timeout=30)
+        run_state = poll.json()
+        status = (run_state.get("status") or "").lower()
+        now = time.time()
+        if _POLL_HEARTBEAT and (now - last_heartbeat) >= _POLL_HEARTBEAT_INTERVAL_S:
+            last_heartbeat = now
+            logger.info(
+                "[parallel_gold] recovering run_id=%s status=%s elapsed=%ss",
+                run_id,
+                status or "unknown",
+                int(now - start),
+            )
+        if status in _TERMINAL_STATUSES:
+            break
+        time.sleep(_POLL_INTERVAL_S)
+
+    if status != "completed":
+        msg = (
+            f"Parallel task did not complete within {_POLL_TIMEOUT_S}s "
+            f"(status={status or 'unknown'}, run_id={run_id})"
+        )
+        logger.error(f"[parallel_gold] {msg}")
+        raise RuntimeError(msg)
+
+    res = _parallel_request("get", f"{base}/v1/tasks/runs/{run_id}/result", headers=headers, timeout=60)
+    payload = res.json()
+    output = payload.get("output") or {}
+    content = output.get("content")
+    parsed_content = _parse_parallel_output_content(content)
+    if parsed_content:
+        return parsed_content
+    if output and isinstance(output, dict) and "m_and_i" in output:
+        return output
+    logger.error(f"[parallel_gold] unexpected recovered result shape: keys={list(payload.keys())}")
+    return None
+
+
 def _parse_parallel_output_content(content: Any) -> Optional[Dict[str, Any]]:
     """Parse Parallel output.content without discarding completed task results."""
     if isinstance(content, dict):

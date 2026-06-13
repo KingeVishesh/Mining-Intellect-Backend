@@ -23,6 +23,7 @@ import re
 import sys
 import uuid
 from collections import Counter
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -61,7 +62,7 @@ from nodes.gold_resource_storage import (  # noqa: E402
     upsert_gold_project,
     upsert_parallel_cache,
 )
-from nodes.parallel_gold_model import _run_parallel_task  # noqa: E402
+from nodes.parallel_gold_model import _run_parallel_task, recover_parallel_task_result  # noqa: E402
 
 
 LOGGER = logging.getLogger("gold_resource_backtest_v2")
@@ -769,9 +770,63 @@ def find_reusable_parallel_cache(
     return None
 
 
+def find_recoverable_parallel_cache(
+    *,
+    task_kind: str,
+    project_id: str,
+    cutoff_date: Optional[date],
+    request_payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    target_payload = comparable_parallel_request_payload(request_payload)
+    query = (
+        supabase_ops.get_client()
+        .table(GOLD_TABLES["parallel_cache"])
+        .select("*")
+        .eq("task_kind", task_kind)
+        .eq("project_id", project_id)
+        .not_.is_("provider_task_id", "null")
+        .order("created_at", desc=True)
+        .limit(20)
+    )
+    if cutoff_date is None:
+        query = query.is_("cutoff_date", "null")
+    else:
+        query = query.eq("cutoff_date", cutoff_date.isoformat())
+    rows = query.execute().data or []
+    for row in rows:
+        if row.get("response_status") == "complete":
+            continue
+        if comparable_parallel_request_payload(row.get("request_payload") or {}) == target_payload:
+            return row
+    return None
+
+
 def provider_task_id_from_error(error: str) -> Optional[str]:
     match = re.search(r"\brun_id=([A-Za-z0-9_-]+)", error or "")
     return match.group(1) if match else None
+
+
+def recover_cached_parallel_response(row: Optional[Dict[str, Any]], *, save: bool) -> Optional[Dict[str, Any]]:
+    if not row or not row.get("provider_task_id"):
+        return None
+    try:
+        response = recover_parallel_task_result(str(row["provider_task_id"]))
+    except Exception as exc:
+        if save:
+            failed = {**row}
+            failed["response_status"] = "failed"
+            failed["provider_error"] = str(exc)
+            upsert_parallel_cache(failed)
+        return None
+    if response is None:
+        return None
+    if save:
+        recovered = {**row}
+        recovered["response_payload"] = response
+        recovered["response_status"] = "complete"
+        recovered["provider_error"] = ""
+        upsert_parallel_cache(recovered)
+    return response
 
 
 def run_parallel_cached(
@@ -794,6 +849,9 @@ def run_parallel_cached(
     cached = get_parallel_cache(key)
     if cached and cached.get("response_status") == "complete":
         return cached.get("response_payload"), False
+    recovered = recover_cached_parallel_response(cached, save=save)
+    if recovered is not None:
+        return recovered, False
     reusable = find_reusable_parallel_cache(
         task_kind=task_kind,
         project_id=project_id,
@@ -802,6 +860,16 @@ def run_parallel_cached(
     )
     if reusable:
         return reusable.get("response_payload"), False
+    if save:
+        recoverable = find_recoverable_parallel_cache(
+            task_kind=task_kind,
+            project_id=project_id,
+            cutoff_date=cutoff_date,
+            request_payload=request_payload,
+        )
+        recovered = recover_cached_parallel_response(recoverable, save=save)
+        if recovered is not None:
+            return recovered, False
     if not allow_paid:
         return None, False
     try:
@@ -832,6 +900,124 @@ def run_parallel_cached(
             "response_status": "complete",
         })
     return response, True
+
+
+def needs_parallel_truth_research(
+    project: Dict[str, Any],
+    *,
+    validated_gold_truths: Dict[str, Dict[str, Any]],
+    mre_runs_by_project: Dict[str, List[Dict[str, Any]]],
+) -> bool:
+    if validated_gold_truths.get(project["id"]):
+        return False
+    truth, exclusion_reason = build_truth_row(project, mre_runs_by_project.get(project["id"], []))
+    return bool(exclusion_reason or not truth)
+
+
+def prefetch_parallel_truth_project(
+    project: Dict[str, Any],
+    *,
+    legacy_runs: Sequence[Dict[str, Any]],
+    save: bool,
+    allow_paid: bool,
+) -> Tuple[str, bool]:
+    if save:
+        ensure_project_for_parallel_cache(project, data_status="candidate")
+    prompt, schema = parallel_truth_prompt(project, legacy_runs)
+    _response, paid_call = run_parallel_cached(
+        task_kind="mre_truth",
+        project_id=project["id"],
+        cutoff_date=None,
+        prompt=prompt,
+        output_schema=schema,
+        save=save,
+        allow_paid=allow_paid,
+    )
+    return project["id"], paid_call
+
+
+def prefetch_parallel_truth_cache(
+    projects: Sequence[Dict[str, Any]],
+    *,
+    validated_gold_truths: Dict[str, Dict[str, Any]],
+    mre_runs_by_project: Dict[str, List[Dict[str, Any]]],
+    max_paid: int,
+    max_workers: int,
+    save: bool,
+) -> int:
+    if not save or max_workers <= 1:
+        return 0
+    worker_count = max(1, min(10, int(max_workers)))
+    candidates = [
+        project
+        for project in projects
+        if needs_parallel_truth_research(
+            project,
+            validated_gold_truths=validated_gold_truths,
+            mre_runs_by_project=mre_runs_by_project,
+        )
+    ]
+    if not candidates:
+        return 0
+
+    paid_count = 0
+    next_index = 0
+    pending: Dict[Future[Tuple[str, bool]], Dict[str, Any]] = {}
+
+    def can_submit_more() -> bool:
+        if next_index >= len(candidates) or len(pending) >= worker_count:
+            return False
+        if max_paid <= 0:
+            return True
+        return paid_count + len(pending) < max_paid
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        while can_submit_more():
+            project = candidates[next_index]
+            next_index += 1
+            pending[
+                executor.submit(
+                    prefetch_parallel_truth_project,
+                    project,
+                    legacy_runs=mre_runs_by_project.get(project["id"], []),
+                    save=save,
+                    allow_paid=max_paid > 0,
+                )
+            ] = project
+
+        while pending:
+            done, _not_done = wait(set(pending), return_when=FIRST_COMPLETED)
+            for future in done:
+                project = pending.pop(future)
+                try:
+                    project_id, paid_call = future.result()
+                    if paid_call:
+                        paid_count += 1
+                    LOGGER.info(
+                        "Parallel MRE truth prefetch finished for %s paid_call=%s",
+                        project_id,
+                        paid_call,
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Parallel MRE truth prefetch failed for %s: %s",
+                        project.get("name"),
+                        exc,
+                    )
+            while can_submit_more():
+                project = candidates[next_index]
+                next_index += 1
+                pending[
+                    executor.submit(
+                        prefetch_parallel_truth_project,
+                        project,
+                        legacy_runs=mre_runs_by_project.get(project["id"], []),
+                        save=save,
+                        allow_paid=max_paid > 0,
+                    )
+                ] = project
+
+    return paid_count
 
 
 def parallel_evidence_prompt(project: Dict[str, Any], cutoff_date: date) -> Tuple[str, Dict[str, Any]]:
@@ -1110,6 +1296,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         import nodes.parallel_gold_model as parallel_gold_model
 
         parallel_gold_model._POLL_TIMEOUT_S = max(15, int(args.poll_timeout_s))
+    truth_concurrency = max(1, min(10, int(getattr(args, "max_parallel_truth_concurrency", 1) or 1)))
 
     before_counts = gold_table_counts()
     project_ids = args.project_id or None
@@ -1129,6 +1316,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 "limit": args.limit,
                 "research_missing_truth": args.research_missing_truth,
                 "max_parallel_truth_projects": args.max_parallel_truth_projects,
+                "max_parallel_truth_concurrency": truth_concurrency,
                 "research_missing_evidence": args.research_missing_evidence,
                 "max_parallel_projects": args.max_parallel_projects,
                 "research_missing_analogs": args.research_missing_analogs,
@@ -1142,6 +1330,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     parallel_truth_spend_count = 0
     parallel_spend_count = 0
     parallel_analog_spend_count = 0
+    if args.research_missing_truth and truth_concurrency > 1:
+        parallel_truth_spend_count += prefetch_parallel_truth_cache(
+            legacy_projects,
+            validated_gold_truths=validated_gold_truths,
+            mre_runs_by_project=mre_runs_by_project,
+            max_paid=args.max_parallel_truth_projects,
+            max_workers=truth_concurrency,
+            save=not args.no_save,
+        )
 
     for project in legacy_projects:
         truth = validated_gold_truths.get(project["id"])
@@ -1469,6 +1666,7 @@ def main() -> int:
     parser.add_argument("--no-save", action="store_true", help="Do not write gold_* rows.")
     parser.add_argument("--research-missing-truth", action="store_true", help="Use cached/Parallel research for projects without validated first-MRE truth.")
     parser.add_argument("--max-parallel-truth-projects", type=int, default=0, help="Maximum paid Parallel MRE truth calls for this run.")
+    parser.add_argument("--max-parallel-truth-concurrency", type=int, default=1, help="Concurrent Parallel MRE truth calls/recoveries, capped at 10.")
     parser.add_argument("--research-missing-evidence", action="store_true", help="Use cached/Parallel research when target evidence is insufficient.")
     parser.add_argument("--max-parallel-projects", type=int, default=0, help="Maximum paid Parallel evidence calls for this run.")
     parser.add_argument("--research-missing-analogs", action="store_true", help="Use cached/Parallel research when the clean analog cohort is insufficient.")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from datetime import date
 from types import SimpleNamespace
 
@@ -301,6 +303,7 @@ def test_parallel_cache_failed_paid_call_counts_and_caches(monkeypatch):
     writes = []
     monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: None)
     monkeypatch.setattr(backtest_v2, "find_reusable_parallel_cache", lambda **kwargs: None)
+    monkeypatch.setattr(backtest_v2, "find_recoverable_parallel_cache", lambda **kwargs: None)
     monkeypatch.setattr(backtest_v2, "upsert_parallel_cache", lambda row: writes.append(row) or row)
 
     def fail_parallel_call(**kwargs):
@@ -323,6 +326,99 @@ def test_parallel_cache_failed_paid_call_counts_and_caches(monkeypatch):
     assert writes[0]["response_status"] == "failed"
     assert "Parallel task did not complete" in writes[0]["provider_error"]
     assert writes[0]["provider_task_id"] == "trun_timeout"
+
+
+def test_parallel_cache_recovers_failed_provider_task_before_paid_call(monkeypatch):
+    payload = {"status": "validated", "confidence": "high"}
+    writes = []
+    cached_row = {
+        "task_kind": "mre_truth",
+        "cache_key": "cache-1",
+        "project_id": "project-1",
+        "cutoff_date": None,
+        "request_payload": {"prompt": "prompt"},
+        "response_payload": {},
+        "response_status": "failed",
+        "provider_error": "Parallel task did not complete within 600s (status=running, run_id=trun_timeout)",
+        "provider_task_id": "trun_timeout",
+    }
+    monkeypatch.setattr(backtest_v2, "get_parallel_cache", lambda key: cached_row)
+    monkeypatch.setattr(backtest_v2, "recover_parallel_task_result", lambda run_id: payload)
+    monkeypatch.setattr(backtest_v2, "upsert_parallel_cache", lambda row: writes.append(row) or row)
+
+    def fail_parallel_call(**kwargs):
+        raise AssertionError("recoverable provider task should not start a new paid call")
+
+    monkeypatch.setattr(backtest_v2, "_run_parallel_task", fail_parallel_call)
+
+    response, paid_call = backtest_v2.run_parallel_cached(
+        task_kind="mre_truth",
+        project_id="project-1",
+        cutoff_date=None,
+        prompt="prompt",
+        output_schema={"type": "object"},
+        save=True,
+        allow_paid=True,
+    )
+
+    assert response == payload
+    assert paid_call is False
+    assert writes[0]["response_status"] == "complete"
+    assert writes[0]["response_payload"] == payload
+    assert writes[0]["provider_error"] == ""
+
+
+def test_parallel_truth_prefetch_caps_concurrency_and_paid_budget(monkeypatch):
+    projects = [
+        {"id": f"project-{idx}", "name": f"Project {idx}", "material": "gold"}
+        for idx in range(4)
+    ]
+    validated = {"project-0": {"id": "truth-0"}}
+    started = []
+    ensured = []
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    monkeypatch.setattr(backtest_v2, "parallel_truth_prompt", lambda project, legacy_runs: ("prompt", {"type": "object"}))
+    monkeypatch.setattr(
+        backtest_v2,
+        "ensure_project_for_parallel_cache",
+        lambda project, *, data_status: ensured.append((project["id"], data_status)),
+    )
+
+    def fake_run_parallel_cached(**kwargs):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            time.sleep(0.02)
+            started.append(kwargs["project_id"])
+            return {"status": "validated"}, True
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(backtest_v2, "run_parallel_cached", fake_run_parallel_cached)
+
+    paid_count = backtest_v2.prefetch_parallel_truth_cache(
+        projects,
+        validated_gold_truths=validated,
+        mre_runs_by_project={project["id"]: [] for project in projects},
+        max_paid=3,
+        max_workers=2,
+        save=True,
+    )
+
+    assert paid_count == 3
+    assert sorted(started) == ["project-1", "project-2", "project-3"]
+    assert max_active <= 2
+    assert ensured == [
+        ("project-1", "candidate"),
+        ("project-2", "candidate"),
+        ("project-3", "candidate"),
+    ]
 
 
 def test_truth_parallel_research_ensures_project_before_cache_write(monkeypatch):

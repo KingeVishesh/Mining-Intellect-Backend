@@ -93,6 +93,30 @@ Cached hits replay without counting as new Parallel spend, even when
 updated/revised/latest MREs, post-MRE study sources, year-end placeholder dates,
 missing source URLs, and incomplete M&I/Inferred split outputs remain excluded.
 
+Parallel MRE truth calls can run for up to an hour or more. Use a long poll
+timeout and cap concurrency explicitly when expanding the truth pool:
+
+```bash
+python3 scripts/run_gold_resource_backtest_v2.py \
+  --research-missing-truth \
+  --max-parallel-truth-projects 10 \
+  --max-parallel-truth-concurrency 10 \
+  --poll-timeout-s 7200
+```
+
+If a local process times out after Parallel accepted a task, the runner stores
+the provider run id in `gold_parallel_cache.provider_task_id`. Later runs first
+recover that provider task and promote the cache row to `complete` before any
+new paid call is allowed. This is the preferred recovery path:
+
+```bash
+python3 scripts/run_gold_resource_backtest_v2.py \
+  --project-id <legacy-project-uuid> \
+  --research-missing-truth \
+  --max-parallel-truth-projects 0 \
+  --poll-timeout-s 7200
+```
+
 Permit cached/Parallel analog research only after truth and pre-MRE target
 evidence are available but the deterministic clean/split-ready cohort is too
 thin:
@@ -113,6 +137,25 @@ only by deterministic analog rules.
 The runner writes all artifacts to `gold_*` tables. Rejected evidence and analog
 decisions are persisted with reasons. If pre-MRE tonnage, grade, or analog
 support is insufficient, the result is `no_prediction`.
+
+## Reusing Prior Backtests
+
+Prior gold backtesting work is useful as a queue and diagnostic signal, but not
+as blind prediction evidence. Use old artifacts such as `artifacts/gold_blind_*`
+or pattern-analysis output to decide which projects to research next and which
+failure modes to harden. Do not feed old predictions, pass/fail labels, MRE
+residuals, or model-run outputs into v2 inputs.
+
+Safe reuse must pass through v2 gates:
+
+- `gold_parallel_cache` can be replayed or recovered by provider task id, then
+  revalidated by the v2 truth/evidence/analog import logic.
+- legacy `mre_runs` can seed scoring truth only when `build_truth_row()` accepts
+  the earliest sourced first MRE with a complete M&I/Inferred split.
+- legacy `projects.drilling_evidence` and analog rows can be imported only as
+  candidates; accepted prediction inputs must be persisted as
+  `gold_pre_mre_evidence`, `gold_analog_candidates`, and
+  `gold_analog_decisions` after deterministic pre-MRE and analog gates.
 
 ## Live Test Checklist
 
