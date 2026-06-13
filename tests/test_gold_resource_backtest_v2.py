@@ -68,6 +68,23 @@ def test_evidence_builder_stores_rejected_payloads_without_post_cutoff_source_da
     assert rows[0]["fact_payload"]["rejected_source_date"] == "2024-02-01"
 
 
+def test_evidence_builder_normalizes_legacy_confidence_objects():
+    rows = evidence_rows_from_payload(
+        project_id="project-1",
+        truth_id="truth-1",
+        cutoff_date=date(2024, 1, 1),
+        evidence={
+            "source_url": "https://example.com/2023-drilling",
+            "source_date": "2023-02-01",
+            "weighted_grade_g_t": 1.2,
+            "confidence": {"level": "High"},
+        },
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["confidence"] == "high"
+
+
 def test_analog_candidate_derives_mi_split_from_total_and_inferred():
     row = analog_candidate_row("target-1", {
         "analog_name": "Split Analog",

@@ -286,6 +286,16 @@ def evidence_source_url(evidence: Dict[str, Any], project_id: str) -> str:
     return f"legacy:projects.drilling_evidence:{project_id}"
 
 
+def normalize_evidence_confidence(value: Any) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+    elif isinstance(value, dict):
+        normalized = str(value.get("level") or value.get("confidence") or value.get("rating") or "").strip().lower()
+    else:
+        normalized = ""
+    return normalized if normalized in {"high", "medium", "low"} else "medium"
+
+
 def evidence_fact_row(
     *,
     project_id: str,
@@ -301,7 +311,7 @@ def evidence_fact_row(
     source_url = evidence_source_url(evidence, project_id)
     parsed_source_date = evidence_source_date(evidence)
     source_title = evidence.get("source_title") or evidence.get("report_title")
-    confidence = evidence.get("confidence") if evidence.get("confidence") in {"high", "medium", "low"} else "medium"
+    confidence = normalize_evidence_confidence(evidence.get("confidence"))
     row = {
         "id": stable_uuid("evidence", project_id, truth_id, cutoff_date.isoformat(), fact_type, source_url, parsed_source_date, value_num, value_text),
         "project_id": project_id,
