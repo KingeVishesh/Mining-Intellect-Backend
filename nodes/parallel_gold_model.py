@@ -987,7 +987,7 @@ def _range_spread_factor(result: Dict[str, Any]) -> float:
 def _metric_round(value: Optional[float], metric: str) -> Optional[float]:
     if value is None:
         return None
-    digits = 4 if metric == "grade_gpt" else 3
+    digits = 6 if metric == "contained_moz" else 4 if metric == "grade_gpt" else 3
     return round(float(value), digits)
 
 
