@@ -530,6 +530,22 @@ def test_blind_leak_detector_flags_target_resource_anchor_in_analog_text():
     })
 
 
+def test_blind_leak_detector_allows_negated_target_mre_rejection_note():
+    assert not _blind_result_mentions_mre_anchor({
+        "anchor_used": "drill_transformation",
+        "methodology": {
+            "branch": "blind_pre_mre",
+            "notes": "post-cutoff target resource source discarded without use",
+        },
+        "conviction": {"level": "low", "rationale": "pre-MRE evidence is modest"},
+        "analogs_used": [],
+        "analogs_rejected": [
+            "Post-cutoff target resource source - chronologically excluded; "
+            "no target MRE numbers, titles, or URLs are referenced.",
+        ],
+    })
+
+
 def test_blind_node_does_not_auto_enable_web_discovery_for_thin_cohort(monkeypatch):
     from config import settings
 

@@ -4660,6 +4660,15 @@ def _blind_result_mentions_mre_anchor(result: Dict[str, Any]) -> bool:
         str(result.get(key) or "")
         for key in ("analogs_used", "analogs_rejected")
     ).lower()
+    analog_text = re.sub(
+        r"\bno\s+target(?:'s)?\s+(?:official\s+)?"
+        r"(?:mre|mineral resource estimate|resource estimate)\s+"
+        r"(?:numbers?|figures?|titles?|urls?|sources?)?.{0,80}?"
+        r"\b(?:referenced|used|included|cited)\b",
+        "",
+        analog_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     target_anchor_regexes = (
         re.compile(
             r"\btarget(?:'s)?\s+(?:official\s+)?"
@@ -6622,7 +6631,7 @@ def _rule_guided_output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
         "units",
     ]
     str_or_empty = {"type": "string"}
-    schema["properties"]["rule_pack_hash"] = {"type": "string", "minLength": 12}
+    schema["properties"]["rule_pack_hash"] = {"type": "string"}
     schema["properties"]["rule_applications"] = {
         "type": "array",
         "items": {

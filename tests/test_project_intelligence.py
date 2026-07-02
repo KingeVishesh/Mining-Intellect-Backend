@@ -1,6 +1,7 @@
 import pytest
 
 from nodes import project_intelligence, supabase_ops
+from nodes.parallel_gold_model import _rule_guided_output_schema
 
 
 def _valid_prediction(rule_hash: str) -> dict:
@@ -101,6 +102,42 @@ def test_normalize_intelligence_requires_sources_and_hashes_rule_pack():
             project={"material": "Gold"},
             use_mre=False,
         )
+
+
+def test_intelligence_schema_has_no_empty_object_properties():
+    def walk(schema, path="root"):
+        if not isinstance(schema, dict):
+            return
+        if schema.get("type") == "object":
+            assert schema.get("properties"), f"empty object properties at {path}"
+        for key, value in schema.items():
+            if isinstance(value, dict):
+                walk(value, f"{path}.{key}")
+            elif isinstance(value, list):
+                for idx, item in enumerate(value):
+                    walk(item, f"{path}.{key}[{idx}]")
+
+    walk(project_intelligence._intelligence_schema())
+
+
+def test_new_parallel_schemas_avoid_unsupported_keywords():
+    unsupported = {"minLength"}
+
+    def walk(schema, path="root"):
+        if not isinstance(schema, dict):
+            return
+        assert not (unsupported & set(schema)), f"unsupported schema keyword at {path}"
+        if schema.get("type") == "object":
+            assert schema.get("properties"), f"empty object properties at {path}"
+        for key, value in schema.items():
+            if isinstance(value, dict):
+                walk(value, f"{path}.{key}")
+            elif isinstance(value, list):
+                for idx, item in enumerate(value):
+                    walk(item, f"{path}.{key}[{idx}]")
+
+    walk(project_intelligence._intelligence_schema(), "intelligence")
+    walk(_rule_guided_output_schema(use_mre=False), "rule_guided_prediction")
 
 
 def test_project_intelligence_node_uses_cache(monkeypatch):

@@ -120,7 +120,25 @@ def build_intelligence_cache_key(
 
 def _intelligence_schema() -> Dict[str, Any]:
     string = {"type": "string"}
-    obj = {"type": "object", "additionalProperties": True}
+    def loose_obj(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        # Parallel rejects object schemas with an empty `properties` mapping.
+        # Keep the schema extensible, but give every object at least one named
+        # property so the provider accepts it.
+        return {
+            "type": "object",
+            "additionalProperties": True,
+            "properties": properties or {"summary": string},
+        }
+
+    logic_obj = loose_obj({
+        "summary": string,
+        "rationale": string,
+    })
+    rule_obj = loose_obj({
+        "name": string,
+        "rule": string,
+        "rationale": string,
+    })
     source = {
         "type": "object",
         "additionalProperties": False,
@@ -145,11 +163,26 @@ def _intelligence_schema() -> Dict[str, Any]:
             "evidence_gaps", "analog_logic", "rule_pack", "sources_used",
         ],
         "properties": {
-            "project_dossier": obj,
-            "deposit_classification": obj,
-            "evidence_inventory": {"type": "array", "items": obj},
+            "project_dossier": loose_obj({
+                "project_name": string,
+                "company": string,
+                "summary": string,
+            }),
+            "deposit_classification": loose_obj({
+                "archetype": string,
+                "deposit_type": string,
+                "rationale": string,
+            }),
+            "evidence_inventory": {"type": "array", "items": loose_obj({
+                "type": string,
+                "summary": string,
+                "source_title": string,
+            })},
             "evidence_gaps": {"type": "array", "items": string},
-            "analog_logic": obj,
+            "analog_logic": loose_obj({
+                "summary": string,
+                "rationale": string,
+            }),
             "rule_pack": {
                 "type": "object",
                 "additionalProperties": True,
@@ -161,12 +194,12 @@ def _intelligence_schema() -> Dict[str, Any]:
                 "properties": {
                     "commodity": string,
                     "archetype": string,
-                    "rules": {"type": "array", "items": obj},
-                    "scale_logic": obj,
-                    "grade_logic": obj,
-                    "contained_logic": obj,
-                    "mi_inferred_split_logic": obj,
-                    "uncertainty_logic": obj,
+                    "rules": {"type": "array", "items": rule_obj},
+                    "scale_logic": logic_obj,
+                    "grade_logic": logic_obj,
+                    "contained_logic": logic_obj,
+                    "mi_inferred_split_logic": logic_obj,
+                    "uncertainty_logic": logic_obj,
                 },
             },
             "sources_used": {"type": "array", "items": source},
