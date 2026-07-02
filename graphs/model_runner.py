@@ -1,8 +1,8 @@
 """
 Graph: model_runner
 
-Standalone pipeline that builds Model 1 (+ Model 2 when an official MRE
-exists) WITHOUT generating a PDF or saving a reports row. Used by the
+Standalone pipeline that builds the local Model 1 estimate WITHOUT generating
+a PDF or saving a reports row. Used by the
 /projects-back "Build Models" button so the user can iterate on model
 output without paying the cost of report generation.
 
@@ -11,10 +11,10 @@ Flow:
     → check_analogs_present
         ↳ END if no analogs
     → load_rules → activate_rules
-    → build_model_1 → build_model_2 → save_model_run → END
+    → build_model_1 → save_model_run → END
 
 Persistence:
-  - INSERT row into model_runs for each Model produced (history).
+  - INSERT row into model_runs for the produced model (history).
   - UPDATE projects with the latest Model values so the table view reflects them.
 """
 from __future__ import annotations
@@ -83,7 +83,6 @@ class ModelRunnerState(TypedDict, total=False):
 
     # Models
     model_1: Optional[Dict]
-    model_2: Optional[Dict]
     official_mre_row: Optional[Dict]
 
     # Output
@@ -381,7 +380,7 @@ _contained_tonnes = _contained_native_unit
 
 
 def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
-    """Translate a Model 1 / Model 2 output dict into the 9 columns we persist.
+    """Translate a local model output dict into the columns we persist.
 
     Industry resource statements bundle Measured + Indicated together as
     "M&I" — the model itself doesn't split them, and re-splitting them
@@ -461,9 +460,6 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
         tier_code, tier_label = model_builder._compute_pre_tier(conviction_num)
 
     # ── P1: posterior percentiles + CV come through from build_model_1 ─────────
-    # Model 1 v2 attaches a joint log-normal posterior. Model 2 doesn't have one
-    # yet (P5 follow-up) — when the keys are absent we pass None, which is what
-    # the nullable model_runs columns expect.
     return {
         # Measured + Indicated combined (M&I)
         "mi_tonnage_mt":         mi_mt,
@@ -480,7 +476,7 @@ def _fields_from_model(project: Dict, model: Dict, is_post_mre: bool) -> Dict:
         # Conviction
         "conviction_score":      tier_code,
         "conviction_tier":       f"{tier_code}: {tier_label}",
-        # Posterior percentiles (Model 1 only in P1 — Model 2 leaves these null)
+        # Posterior percentiles
         "p10_tonnage_mt":        _round(model.get("p10_total_tonnage_mt"), 3),
         "p50_tonnage_mt":        _round(model.get("p50_total_tonnage_mt"), 3),
         "p90_tonnage_mt":        _round(model.get("p90_total_tonnage_mt"), 3),
@@ -512,7 +508,7 @@ def save_model_run_node(
     thread_id = cfg.get("thread_id")
     run_id = cfg.get("run_id")
 
-    model = state.get("model_1") or state.get("model_2")
+    model = state.get("model_1")
     if not model:
         return {"saved": False, "error": "No model output produced"}
 

@@ -166,3 +166,55 @@ def test_analog_quality_uses_pre_mre_grade_proxy_when_mre_grade_absent():
 
     assert quality["metrics"]["grade_band_match_rate"] == 1.0
     assert quality["metrics"]["tonnage_band_match_rate"] is None
+
+
+def test_analog_quality_flags_broad_tonnage_band_cohort():
+    quality = analog_quality_score(
+        project={
+            "deposit_subtype": "orogenic_general",
+            "tectonic_belt": "abitibi",
+        },
+        analogs=[
+            {
+                "name": "Tiny Vein",
+                "deposit_subtype": "orogenic_general",
+                "tectonic_belt": "abitibi",
+                "tonnage_mt": 0.8,
+                "grade_value": 6.0,
+                "source_url": "https://example.com/tiny.pdf",
+            },
+            {
+                "name": "Small Mine",
+                "deposit_subtype": "orogenic_general",
+                "tectonic_belt": "abitibi",
+                "tonnage_mt": 8.0,
+                "grade_value": 4.0,
+                "source_url": "https://example.com/small.pdf",
+            },
+            {
+                "name": "Mid Mine",
+                "deposit_subtype": "orogenic_general",
+                "tectonic_belt": "abitibi",
+                "tonnage_mt": 55.0,
+                "grade_value": 2.0,
+                "source_url": "https://example.com/mid.pdf",
+            },
+            {
+                "name": "Mega District",
+                "deposit_subtype": "orogenic_general",
+                "tectonic_belt": "abitibi",
+                "tonnage_mt": 450.0,
+                "grade_value": 0.8,
+                "source_url": "https://example.com/mega.pdf",
+            },
+        ],
+    )
+
+    assert "broad_tonnage_band_cohort" in quality["flags"]
+    assert "extreme_tonnage_spread" in quality["flags"]
+    assert quality["metrics"]["analog_tonnage_band_counts"] == {
+        "sub_1mt": 1,
+        "5_25mt": 1,
+        "25_100mt": 1,
+        "300mt_plus": 1,
+    }

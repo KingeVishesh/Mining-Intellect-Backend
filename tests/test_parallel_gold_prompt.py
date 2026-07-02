@@ -71,6 +71,7 @@ from nodes.parallel_gold_model import (
     _blind_result_mentions_mre_anchor,
     _clean_blind_analogs,
     _evidence_mentions_target_mre,
+    _ensure_blind_resource_ranges,
     _high_grade_vms_scout_proxy,
     _large_yukon_irgs_proxy,
     _parallel_request,
@@ -351,7 +352,32 @@ def test_blind_schema_forces_numeric_estimate_and_excludes_mre_anchor():
     assert schema["properties"]["m_and_i"]["properties"]["tonnage_mt"]["type"] == "number"
     assert schema["properties"]["m_and_i"]["properties"]["tonnage_mt"]["exclusiveMinimum"] == 0
     assert schema["properties"]["m_and_i"]["properties"]["grade_gpt"]["type"] == "number"
+    assert "tonnage_range_mt" in schema["properties"]["m_and_i"]["required"]
+    assert "grade_range_gpt" in schema["properties"]["inferred"]["required"]
+    assert "sources_used" in schema["required"]
     assert "mre_anchored" not in schema["properties"]["anchor_used"]["enum"]
+
+
+def test_blind_range_safeguard_derives_monotonic_ranges_from_scalars():
+    result = {
+        "m_and_i": {"tonnage_mt": 10.0, "grade_gpt": 1.2, "contained_moz": 0.386},
+        "inferred": {"tonnage_mt": 5.0, "grade_gpt": 0.9, "contained_moz": 0.145},
+        "anchor_used": "analog_only_fallback",
+        "conviction": {"level": "low", "rationale": "thin evidence"},
+        "methodology": {"branch": "analog_only_fallback"},
+        "analogs_used": [],
+        "analogs_rejected": [],
+    }
+
+    out = _ensure_blind_resource_ranges(result)
+
+    assert out["m_and_i"]["tonnage_range_mt"] == {
+        "p10": 2.857,
+        "p50": 10.0,
+        "p90": 35.0,
+    }
+    assert out["inferred"]["grade_range_gpt"]["p10"] < out["inferred"]["grade_gpt"]
+    assert out["sources_used"] == []
 
 
 def test_placeholder_blind_estimate_replaced_with_analog_fallback():

@@ -38,6 +38,7 @@ Persistence:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
@@ -112,6 +113,192 @@ def _route_after_parallel(state: GoldModelBuilderState) -> str:
 
 
 _GOLD_MATERIAL = "gold"
+_URL_RE = re.compile(r"https?://[^\s),\]]+")
+
+
+def _as_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        parsed = float(value)
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _range_value(block: Dict[str, Any], range_key: str, point_key: str) -> Dict[str, Optional[float]]:
+    raw = block.get(range_key) if isinstance(block.get(range_key), dict) else {}
+    p50 = _as_float(raw.get("p50")) or _as_float(block.get(point_key))
+    p10 = _as_float(raw.get("p10"))
+    p90 = _as_float(raw.get("p90"))
+    if p50 is None:
+        return {"p10": None, "p50": None, "p90": None}
+    if p10 is None or p10 > p50:
+        p10 = p50
+    if p90 is None or p90 < p50:
+        p90 = p50
+    return {"p10": p10, "p50": p50, "p90": p90}
+
+
+def _weighted_grade_range(
+    tonnage_a: Dict[str, Optional[float]],
+    grade_a: Dict[str, Optional[float]],
+    tonnage_b: Dict[str, Optional[float]],
+    grade_b: Dict[str, Optional[float]],
+) -> Dict[str, Optional[float]]:
+    out: Dict[str, Optional[float]] = {}
+    for key in ("p10", "p50", "p90"):
+        ta = tonnage_a.get(key) or 0.0
+        tb = tonnage_b.get(key) or 0.0
+        ga = grade_a.get(key)
+        gb = grade_b.get(key)
+        total_t = ta + tb
+        if total_t <= 0 or (ga is None and gb is None):
+            out[key] = None
+        else:
+            out[key] = (((ga or 0.0) * ta) + ((gb or 0.0) * tb)) / total_t
+    return out
+
+
+def _metric_range_rows(category: str, block: Dict[str, Any]) -> List[Dict[str, Any]]:
+    metric_specs = (
+        ("tonnage_mt", "tonnage_range_mt", "tonnage_mt", "Mt"),
+        ("grade_gpt", "grade_range_gpt", "grade_gpt", "g/t"),
+        ("contained_moz", "contained_range_moz", "contained_moz", "Moz"),
+    )
+    rows: List[Dict[str, Any]] = []
+    for metric, range_key, point_key, unit in metric_specs:
+        values = _range_value(block, range_key, point_key)
+        if values["p50"] is None:
+            continue
+        rows.append({
+            "resource_category": category,
+            "metric": metric,
+            "p10": _round(values["p10"], 6),
+            "p50": _round(values["p50"], 6),
+            "p90": _round(values["p90"], 6),
+            "unit": unit,
+            "payload": {"source": "parallel_gold_model", "range_key": range_key},
+        })
+    return rows
+
+
+def _resource_range_rows_from_parallel(parallel_out: Dict[str, Any]) -> List[Dict[str, Any]]:
+    mi_block = parallel_out.get("m_and_i") or {}
+    inf_block = parallel_out.get("inferred") or {}
+    rows = _metric_range_rows("m_and_i", mi_block)
+    rows.extend(_metric_range_rows("inferred", inf_block))
+
+    mi_t = _range_value(mi_block, "tonnage_range_mt", "tonnage_mt")
+    inf_t = _range_value(inf_block, "tonnage_range_mt", "tonnage_mt")
+    mi_g = _range_value(mi_block, "grade_range_gpt", "grade_gpt")
+    inf_g = _range_value(inf_block, "grade_range_gpt", "grade_gpt")
+    mi_c = _range_value(mi_block, "contained_range_moz", "contained_moz")
+    inf_c = _range_value(inf_block, "contained_range_moz", "contained_moz")
+    total_t = {key: (mi_t.get(key) or 0.0) + (inf_t.get(key) or 0.0) for key in ("p10", "p50", "p90")}
+    total_c = {key: (mi_c.get(key) or 0.0) + (inf_c.get(key) or 0.0) for key in ("p10", "p50", "p90")}
+    total_g = _weighted_grade_range(mi_t, mi_g, inf_t, inf_g)
+
+    for metric, values, unit in (
+        ("tonnage_mt", total_t, "Mt"),
+        ("grade_gpt", total_g, "g/t"),
+        ("contained_moz", total_c, "Moz"),
+    ):
+        if not values.get("p50"):
+            continue
+        rows.append({
+            "resource_category": "total",
+            "metric": metric,
+            "p10": _round(values.get("p10"), 6),
+            "p50": _round(values.get("p50"), 6),
+            "p90": _round(values.get("p90"), 6),
+            "unit": unit,
+            "payload": {"source": "parallel_gold_model", "derived": True},
+        })
+    return rows
+
+
+def _source_url_from_text(text: str) -> Optional[str]:
+    match = _URL_RE.search(text or "")
+    return match.group(0).rstrip(".") if match else None
+
+
+def _source_rows_from_parallel(project: Dict[str, Any], analogs: List[Dict], parallel_out: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+
+    def add(row: Dict[str, Any]) -> None:
+        title = row.get("title") or row.get("source_title") or row.get("summary") or row.get("url")
+        summary = row.get("summary") or row.get("notes") or row.get("reason") or title
+        if not title and not summary:
+            return
+        used_for = row.get("used_for") if isinstance(row.get("used_for"), list) else []
+        rows.append({
+            "role": row.get("role") or "evidence",
+            "used_for": [str(item) for item in used_for],
+            "title": str(title or "")[:500],
+            "url": row.get("url") or row.get("source_url") or _source_url_from_text(str(summary or "")),
+            "publisher": row.get("publisher") or row.get("source_name"),
+            "source_date": row.get("source_date"),
+            "summary": str(summary or "")[:2000],
+            "excerpt": row.get("excerpt"),
+            "confidence": row.get("confidence"),
+            "payload": row,
+        })
+
+    for item in parallel_out.get("sources_used") or []:
+        if isinstance(item, dict):
+            add(item)
+        elif isinstance(item, str):
+            add({"role": "parallel_source", "title": item, "summary": item})
+
+    drilling = project.get("drilling_evidence")
+    if isinstance(drilling, dict) and drilling.get("source_url") and not drilling.get("redacted"):
+        add({
+            "role": "target_pre_mre_evidence",
+            "used_for": ["tonnage_range", "grade_range", "contained_range"],
+            "title": drilling.get("source_title") or "Target pre-MRE drilling evidence",
+            "url": drilling.get("source_url"),
+            "source_date": drilling.get("source_date"),
+            "summary": drilling.get("notes") or "Target drilling/geometry evidence supplied to the blind gold model.",
+            "confidence": drilling.get("confidence"),
+        })
+
+    for text in parallel_out.get("analogs_used") or []:
+        if isinstance(text, str):
+            add({
+                "role": "analog_weighting",
+                "used_for": ["analog_selection", "range_calibration"],
+                "title": text.split("|", 1)[0].strip() or "Analog used",
+                "url": _source_url_from_text(text),
+                "summary": text,
+            })
+
+    for analog in analogs or []:
+        source_url = analog.get("source_url") or analog.get("mre_source_url")
+        if source_url:
+            add({
+                "role": "analog_resource_source",
+                "used_for": ["analog_selection", "range_calibration"],
+                "title": analog.get("name") or analog.get("analog_name") or source_url,
+                "url": source_url,
+                "source_date": analog.get("mre_date"),
+                "summary": "Approved analog source available to the gold model.",
+                "payload": {
+                    "name": analog.get("name") or analog.get("analog_name"),
+                    "tonnage_mt": analog.get("tonnage_mt"),
+                    "grade_value": analog.get("grade_value"),
+                },
+            })
+
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        key = (row.get("url") or "", row.get("title") or "", row.get("summary") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 def _fields_from_parallel(project: Dict, parallel_out: Dict) -> Dict[str, Any]:
@@ -123,10 +310,10 @@ def _fields_from_parallel(project: Dict, parallel_out: Dict) -> Dict[str, Any]:
     mi_block = parallel_out.get("m_and_i") or {}
     inf_block = parallel_out.get("inferred") or {}
 
-    mi_mt = mi_block.get("tonnage_mt")
-    mi_g = mi_block.get("grade_gpt")
-    inf_mt = inf_block.get("tonnage_mt")
-    inf_g = inf_block.get("grade_gpt")
+    mi_mt = _as_float(mi_block.get("tonnage_mt"))
+    mi_g = _as_float(mi_block.get("grade_gpt"))
+    inf_mt = _as_float(inf_block.get("tonnage_mt"))
+    inf_g = _as_float(inf_block.get("grade_gpt"))
 
     mi_kt = float(mi_mt) * 1000.0 if mi_mt is not None else 0.0
     inf_kt = float(inf_mt) * 1000.0 if inf_mt is not None else 0.0
@@ -159,6 +346,22 @@ def _fields_from_parallel(project: Dict, parallel_out: Dict) -> Dict[str, Any]:
         else None
     )
 
+    mi_t_range = _range_value(mi_block, "tonnage_range_mt", "tonnage_mt")
+    inf_t_range = _range_value(inf_block, "tonnage_range_mt", "tonnage_mt")
+    mi_g_range = _range_value(mi_block, "grade_range_gpt", "grade_gpt")
+    inf_g_range = _range_value(inf_block, "grade_range_gpt", "grade_gpt")
+    mi_c_range = _range_value(mi_block, "contained_range_moz", "contained_moz")
+    inf_c_range = _range_value(inf_block, "contained_range_moz", "contained_moz")
+    total_t_range = {
+        key: (mi_t_range.get(key) or 0.0) + (inf_t_range.get(key) or 0.0)
+        for key in ("p10", "p50", "p90")
+    }
+    total_g_range = _weighted_grade_range(mi_t_range, mi_g_range, inf_t_range, inf_g_range)
+    total_c_range_oz = {
+        key: ((mi_c_range.get(key) or 0.0) + (inf_c_range.get(key) or 0.0)) * 1_000_000.0
+        for key in ("p10", "p50", "p90")
+    }
+
     conviction = (parallel_out.get("conviction") or {})
     conviction_level = conviction.get("level") or ""
     tier_code = f"PARALLEL-{conviction_level.upper()}" if conviction_level else "PARALLEL-UNKNOWN"
@@ -180,10 +383,17 @@ def _fields_from_parallel(project: Dict, parallel_out: Dict) -> Dict[str, Any]:
         # Conviction
         "conviction_score":    tier_code,
         "conviction_tier":     f"{tier_code}: {tier_label}",
-        # Percentile / CV columns: Parallel doesn't produce them yet — leave null.
-        "p10_tonnage_mt": None, "p50_tonnage_mt": None, "p90_tonnage_mt": None,
-        "p10_grade": None, "p50_grade": None, "p90_grade": None,
-        "p10_contained": None, "p50_contained": None, "p90_contained": None,
+        # Percentile / CV columns: for gold ranges, P50 mirrors the scalar
+        # latest-project fields while P10/P90 carry the blind uncertainty band.
+        "p10_tonnage_mt": _round(total_t_range.get("p10"), 3),
+        "p50_tonnage_mt": _round(total_t_range.get("p50"), 3),
+        "p90_tonnage_mt": _round(total_t_range.get("p90"), 3),
+        "p10_grade": _round(total_g_range.get("p10"), 4),
+        "p50_grade": _round(total_g_range.get("p50"), 4),
+        "p90_grade": _round(total_g_range.get("p90"), 4),
+        "p10_contained": _round(total_c_range_oz.get("p10"), 3),
+        "p50_contained": _round(total_c_range_oz.get("p50"), 3),
+        "p90_contained": _round(total_c_range_oz.get("p90"), 3),
         "cv_contained": None,
         # Audit trail — the full Parallel response is also saved into
         # model_output_json below; this column gets the analogs-used trace
@@ -194,7 +404,8 @@ def _fields_from_parallel(project: Dict, parallel_out: Dict) -> Dict[str, Any]:
             "methodology": parallel_out.get("methodology"),
             "analogs_used": parallel_out.get("analogs_used"),
             "analogs_rejected": parallel_out.get("analogs_rejected"),
-            "sources": parallel_out.get("sources"),
+            "sources_used": parallel_out.get("sources_used"),
+            "sources_rejected": parallel_out.get("sources_rejected"),
         },
     }
 
@@ -223,7 +434,7 @@ def save_model_run_node(
     run_id = cfg.get("run_id")
 
     fields = _fields_from_parallel(project, parallel_out)
-    supabase_ops.save_model_run(
+    model_run_id = supabase_ops.save_model_run(
         project_id=project_id,
         model_type=model_type,
         fields=fields,
@@ -231,6 +442,21 @@ def save_model_run_node(
         thread_id=thread_id,
         run_id=run_id,
     )
+    if model_run_id:
+        supabase_ops.save_model_run_resource_ranges(
+            model_run_id=model_run_id,
+            project_id=project_id,
+            ranges=_resource_range_rows_from_parallel(parallel_out),
+        )
+        supabase_ops.save_model_run_sources(
+            model_run_id=model_run_id,
+            project_id=project_id,
+            sources=_source_rows_from_parallel(
+                project=project,
+                analogs=state.get("analogs") or [],
+                parallel_out=parallel_out,
+            ),
+        )
     supabase_ops.update_project_latest_model(project_id, fields)
     return {"saved": True, "error": None}
 

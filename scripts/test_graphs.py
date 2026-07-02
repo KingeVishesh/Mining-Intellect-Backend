@@ -48,7 +48,6 @@ FAKE_PROJECT = {
     "enrichment_status": "complete",
     "field_statuses": {},
     "has_model_1": False,
-    "has_model_2": False,
     "updated_at": "2025-01-01T00:00:00Z",
 }
 

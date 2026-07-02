@@ -3,7 +3,7 @@ Graph 3: report_generator
 
 Flow:
   load_project_and_analogs → load_rules → activate_rules
-  → build_model_1 → build_model_2 (if official MRE exists)
+  → build_model_1
   → generate_report → save_report → END  (no human review)
 
 Input:  { project_id }
@@ -40,7 +40,6 @@ class ReportState(TypedDict, total=False):
 
     # Models
     model_1: Optional[Dict]
-    model_2: Optional[Dict]
     official_mre_row: Optional[Dict]
 
     # Report
@@ -123,28 +122,6 @@ def build_model_1_node(state: ReportState) -> ReportState:
     return {"model_1": model_1, "rule_effects": rule_effects, "official_mre_row": official_mre_row}
 
 
-def build_model_2_node(state: ReportState) -> ReportState:
-    """Build Model 2 (Updated) if official MRE exists."""
-    if state.get("error"):
-        return {}
-
-    project = state["project"]
-    model_1 = state.get("model_1")
-    if not model_1:
-        return {}
-
-    official_mre = None
-    if project.get("tonnage_mt") and project.get("grade_value"):
-        official_mre = {
-            "tonnage_mt": project["tonnage_mt"],
-            "grade_value": project["grade_value"],
-        }
-
-    model_2 = model_builder.build_model_2(model_1, project, official_mre)
-    logger.info(f"[model2] built={'yes' if model_2 else 'no (no official MRE)'}")
-    return {"model_2": model_2}
-
-
 def generate_report_node(state: ReportState) -> ReportState:
     """Generate the full MiningReport JSON using models + LLM narrative."""
     if state.get("error"):
@@ -155,20 +132,17 @@ def generate_report_node(state: ReportState) -> ReportState:
     analogs = state.get("analogs", [])
     activated_rules = state.get("activated_rules", [])
     model_1 = state.get("model_1", {})
-    model_2 = state.get("model_2")
     official_mre_row = state.get("official_mre_row")
     sections = state.get("sections")  # None = all sections
 
     # Build comparison table
     comparison_table = [model_1]
-    if model_2:
-        comparison_table.append(model_2)
     if official_mre_row:
         comparison_table.append(official_mre_row)
 
     # Generate LLM narrative (all sections)
     narrative = model_builder.generate_report_narrative(
-        project, model_1, model_2, analogs, activated_rules, sections=sections
+        project, model_1, analogs, activated_rules, sections=sections
     )
 
     # Compute sensitivity analysis deterministically
@@ -213,10 +187,11 @@ def generate_report_node(state: ReportState) -> ReportState:
                 "key_factors": model_1.get("analogs_used", [])[:3],
             },
             updated_analysis={
-                "confidence_pct": (model_2 or {}).get("conviction_pct", 0),
-                "conviction_tier": (model_2 or {}).get("conviction_tier"),
-                "conviction_label": (model_2 or {}).get("conviction_label"),
-                "key_factors": [(model_2 or {}).get("description", "No updated model")],
+                "confidence_pct": None,
+                "conviction_tier": None,
+                "conviction_label": None,
+                "key_factors": [],
+                "status": "removed",
             },
             compliance_summary=[
                 "Estimates are internal MI models — NOT NI 43-101 or JORC compliant.",
@@ -268,7 +243,6 @@ def generate_extended_sections_node(state: ReportState) -> ReportState:
         extended = model_builder.generate_extended_narrative(
             state["project"],
             state["model_1"],
-            state.get("model_2"),
             state.get("analogs", []),
             state.get("activated_rules", []),
             det_vals,
@@ -331,7 +305,7 @@ def save_report_node(state: ReportState) -> ReportState:
         from nodes.supabase_ops import get_client as _get_client
         _get_client().table("projects").update({
             "has_model_1": state.get("model_1") is not None,
-            "has_model_2": state.get("model_2") is not None,
+            "has_model_2": False,
         }).eq("id", state["project_id"]).execute()
 
         logger.info(f"[save_report] Saved report {report_id}")
@@ -353,7 +327,6 @@ builder.add_node("load_project_and_analogs", load_project_and_analogs_node)
 builder.add_node("load_rules", load_rules_node)
 builder.add_node("activate_rules", activate_rules_node)
 builder.add_node("build_model_1", build_model_1_node)
-builder.add_node("build_model_2", build_model_2_node)
 builder.add_node("generate_report", generate_report_node)
 builder.add_node("generate_extended_sections", generate_extended_sections_node)
 builder.add_node("generate_pdf", generate_pdf_node)
@@ -367,8 +340,7 @@ builder.add_conditional_edges(
 )
 builder.add_edge("load_rules", "activate_rules")
 builder.add_edge("activate_rules", "build_model_1")
-builder.add_edge("build_model_1", "build_model_2")
-builder.add_edge("build_model_2", "generate_report")
+builder.add_edge("build_model_1", "generate_report")
 builder.add_edge("generate_report", "generate_extended_sections")
 builder.add_edge("generate_extended_sections", "generate_pdf")
 builder.add_edge("generate_pdf", "save_report")

@@ -236,6 +236,10 @@ def get_approved_analogs(
             "country": r.get("analog_country"),
             "tonnage_mt": r.get("analog_tonnage_mt"),
             "grade_value": r.get("analog_grade_value"),
+            "mi_tonnage_mt": r.get("analog_tonnage_mt"),
+            "mi_grade": r.get("analog_grade_value"),
+            "inferred_tonnage_mt": r.get("analog_inferred_tonnage_mt"),
+            "inferred_grade": r.get("analog_inferred_grade"),
             "grade_unit": r.get("analog_grade_unit"),
             "source_url": r.get("source_url"),
             "project_stage": r.get("analog_project_stage"),
@@ -253,6 +257,7 @@ def get_approved_analogs(
             "resource_category_class":     r.get("analog_resource_category_class"),
             "resource_compliance_standard": r.get("analog_resource_compliance_standard"),
             "resource_vintage_year":       r.get("analog_resource_vintage_year"),
+            "legacy_mi_resource": True,
             "source": "library",
         })
     return candidates
@@ -376,7 +381,6 @@ def save_report(
     resource = report_json.get("resource_estimates", {})
     table = resource.get("comparison_table", [])
     m1 = next((r for r in table if "Independent" in r.get("model", "")), {})
-    m2 = next((r for r in table if "Updated" in r.get("model", "")), {})
 
     row = {
         "id": report_id,
@@ -390,9 +394,9 @@ def save_report(
         "model_1_tonnage": m1.get("total_tonnage_kt"),
         "model_1_grade": m1.get("total_grade_pct"),
         "model_1_conviction": resource.get("independent_analysis", {}).get("confidence_pct"),
-        "model_2_tonnage": m2.get("total_tonnage_kt"),
-        "model_2_grade": m2.get("total_grade_pct"),
-        "model_2_conviction": resource.get("updated_analysis", {}).get("confidence_pct"),
+        "model_2_tonnage": None,
+        "model_2_grade": None,
+        "model_2_conviction": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -506,6 +510,10 @@ def _project_analog_row_to_candidate(row: Dict) -> Dict:
         "country": row.get("analog_country"),
         "tonnage_mt": row.get("analog_tonnage_mt"),
         "grade_value": row.get("analog_grade_value"),
+        "mi_tonnage_mt": row.get("analog_tonnage_mt"),
+        "mi_grade": row.get("analog_grade_value"),
+        "inferred_tonnage_mt": row.get("analog_inferred_tonnage_mt"),
+        "inferred_grade": row.get("analog_inferred_grade"),
         "grade_unit": row.get("analog_grade_unit"),
         "source_url": row.get("source_url"),
         "project_stage": row.get("analog_project_stage"),
@@ -523,6 +531,7 @@ def _project_analog_row_to_candidate(row: Dict) -> Dict:
         "resource_compliance_standard": row.get("analog_resource_compliance_standard"),
         "resource_vintage_year": row.get("analog_resource_vintage_year"),
         "similarity_score": row.get("similarity_score"),
+        "legacy_mi_resource": True,
         "source": row.get("source") or "analogs_table",
     }
 
@@ -782,8 +791,8 @@ def save_model_run(
     model_output_json: Optional[Dict] = None,
     thread_id: Optional[str] = None,
     run_id: Optional[str] = None,
-) -> None:
-    """Insert a row into model_runs capturing one Model 1 / Model 2 snapshot.
+) -> Optional[str]:
+    """Insert a row into model_runs capturing one model snapshot.
 
     The `signal_contributions_json` column captures per-signal (μ, σ) for
     each fusion input so future recalibration passes can attribute residual
@@ -799,12 +808,98 @@ def save_model_run(
         "status": "complete",
         **{k: fields.get(k) for k in _MODEL_RUN_FIELDS},
     }
-    get_client().table("model_runs").insert(row).execute()
+    res = get_client().table("model_runs").insert(row).execute()
+    inserted = (res.data or [{}])[0]
+    model_run_id = inserted.get("id")
     logger.info(
         f"[DB] model_run saved: project={project_id} type={model_type} "
         f"tonnage={fields.get('tonnage_mt')} conviction={fields.get('conviction_score')} "
         f"cv={fields.get('cv_contained')}"
     )
+    return model_run_id
+
+
+def save_model_run_resource_ranges(
+    *,
+    model_run_id: str,
+    project_id: str,
+    ranges: List[Dict[str, Any]],
+) -> None:
+    """Persist normalized P10/P50/P90 rows for a model run."""
+    if not ranges:
+        return
+    rows = [
+        {
+            "model_run_id": model_run_id,
+            "project_id": project_id,
+            "resource_category": row.get("resource_category"),
+            "metric": row.get("metric"),
+            "p10": row.get("p10"),
+            "p50": row.get("p50"),
+            "p90": row.get("p90"),
+            "unit": row.get("unit"),
+            "payload": row.get("payload") or {},
+        }
+        for row in ranges
+        if row.get("resource_category") and row.get("metric")
+    ]
+    if not rows:
+        return
+    get_client().table("model_run_resource_ranges").insert(rows).execute()
+    logger.info("[DB] %s model_run_resource_ranges saved for run=%s", len(rows), model_run_id)
+
+
+def _source_date_or_none(value: Any) -> Optional[str]:
+    if not value:
+        return None
+    text = str(value).strip()
+    match = re.search(r"\b(19|20)\d{2}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?\b", text)
+    if not match:
+        return None
+    parts = match.group(0).split("-")
+    if len(parts) == 1:
+        return f"{parts[0]}-12-31"
+    if len(parts) == 2:
+        return f"{parts[0]}-{parts[1]}-28"
+    return match.group(0)
+
+
+def _confidence_or_none(value: Any) -> Optional[str]:
+    text = str(value or "").strip().lower()
+    return text if text in {"low", "medium", "high"} else None
+
+
+def save_model_run_sources(
+    *,
+    model_run_id: str,
+    project_id: str,
+    sources: List[Dict[str, Any]],
+) -> None:
+    """Persist source/evidence references used by a model run."""
+    if not sources:
+        return
+    rows = [
+        {
+            "model_run_id": model_run_id,
+            "project_id": project_id,
+            "role": row.get("role"),
+            "used_for": row.get("used_for") or [],
+            "title": row.get("title"),
+            "url": row.get("url"),
+            "publisher": row.get("publisher"),
+            "source_date": _source_date_or_none(row.get("source_date")),
+            "summary": row.get("summary"),
+            "excerpt": row.get("excerpt"),
+            "confidence": _confidence_or_none(row.get("confidence")),
+            "payload": row.get("payload") or {},
+        }
+        for row in sources
+        if row.get("title") or row.get("url") or row.get("summary")
+    ]
+    if not rows:
+        return
+    get_client().table("model_run_sources").insert(rows).execute()
+    logger.info("[DB] %s model_run_sources saved for run=%s", len(rows), model_run_id)
 
 
 def update_project_latest_model(project_id: str, fields: Dict) -> None:

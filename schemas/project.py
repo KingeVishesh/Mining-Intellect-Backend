@@ -80,4 +80,3 @@ class ProjectData(BaseModel):
     field_statuses: Optional[Any] = None
     data_sources: Optional[Any] = None
     has_model_1: Optional[bool] = None
-    has_model_2: Optional[bool] = None

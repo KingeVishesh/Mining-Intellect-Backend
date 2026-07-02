@@ -74,4 +74,4 @@ See `docs/api.md` for the full `MiningReport` schema that the frontend reads.
 Frontend field mapping:
 - `resource_estimates.comparison_table` — the comparison table
 - `resource_estimates.independent_analysis.confidence_pct` — Model 1 conviction
-- `resource_estimates.updated_analysis.confidence_pct` — Model 2 conviction
+- `resource_estimates.updated_analysis` — deprecated compatibility object; no local updated-model path is produced

@@ -1,7 +1,6 @@
 {% set res = report.resource_estimates or {} %}
 {% set comp = res.comparison_table or [] %}
 {% set ind  = res.independent_analysis or {} %}
-{% set upd  = res.updated_analysis or {} %}
 {% set material = (report.metadata or {}).material or '' %}
 {% set best = none %}
 {% for r in comp %}{% if 'Model 1' in (r.model or '') and not best %}{% set best = r %}{% endif %}{% endfor %}
@@ -51,8 +50,7 @@
           <tbody>
             {% for row in comp %}
               {% set is_m1 = 'Model 1' in (row.model or '') %}
-              {% set is_m2 = 'Model 2' in (row.model or '') %}
-              {% set conv = ind.confidence_pct if is_m1 else (upd.confidence_pct if is_m2 else 0) %}
+              {% set conv = ind.confidence_pct if is_m1 else 0 %}
               <tr class="{% if loop.index0 % 2 == 0 %}alt{% endif %}">
                 <td>{{ row.model or '' }}</td>
                 <td class="num">{{ row.total_contained_mlb | num('{:,.2f}') }}</td>

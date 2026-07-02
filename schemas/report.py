@@ -30,7 +30,7 @@ class ComparisonTableRow(BaseModel):
 class ResourceEstimates(BaseModel):
     comparison_table: List[ComparisonTableRow]
     independent_analysis: dict      # { confidence_pct, key_factors: List[str] }
-    updated_analysis: dict          # { confidence_pct, key_factors: List[str] }
+    updated_analysis: dict          # Deprecated compatibility object; no updated-model path is produced.
     compliance_summary: List[str]
 
 

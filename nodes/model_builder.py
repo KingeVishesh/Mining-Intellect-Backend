@@ -1,8 +1,9 @@
 """
-Model Builder — builds resource estimates (Model 1 and Model 2).
+Model Builder — builds the local MI resource estimate.
 
-Model 1 (Independent): based entirely on analogs + rules, ignoring any official MRE.
-Model 2 (Updated):     reconciles Model 1 with the official MRE if one is available.
+The local model runs in either pre-MRE or post-MRE mode via `use_mre`.
+Gold-specific deep-research estimates are handled separately by
+`nodes.parallel_gold_model`.
 
 LLM is used only as a last-resort sanity check and for narrative explanation.
 All core calculations are deterministic.
@@ -211,9 +212,9 @@ def _contained_t_from_mt(tonnage_mt: float, grade: float, material: str) -> floa
 
 def _compute_pre_tier(conviction_pct: float) -> Tuple[str, str]:
     """
-    Legacy 0–100 conviction → PRE-1..PRE-5 tier. Retained for Model 2, which
-    blends Model 1's `conviction_pct` with the official-MRE confidence. The
-    primary path for Model 1 in v2 is `_compute_pre_tier_from_cv()`.
+    Legacy 0–100 conviction → PRE-1..PRE-5 tier. The primary path for the
+    local model is `_compute_pre_tier_from_cv()`, but persistence still uses
+    this helper when translating older conviction scores.
     """
     if conviction_pct < 10:
         n = 1
@@ -252,9 +253,7 @@ def _compute_pre_tier_from_cv(cv_contained: float) -> Tuple[str, str]:
 
 
 def _cv_to_conviction_pct(cv_contained: float) -> float:
-    """Smooth mapping of contained-metal CV to the legacy 0–100 scale. Model 2
-    still consumes `conviction_pct` to seed its own confidence; keeping the
-    scale lets v2 ship without rewriting Model 2 in the same change."""
+    """Smooth mapping of contained-metal CV to the legacy 0–100 scale."""
     # piecewise-linear inversion of the tier cutoffs
     if cv_contained < 0.30:
         return 90.0 - (cv_contained / 0.30) * 5.0          # 85–90 → PRE-5
@@ -893,7 +892,7 @@ def build_model_1(
         from analogs + drilling + geometry + L151 prior. Tier comes from
         `_compute_pre_tier_from_cv` (PRE-1..5).
 
-    This replaces the old Model 1 + Model 2 split — there's only one
+    This replaces the old two-model split — there's only one
     model now; the flag picks the regime. Backtest harness sets
     use_mre=False so the MRE we're trying to predict can't leak in.
 
@@ -1449,10 +1448,9 @@ def build_model_1(
     else:
         tier, tier_label = _compute_pre_tier_from_cv(cv_contained)
         conv_pct = _cv_to_conviction_pct(cv_contained)
-    # Rule-driven confidence_delta still influences the legacy conviction_pct
-    # (consumed by Model 2). It does NOT alter the CV-based tier directly —
-    # that comes from the posterior, where rules already had their say via
-    # the log-multipliers above.
+    # Rule-driven confidence_delta still influences the legacy conviction_pct.
+    # It does NOT alter the CV-based tier directly; that comes from the
+    # posterior, where rules already had their say via the log-multipliers.
     conv_pct = max(0.0, min(100.0, conv_pct + float(adj.get("confidence_delta", 0.0))))
 
     # Closed-form lognormal quantiles
@@ -1601,60 +1599,6 @@ def build_model_1(
                              "reason": ("use_mre=False" if not use_mre
                                         else "no MRE on project")}),
         },
-    }
-
-
-def build_model_2(
-    model_1: Dict,
-    project: Dict,
-    official_mre: Optional[Dict],
-) -> Optional[Dict]:
-    """
-    Build Model 2 (Updated estimate).
-    Reconciles Model 1 with the official MRE using an 80/20 blend.
-    Returns None if no official MRE is available.
-    """
-    if not official_mre:
-        return None
-
-    material = project.get("material", "unknown")
-    official_tonnage_kt = float(official_mre.get("tonnage_mt", 0)) * 1000
-    official_grade = float(official_mre.get("grade_value", 0))
-
-    if official_tonnage_kt == 0 or official_grade == 0:
-        return None
-
-    m1_tonnage = model_1["total_tonnage_kt"]
-    m1_grade = model_1["total_grade_pct"]
-
-    # 80% official MRE, 20% Model 1
-    blended_tonnage = 0.8 * official_tonnage_kt + 0.2 * m1_tonnage
-    blended_grade = 0.8 * official_grade + 0.2 * m1_grade
-
-    mi_kt = blended_tonnage * 0.65
-    inferred_kt = blended_tonnage * 0.35
-
-    # Model 2 conviction is higher because we have official data
-    conviction = min(100.0, model_1["conviction_pct"] * 0.3 + 65.0)
-    tier, tier_label = _compute_post_tier(conviction, project)
-
-    return {
-        "model": "MI Model (Post-MRE)",
-        "mi_tonnage_kt": round(mi_kt, 2),
-        "mi_grade_pct": round(blended_grade, 4),
-        "mi_contained_mlb": round(_contained_metal(mi_kt, blended_grade, material), 3),
-        "inferred_tonnage_kt": round(inferred_kt, 2),
-        "inferred_grade_pct": round(blended_grade * 0.95, 4),
-        "inferred_contained_mlb": round(_contained_metal(inferred_kt, blended_grade * 0.95, material), 3),
-        "total_tonnage_kt": round(blended_tonnage, 2),
-        "total_grade_pct": round(blended_grade, 4),
-        "total_contained_mlb": round(_contained_metal(blended_tonnage, blended_grade, material), 3),
-        "description": "MI estimate reconciling independent model with official MRE (80/20 blend).",
-        "conviction_pct": round(conviction, 1),
-        "conviction_tier": tier,
-        "conviction_label": tier_label,
-        "analogs_used": model_1.get("analogs_used", []),
-        "rules_applied": model_1.get("rules_applied", []),
     }
 
 
@@ -1948,7 +1892,6 @@ def compute_sensitivity_analysis(model_1: Dict, project: Dict) -> Dict:
 def generate_report_narrative(
     project: Dict,
     model_1: Dict,
-    model_2: Optional[Dict],
     analogs: List[Dict],
     activated_rules: List[Dict],
     sections: Optional[List[str]] = None,
@@ -1972,8 +1915,6 @@ def generate_report_narrative(
     material = project.get("material", "Unknown")
     grade_unit = project.get("grade_unit", "%")
     model_summary = json.dumps(model_1, indent=2)
-    if model_2:
-        model_summary += "\n\nMI Model (Post-MRE):\n" + json.dumps(model_2, indent=2)
 
     analogs_summary = json.dumps([
         {k: a.get(k) for k in ("name","tonnage_mt","grade_value","grade_unit","deposit_type","country","similarity_score")}
@@ -2267,7 +2208,6 @@ def _fallback_extended_narrative(project: Dict, deterministic_vals: Dict) -> Dic
 def generate_extended_narrative(
     project: Dict,
     model_1: Dict,
-    model_2: Optional[Dict],
     analogs: List[Dict],
     activated_rules: List[Dict],
     deterministic_vals: Dict,

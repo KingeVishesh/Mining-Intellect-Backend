@@ -13,8 +13,8 @@ agent's job is to:
      pretend the official MRE doesn't exist and predict from scratch.
 
 Output is a strict JSON object with M&I and Inferred tonnage / grade /
-contained Moz plus the analogs the agent actually relied on and a short
-methodology trace.
+contained Moz. In blind/pre-MRE mode the scalar values are the P50 estimate,
+and each metric also carries a P10/P50/P90 range plus the sources used.
 """
 from __future__ import annotations
 
@@ -180,6 +180,9 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         result = _apply_blind_kookynie_sparse_yilgarn_window(result, project, analogs)
         result = _apply_blind_tailings_reprocessing_window(result, project, analogs)
         result = _apply_blind_evidence_scale_guard(result, project, analogs)
+        result = _ensure_blind_resource_ranges(result)
+    else:
+        result = _ensure_source_arrays(result)
 
     logger.info(
         f"[parallel_gold] estimate: M&I={result.get('m_and_i', {}).get('tonnage_mt')} Mt @ "
@@ -359,8 +362,17 @@ OUTPUT
 ================================================================
 Return ONLY a JSON object matching the schema you have been given.
 Hard rules:
-  • Never fabricate. Unknown numeric -> null. Unknown string -> "".
+  • Never fabricate. Unknown numeric -> null in post-MRE mode; in blind
+    pre-MRE mode return a defensible positive range instead of fake precision.
   • All gold grades in g/t. All tonnage in Mt. All contained gold in Moz.
+  • In blind pre-MRE mode, scalar `tonnage_mt`, `grade_gpt`, and
+    `contained_moz` are the P50 estimate. Also return P10/P50/P90 range
+    objects for every M&I and Inferred metric:
+    `tonnage_range_mt`, `grade_range_gpt`, `contained_range_moz`.
+  • P10/P50/P90 ranges must be ordered and useful: p10 <= p50 <= p90.
+    Do not hide uncertainty with a single number, and do not create an
+    absurdly wide range unless the evidence genuinely forces very_low
+    conviction.
   • Every analog you USE in the math must appear in `analogs_used`
     with the per-analog ratios you derived. If you reject an analog
     list it in `analogs_rejected` with a reason.
@@ -376,10 +388,16 @@ Hard rules:
     drill_transformation / analog_only_fallback), the top-cut value,
     the reference cutoff, any stage-weighting applied, and whether
     the geometric ceiling clamped the result.
+  • `sources_used` must list every source that materially informed the
+    estimate or range. Prefer primary project drilling releases, technical
+    reports, annual resource/reserve reports, SEDAR/ASX filings, and analog
+    source URLs. Include title, URL, publisher, date when known, role, used_for,
+    and a short summary. `sources_rejected` lists source names/URLs rejected for
+    chronology, target-MRE leakage, or weak relevance.
   • `conviction` is one of: very_low / low / medium / high / very_high,
     plus a one-sentence rationale.
-  • Keep output compact. Put source-document names/URLs inside rationale
-    strings when needed; do not add a separate sources table.
+  • Keep output compact. Source summaries should be short; do not copy long
+    passages from source documents.
 """.strip()
 
 
@@ -943,6 +961,85 @@ def _as_float(value: Any) -> Optional[float]:
         return f if f > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+_RANGE_KEYS = {
+    "tonnage_mt": "tonnage_range_mt",
+    "grade_gpt": "grade_range_gpt",
+    "contained_moz": "contained_range_moz",
+}
+
+
+def _range_spread_factor(result: Dict[str, Any]) -> float:
+    conviction = (result.get("conviction") or {}).get("level")
+    factor = {
+        "very_high": 1.35,
+        "high": 1.6,
+        "medium": 2.1,
+        "low": 3.0,
+        "very_low": 4.0,
+    }.get(str(conviction or "").lower(), 3.0)
+    if result.get("anchor_used") == "analog_only_fallback":
+        factor = max(factor, 3.5)
+    return factor
+
+
+def _metric_round(value: Optional[float], metric: str) -> Optional[float]:
+    if value is None:
+        return None
+    digits = 4 if metric == "grade_gpt" else 3
+    return round(float(value), digits)
+
+
+def _coerce_range(block: Dict[str, Any], metric: str, spread: float) -> None:
+    """Ensure a block has a monotonic P10/P50/P90 range for one metric.
+
+    Parallel is instructed to return ranges directly. This fallback keeps the
+    persisted shape stable when an older cached result or a local blind guard
+    only returns scalar estimates.
+    """
+    range_key = _RANGE_KEYS[metric]
+    candidate = block.get(range_key) if isinstance(block.get(range_key), dict) else {}
+    scalar = _as_float(block.get(metric))
+    p50 = _as_float(candidate.get("p50")) or scalar
+    if p50 is None:
+        return
+
+    p10 = _as_float(candidate.get("p10"))
+    p90 = _as_float(candidate.get("p90"))
+    if p10 is None or p90 is None or p10 > p50 or p90 < p50 or p10 >= p90:
+        p10 = p50 / spread
+        p90 = p50 * spread
+
+    block[metric] = _metric_round(p50, metric)
+    block[range_key] = {
+        "p10": _metric_round(p10, metric),
+        "p50": _metric_round(p50, metric),
+        "p90": _metric_round(p90, metric),
+    }
+
+
+def _ensure_source_arrays(result: Dict[str, Any]) -> Dict[str, Any]:
+    replaced = dict(result or {})
+    if not isinstance(replaced.get("sources_used"), list):
+        legacy_sources = replaced.get("sources")
+        replaced["sources_used"] = legacy_sources if isinstance(legacy_sources, list) else []
+    if not isinstance(replaced.get("sources_rejected"), list):
+        replaced["sources_rejected"] = []
+    return replaced
+
+
+def _ensure_blind_resource_ranges(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarantee range-bearing blind output while preserving scalar P50 fields."""
+    replaced = _ensure_source_arrays(result)
+    spread = _range_spread_factor(replaced)
+    for key in ("m_and_i", "inferred"):
+        block = replaced.get(key)
+        if not isinstance(block, dict):
+            continue
+        for metric in ("tonnage_mt", "grade_gpt", "contained_moz"):
+            _coerce_range(block, metric, spread)
+    return replaced
 
 
 def _context_blob(row: Dict[str, Any]) -> str:
@@ -6244,6 +6341,24 @@ def _output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
     """
     num_or_null = {"type": ["number", "null"]}
     estimate_num = num_or_null if use_mre else {"type": "number", "exclusiveMinimum": 0}
+    range_num = num_or_null if use_mre else {"type": "number", "exclusiveMinimum": 0}
+    range_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["p10", "p50", "p90"],
+        "properties": {
+            "p10": range_num,
+            "p50": range_num,
+            "p90": range_num,
+        },
+    }
+    estimate_required = ["tonnage_mt", "grade_gpt", "contained_moz"]
+    if not use_mre:
+        estimate_required = estimate_required + [
+            "tonnage_range_mt",
+            "grade_range_gpt",
+            "contained_range_moz",
+        ]
     str_or_empty = {"type": "string"}
     return {
         "type": "object",
@@ -6251,26 +6366,33 @@ def _output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
         "required": [
             "m_and_i", "inferred", "anchor_used", "conviction",
             "methodology", "analogs_used", "analogs_rejected",
+            "sources_used", "sources_rejected",
         ],
         "properties": {
             "m_and_i": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["tonnage_mt", "grade_gpt", "contained_moz"],
+                "required": estimate_required,
                 "properties": {
                     "tonnage_mt": estimate_num,
                     "grade_gpt": estimate_num,
                     "contained_moz": estimate_num,
+                    "tonnage_range_mt": range_schema,
+                    "grade_range_gpt": range_schema,
+                    "contained_range_moz": range_schema,
                 },
             },
             "inferred": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["tonnage_mt", "grade_gpt", "contained_moz"],
+                "required": estimate_required,
                 "properties": {
                     "tonnage_mt": estimate_num,
                     "grade_gpt": estimate_num,
                     "contained_moz": estimate_num,
+                    "tonnage_range_mt": range_schema,
+                    "grade_range_gpt": range_schema,
+                    "contained_range_moz": range_schema,
                 },
             },
             "anchor_used": {
@@ -6321,6 +6443,44 @@ def _output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
                 "type": "array",
                 "items": str_or_empty,
             },
+            "sources_used": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["role", "used_for", "title", "summary"],
+                    "properties": {
+                        "role": str_or_empty,
+                        "used_for": {
+                            "type": "array",
+                            "items": str_or_empty,
+                        },
+                        "title": str_or_empty,
+                        "url": str_or_empty,
+                        "publisher": str_or_empty,
+                        "source_date": str_or_empty,
+                        "summary": str_or_empty,
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high", ""],
+                        },
+                    },
+                },
+            },
+            "sources_rejected": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["role", "title", "reason"],
+                    "properties": {
+                        "role": str_or_empty,
+                        "title": str_or_empty,
+                        "url": str_or_empty,
+                        "reason": str_or_empty,
+                    },
+                },
+            },
         },
     }
 
@@ -6343,6 +6503,10 @@ def _parallel_request(method: str, url: str, **kwargs: Any) -> requests.Response
             last_exc = exc
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
             if status_code and status_code not in retry_statuses:
+                response = getattr(exc, "response", None)
+                body = (getattr(response, "text", "") or "").strip()
+                if body:
+                    raise RuntimeError(f"{exc}; response_body={body[:1000]}") from exc
                 break
             if attempt >= _PARALLEL_HTTP_RETRIES:
                 break

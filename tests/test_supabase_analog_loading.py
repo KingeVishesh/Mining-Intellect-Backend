@@ -64,6 +64,10 @@ def test_get_analogs_falls_back_to_approved_table_rows(monkeypatch):
         "country": None,
         "tonnage_mt": 18.0,
         "grade_value": 1.2,
+        "mi_tonnage_mt": 18.0,
+        "mi_grade": 1.2,
+        "inferred_tonnage_mt": None,
+        "inferred_grade": None,
         "grade_unit": "g/t Au",
         "source_url": None,
         "project_stage": None,
@@ -81,6 +85,7 @@ def test_get_analogs_falls_back_to_approved_table_rows(monkeypatch):
         "resource_compliance_standard": None,
         "resource_vintage_year": None,
         "similarity_score": None,
+        "legacy_mi_resource": True,
         "source": "analogs_table",
     }]
 

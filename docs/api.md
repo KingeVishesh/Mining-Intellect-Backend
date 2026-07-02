@@ -75,7 +75,6 @@ Response: {
 
     // report_generator interrupted:
     // "model_1": { "total_tonnage_kt": 1500, "total_grade_pct": 2.1, "conviction_pct": 72 }
-    // "model_2": { ... }
   },
   "next": ["human_review"]
 }
@@ -305,10 +304,6 @@ The `content_json` field in the `reports` table always follows this structure:
         "description": "Independent estimate using 4 analog projects and 12 rules."
       },
       {
-        "model": "Model 2 (Updated)",
-        "..."
-      },
-      {
         "model": "Official MRE",
         "..."
       }
@@ -318,8 +313,8 @@ The `content_json` field in the `reports` table always follows this structure:
       "key_factors": ["Arrow Deposit", "Patterson Lake South"]
     },
     "updated_analysis": {
-      "confidence_pct": 84.0,
-      "key_factors": ["Reconciled with NI 43-101 estimate"]
+      "status": "removed",
+      "key_factors": []
     },
     "compliance_summary": [
       "Estimates are internal MI models — NOT NI 43-101 or JORC compliant.",

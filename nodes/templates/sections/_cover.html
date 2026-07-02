@@ -4,7 +4,6 @@
 {% set res  = report.resource_estimates or {} %}
 {% set comp = res.comparison_table or [] %}
 {% set ind  = res.independent_analysis or {} %}
-{% set upd  = res.updated_analysis or {} %}
 {% set best = none %}
 {% for r in comp %}{% if 'Model 1' in (r.model or '') and not best %}{% set best = r %}{% endif %}{% endfor %}
 {% if not best and comp %}{% set best = comp[0] %}{% endif %}
@@ -152,7 +151,6 @@
         {% set mi_mt      = (best.mi_tonnage_kt or 0) | float / 1000 %}
         {% set mi_grade   = best.mi_grade_pct or 0 %}
         {% set conv_pct   = ind.confidence_pct or 0 %}
-        {% set conv2_pct  = upd.confidence_pct or conv_pct %}
 
         <div class="metric primary">
           <div class="label">TOTAL RESOURCE</div>

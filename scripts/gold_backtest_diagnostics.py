@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -119,6 +120,23 @@ def _ratio_within(a: Any, b: Any, max_ratio: float) -> Optional[bool]:
     return max(left, right) / min(left, right) <= max_ratio
 
 
+def _tonnage_band(value: Any) -> Optional[str]:
+    tonnage = _finite_positive(value)
+    if not tonnage:
+        return None
+    if tonnage < 1:
+        return "sub_1mt"
+    if tonnage < 5:
+        return "1_5mt"
+    if tonnage < 25:
+        return "5_25mt"
+    if tonnage < 100:
+        return "25_100mt"
+    if tonnage < 300:
+        return "100_300mt"
+    return "300mt_plus"
+
+
 def _project_grade_proxy(project: Dict[str, Any]) -> Optional[float]:
     direct = _finite_positive(project.get("pre_mre_grade_proxy") or project.get("blind_grade_proxy"))
     if direct:
@@ -207,6 +225,10 @@ def analog_quality_score(
         _ratio_within(project_tonnage, row.get("tonnage_mt"), 10.0)
         for row in rows
     ]
+    analog_tonnages = [
+        tonnage for tonnage in (_finite_positive(row.get("tonnage_mt")) for row in rows) if tonnage
+    ]
+    analog_tonnage_bands = [band for band in (_tonnage_band(value) for value in analog_tonnages) if band]
 
     def rate(values: List[Optional[bool]]) -> Optional[float]:
         evaluated = [value for value in values if value is not None]
@@ -222,6 +244,8 @@ def analog_quality_score(
         "tonnage_band_match_rate": rate(tonnage_band_checks),
     }
     metrics.update(rates)
+    if analog_tonnage_bands:
+        metrics["analog_tonnage_band_counts"] = dict(Counter(analog_tonnage_bands))
 
     if count >= 5:
         score += 20
@@ -258,7 +282,13 @@ def analog_quality_score(
 
     unknown_core_count = sum(1 for flag in flags if flag in unknown_core_flags)
     score -= 6 * unknown_core_count
-    score = min(100, int(score))
+    if len(set(analog_tonnage_bands)) >= 4:
+        flags.append("broad_tonnage_band_cohort")
+        score -= 8
+    if len(analog_tonnages) >= 3 and max(analog_tonnages) / min(analog_tonnages) > 50:
+        flags.append("extreme_tonnage_spread")
+        score -= 10
+    score = max(0, min(100, int(score)))
     if score >= 75 and not any(flag.startswith("low_") for flag in flags) and unknown_core_count == 0:
         grade = "high"
     elif score >= 55:

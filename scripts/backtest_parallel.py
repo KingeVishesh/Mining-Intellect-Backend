@@ -144,9 +144,54 @@ def fetch_projects(project_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
     return {row["id"]: row for row in (res.data or [])}
 
 
+def fetch_range_rows(model_run_ids: Iterable[str]) -> Dict[str, List[Dict[str, Any]]]:
+    ids = sorted({rid for rid in model_run_ids if rid})
+    if not ids:
+        return {}
+    try:
+        res = (
+            get_client().table("model_run_resource_ranges")
+            .select("model_run_id,resource_category,metric,p10,p50,p90,unit")
+            .in_("model_run_id", ids)
+            .execute()
+        )
+    except Exception:
+        return {}
+    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in res.data or []:
+        grouped[row["model_run_id"]].append(row)
+    return grouped
+
+
+def _range_hit(
+    ranges: List[Dict[str, Any]],
+    *,
+    category: str,
+    metric: str,
+    truth_value: Optional[float],
+) -> Optional[bool]:
+    if truth_value is None:
+        return None
+    row = next(
+        (
+            item for item in ranges
+            if item.get("resource_category") == category
+            and item.get("metric") == metric
+        ),
+        None,
+    )
+    if not row or row.get("p10") is None or row.get("p90") is None:
+        return None
+    truth = truth_value
+    if metric == "contained_moz" and (row.get("unit") or "").lower() == "moz":
+        truth = truth_value / 1_000_000.0
+    return float(row["p10"]) <= float(truth) <= float(row["p90"])
+
+
 def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float, run_id: Optional[str] = None) -> int:
     runs = select_runs(model_types, latest_only=latest_only, run_id=run_id)
     projects = fetch_projects(row["project_id"] for row in runs)
+    range_rows_by_run = fetch_range_rows(row["id"] for row in runs)
 
     evaluated = []
     skipped = []
@@ -232,6 +277,32 @@ def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float
         if not pass_core:
             print(f"Failure class: {failure.get('class')}")
             print(f"Lesson: {failure.get('lesson')}")
+        ranges = range_rows_by_run.get(row["id"]) or []
+        if ranges:
+            total_contained_hit = _range_hit(
+                ranges,
+                category="total",
+                metric="contained_moz",
+                truth_value=truth["total_contained_oz"],
+            )
+            mi_tonnage_hit = _range_hit(
+                ranges,
+                category="m_and_i",
+                metric="tonnage_mt",
+                truth_value=truth["mi_tonnage_mt"],
+            )
+            inferred_tonnage_hit = _range_hit(
+                ranges,
+                category="inferred",
+                metric="tonnage_mt",
+                truth_value=truth["inferred_tonnage_mt"],
+            )
+            print(
+                "Range hits: "
+                f"total_contained={total_contained_hit} "
+                f"mi_tonnage={mi_tonnage_hit} "
+                f"inferred_tonnage={inferred_tonnage_hit}"
+            )
         guards = extract_local_guards(row.get("model_output_json") or {})
         if guards:
             print(f"Local guards: {', '.join(guards)}")
@@ -257,6 +328,26 @@ def run_backtest(model_types: Iterable[str], latest_only: bool, threshold: float
                 ]
                 if vals:
                     print(f"  MAPE {key:9s}: {sum(vals) / len(vals) * 100:.1f}%")
+            range_items = [
+                (item, range_rows_by_run.get(item[0]["id"]) or [])
+                for item in items
+                if range_rows_by_run.get(item[0]["id"])
+            ]
+            if range_items:
+                for category, metric, truth_key in (
+                    ("total", "contained_moz", "total_contained_oz"),
+                    ("m_and_i", "tonnage_mt", "mi_tonnage_mt"),
+                    ("m_and_i", "grade_gpt", "mi_grade_gpt"),
+                    ("inferred", "tonnage_mt", "inferred_tonnage_mt"),
+                    ("inferred", "grade_gpt", "inferred_grade_gpt"),
+                ):
+                    hits = [
+                        _range_hit(ranges, category=category, metric=metric, truth_value=item[2].get(truth_key))
+                        for item, ranges in range_items
+                    ]
+                    hits = [hit for hit in hits if hit is not None]
+                    if hits:
+                        print(f"  Range coverage {category}.{metric}: {sum(hits)}/{len(hits)}")
 
     return 0 if evaluated else 1
 
