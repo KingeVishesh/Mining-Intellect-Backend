@@ -140,6 +140,20 @@ def _range_value(block: Dict[str, Any], range_key: str, point_key: str) -> Dict[
     return {"p10": p10, "p50": p50, "p90": p90}
 
 
+def _contained_range_value(block: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    values = _range_value(block, "contained_range_moz", "contained_moz")
+    if values["p50"] is not None:
+        return values
+    tonnage = _range_value(block, "tonnage_range_mt", "tonnage_mt")
+    grade = _range_value(block, "grade_range_gpt", "grade_gpt")
+    derived: Dict[str, Optional[float]] = {}
+    for key in ("p10", "p50", "p90"):
+        t = tonnage.get(key)
+        g = grade.get(key)
+        derived[key] = (t * g * 0.032151) if t is not None and g is not None else None
+    return derived
+
+
 def _weighted_grade_range(
     tonnage_a: Dict[str, Optional[float]],
     grade_a: Dict[str, Optional[float]],
@@ -168,7 +182,11 @@ def _metric_range_rows(category: str, block: Dict[str, Any]) -> List[Dict[str, A
     )
     rows: List[Dict[str, Any]] = []
     for metric, range_key, point_key, unit in metric_specs:
-        values = _range_value(block, range_key, point_key)
+        values = (
+            _contained_range_value(block)
+            if metric == "contained_moz"
+            else _range_value(block, range_key, point_key)
+        )
         if values["p50"] is None:
             continue
         rows.append({
@@ -193,8 +211,8 @@ def _resource_range_rows_from_parallel(parallel_out: Dict[str, Any]) -> List[Dic
     inf_t = _range_value(inf_block, "tonnage_range_mt", "tonnage_mt")
     mi_g = _range_value(mi_block, "grade_range_gpt", "grade_gpt")
     inf_g = _range_value(inf_block, "grade_range_gpt", "grade_gpt")
-    mi_c = _range_value(mi_block, "contained_range_moz", "contained_moz")
-    inf_c = _range_value(inf_block, "contained_range_moz", "contained_moz")
+    mi_c = _contained_range_value(mi_block)
+    inf_c = _contained_range_value(inf_block)
     total_t = {key: (mi_t.get(key) or 0.0) + (inf_t.get(key) or 0.0) for key in ("p10", "p50", "p90")}
     total_c = {key: (mi_c.get(key) or 0.0) + (inf_c.get(key) or 0.0) for key in ("p10", "p50", "p90")}
     total_g = _weighted_grade_range(mi_t, mi_g, inf_t, inf_g)
@@ -204,7 +222,7 @@ def _resource_range_rows_from_parallel(parallel_out: Dict[str, Any]) -> List[Dic
         ("grade_gpt", total_g, "g/t"),
         ("contained_moz", total_c, "Moz"),
     ):
-        if not values.get("p50"):
+        if values.get("p50") is None:
             continue
         rows.append({
             "resource_category": "total",
@@ -321,14 +339,16 @@ def _fields_from_parallel(project: Dict, parallel_out: Dict) -> Dict[str, Any]:
     # contained_moz reported by Parallel is in Moz; we persist contained in
     # the material's native unit (troy oz for gold). Convert Moz -> oz when
     # present; otherwise derive from tonnage × grade for consistency.
+    mi_contained_moz = _as_float(mi_block.get("contained_moz"))
+    inf_contained_moz = _as_float(inf_block.get("contained_moz"))
     mi_contained_oz = (
-        float(mi_block["contained_moz"]) * 1_000_000.0
-        if mi_block.get("contained_moz") is not None
+        mi_contained_moz * 1_000_000.0
+        if mi_contained_moz is not None
         else _contained_native_unit(mi_kt, mi_g, material)
     )
     inf_contained_oz = (
-        float(inf_block["contained_moz"]) * 1_000_000.0
-        if inf_block.get("contained_moz") is not None
+        inf_contained_moz * 1_000_000.0
+        if inf_contained_moz is not None
         else _contained_native_unit(inf_kt, inf_g, material)
     )
 

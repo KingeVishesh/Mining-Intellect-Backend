@@ -1019,6 +1019,23 @@ def _coerce_range(block: Dict[str, Any], metric: str, spread: float) -> None:
     }
 
 
+def _derive_contained_ranges(block: Dict[str, Any]) -> None:
+    tonnage = block.get("tonnage_range_mt") if isinstance(block.get("tonnage_range_mt"), dict) else {}
+    grade = block.get("grade_range_gpt") if isinstance(block.get("grade_range_gpt"), dict) else {}
+    derived = {}
+    for key in ("p10", "p50", "p90"):
+        t = _as_float(tonnage.get(key))
+        g = _as_float(grade.get(key))
+        if t is None or g is None:
+            return
+        derived[key] = _metric_round(t * g * 0.032151, "contained_moz")
+    current = block.get("contained_range_moz") if isinstance(block.get("contained_range_moz"), dict) else {}
+    if not _as_float(current.get("p50")):
+        block["contained_range_moz"] = derived
+    if not _as_float(block.get("contained_moz")):
+        block["contained_moz"] = derived["p50"]
+
+
 def _ensure_source_arrays(result: Dict[str, Any]) -> Dict[str, Any]:
     replaced = dict(result or {})
     if not isinstance(replaced.get("sources_used"), list):
@@ -1039,6 +1056,7 @@ def _ensure_blind_resource_ranges(result: Dict[str, Any]) -> Dict[str, Any]:
             continue
         for metric in ("tonnage_mt", "grade_gpt", "contained_moz"):
             _coerce_range(block, metric, spread)
+        _derive_contained_ranges(block)
     return replaced
 
 

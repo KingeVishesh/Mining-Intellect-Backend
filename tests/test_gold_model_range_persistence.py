@@ -57,6 +57,40 @@ def test_gold_parallel_ranges_feed_model_run_percentiles_and_range_rows():
     )
 
 
+def test_gold_range_rows_derive_tiny_positive_contained_when_parallel_rounds_to_zero():
+    parallel_out = {
+        "m_and_i": {
+            "tonnage_mt": 0.003,
+            "grade_gpt": 1.5,
+            "contained_moz": 0.0,
+            "tonnage_range_mt": {"p10": 0.002, "p50": 0.003, "p90": 0.008},
+            "grade_range_gpt": {"p10": 1.27, "p50": 1.5, "p90": 1.8},
+            "contained_range_moz": {"p10": 0.0, "p50": 0.0, "p90": 0.0},
+        },
+        "inferred": {
+            "tonnage_mt": 1.766,
+            "grade_gpt": 0.184,
+            "contained_moz": 0.01,
+            "tonnage_range_mt": {"p10": 0.883, "p50": 1.766, "p90": 3.533},
+            "grade_range_gpt": {"p10": 0.101, "p50": 0.184, "p90": 0.303},
+            "contained_range_moz": {"p10": 0.003, "p50": 0.01, "p90": 0.034},
+        },
+        "conviction": {"level": "very_low", "rationale": "live edge case"},
+    }
+
+    fields = _fields_from_parallel({"material": "gold"}, parallel_out)
+    rows = _resource_range_rows_from_parallel(parallel_out)
+
+    mi_contained = next(
+        row for row in rows
+        if row["resource_category"] == "m_and_i"
+        and row["metric"] == "contained_moz"
+    )
+    assert fields["mi_contained"] > 0
+    assert mi_contained["p50"] > 0
+    assert len(rows) == 9
+
+
 def test_gold_source_rows_include_parallel_and_target_evidence_sources():
     project = {
         "drilling_evidence": {
