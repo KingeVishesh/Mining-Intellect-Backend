@@ -902,6 +902,101 @@ def save_model_run_sources(
     logger.info("[DB] %s model_run_sources saved for run=%s", len(rows), model_run_id)
 
 
+def get_cached_project_intelligence_run(cache_key: str) -> Optional[Dict[str, Any]]:
+    """Return the newest non-expired completed intelligence run for a cache key."""
+    if not cache_key:
+        return None
+    now = datetime.now(timezone.utc)
+    res = (
+        get_client()
+        .table("project_intelligence_runs")
+        .select("*")
+        .eq("cache_key", cache_key)
+        .eq("status", "complete")
+        .order("created_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+    for row in res.data or []:
+        expires_at = row.get("expires_at")
+        if not expires_at:
+            return row
+        try:
+            expires_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if expires_dt > now:
+            return row
+    return None
+
+
+def save_project_intelligence_run(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Insert a project-intelligence cache row and return the inserted row."""
+    payload = {
+        "project_id": row.get("project_id"),
+        "commodity": row.get("commodity"),
+        "mode": row.get("mode"),
+        "cutoff_date": row.get("cutoff_date"),
+        "cache_key": row.get("cache_key"),
+        "rule_pack_hash": row.get("rule_pack_hash"),
+        "status": row.get("status") or "complete",
+        "provider_task_id": row.get("provider_task_id"),
+        "processor": row.get("processor"),
+        "dossier_json": row.get("dossier_json") or {},
+        "classification_json": row.get("classification_json") or {},
+        "rule_pack_json": row.get("rule_pack_json") or {},
+        "quality_json": row.get("quality_json") or {},
+        "expires_at": row.get("expires_at"),
+        "error": row.get("error"),
+    }
+    res = get_client().table("project_intelligence_runs").insert(payload).execute()
+    inserted = (res.data or [{}])[0]
+    logger.info(
+        "[DB] project_intelligence_run saved: project=%s mode=%s rule_hash=%s",
+        payload.get("project_id"),
+        payload.get("mode"),
+        payload.get("rule_pack_hash"),
+    )
+    return inserted if inserted.get("id") else None
+
+
+def save_project_intelligence_sources(
+    *,
+    intelligence_run_id: str,
+    project_id: str,
+    sources: List[Dict[str, Any]],
+) -> None:
+    """Persist source/evidence references used by a project-intelligence run."""
+    if not intelligence_run_id or not sources:
+        return
+    rows = [
+        {
+            "intelligence_run_id": intelligence_run_id,
+            "project_id": project_id,
+            "role": row.get("role"),
+            "used_for": row.get("used_for") or [],
+            "title": row.get("title"),
+            "url": row.get("url"),
+            "publisher": row.get("publisher"),
+            "source_date": _source_date_or_none(row.get("source_date")),
+            "summary": row.get("summary"),
+            "excerpt": row.get("excerpt"),
+            "confidence": _confidence_or_none(row.get("confidence")),
+            "payload": row.get("payload") or row,
+        }
+        for row in sources
+        if row.get("title") or row.get("url") or row.get("summary")
+    ]
+    if not rows:
+        return
+    get_client().table("project_intelligence_sources").insert(rows).execute()
+    logger.info(
+        "[DB] %s project_intelligence_sources saved for run=%s",
+        len(rows),
+        intelligence_run_id,
+    )
+
+
 def update_project_latest_model(project_id: str, fields: Dict) -> None:
     """Overwrite the latest-model columns on projects so the /projects-back
     table reflects the most recent run. Percentile / CV / signal-trace fields

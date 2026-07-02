@@ -23,6 +23,7 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from datetime import date
 from typing import Any, Dict, List, Optional
 
@@ -95,11 +96,23 @@ def parallel_gold_model_node(state: Dict) -> Dict:
         f"find_analogs={find_analogs}, supplied_analogs={len(analogs)}"
     )
 
-    prompt = _build_prompt(
-        project=project, analogs=analogs,
-        use_mre=use_mre, find_analogs=find_analogs,
-    )
-    schema = _output_schema(use_mre=use_mre)
+    intelligence = state.get("project_intelligence") or {}
+    use_intelligence_layer = bool(state.get("use_intelligence_layer", True) and intelligence)
+    if use_intelligence_layer:
+        prompt = _build_rule_guided_prompt(
+            project=project,
+            analogs=analogs,
+            use_mre=use_mre,
+            find_analogs=find_analogs,
+            intelligence=intelligence,
+        )
+        schema = _rule_guided_output_schema(use_mre=use_mre)
+    else:
+        prompt = _build_prompt(
+            project=project, analogs=analogs,
+            use_mre=use_mre, find_analogs=find_analogs,
+        )
+        schema = _output_schema(use_mre=use_mre)
 
     try:
         result = _run_parallel_task(prompt=prompt, output_schema=schema)
@@ -112,7 +125,9 @@ def parallel_gold_model_node(state: Dict) -> Dict:
             result = _blind_local_fallback_estimate(project, analogs, reason="parallel_no_result")
         else:
             return {"error": "Parallel returned no result"}
-    if not use_mre:
+    if not use_mre and use_intelligence_layer:
+        result = _ensure_blind_resource_ranges(result)
+    elif not use_mre:
         result = _replace_placeholder_blind_estimate(result, analogs, project=project)
         result = _replace_blind_mre_leak_estimate(result, analogs)
         result = _apply_blind_moderate_drilling_fallback_calibration(result, project, analogs)
@@ -398,6 +413,90 @@ Hard rules:
     plus a one-sentence rationale.
   • Keep output compact. Source summaries should be short; do not copy long
     passages from source documents.
+""".strip()
+
+
+def _build_rule_guided_prompt(
+    *,
+    project: Dict,
+    analogs: List[Dict],
+    use_mre: bool,
+    find_analogs: bool,
+    intelligence: Dict[str, Any],
+) -> str:
+    """Prediction prompt for the two-step project-intelligence flow.
+
+    The first Parallel call owns project-specific rule creation. This second
+    call must apply that frozen rule pack rather than inventing post-hoc local
+    guardrails.
+    """
+    project_block = _format_project_block(project, use_mre=use_mre)
+    cutoff = _target_mre_cutoff(project) if not use_mre else None
+    analogs_block = _format_analogs_block(analogs, cutoff_date=cutoff)
+    chronology_directive = _chronology_directive(cutoff) if not use_mre else "POST-MRE MODE\nYou may use official MRE fields if supplied."
+    rule_pack = intelligence.get("rule_pack") or {}
+    rule_pack_hash = intelligence.get("rule_pack_hash") or ""
+    intelligence_payload = {
+        "intelligence_run_id": intelligence.get("id"),
+        "mode": intelligence.get("mode"),
+        "commodity": intelligence.get("commodity"),
+        "cutoff_date": intelligence.get("cutoff_date"),
+        "rule_pack_hash": rule_pack_hash,
+        "project_dossier": intelligence.get("project_dossier") or intelligence.get("dossier") or {},
+        "deposit_classification": intelligence.get("deposit_classification") or intelligence.get("classification") or {},
+        "evidence_inventory": intelligence.get("evidence_inventory") or [],
+        "evidence_gaps": intelligence.get("evidence_gaps") or [],
+        "analog_logic": intelligence.get("analog_logic") or {},
+        "rule_pack": rule_pack,
+        "quality": intelligence.get("quality") or {},
+    }
+
+    return f"""
+You are a senior gold resource estimator. This is the SECOND step of a
+cache-first rule-guided workflow.
+
+The FIRST step already researched the project and produced a frozen project
+intelligence dossier plus a project-specific rule pack. Your job is to APPLY
+that rule pack to produce M&I and Inferred P10/P50/P90 resource ranges.
+
+Hard constraints:
+  • Do not create a new rule pack. Use the supplied rule pack exactly.
+  • Return `rule_pack_hash` exactly as: {rule_pack_hash}
+  • Return `units` exactly as tonnage=Mt, grade=g/t, contained=Moz.
+  • If evidence is insufficient, widen P10-P90 and lower conviction; do not
+    hide uncertainty with a narrow range.
+  • Every range must be ordered: p10 <= p50 <= p90.
+  • Every material source used in this prediction must be listed in
+    `sources_used`. It can come from the dossier, analogs, or new source checks.
+  • `rule_applications` must explain which rule-pack rules controlled scale,
+    grade, contained metal, M&I/Inferred split, and uncertainty.
+
+{chronology_directive}
+
+================================================================
+PROJECT INTELLIGENCE AND FROZEN RULE PACK
+================================================================
+{json.dumps(intelligence_payload, indent=2, default=str, ensure_ascii=False)}
+
+================================================================
+TARGET PROJECT — CONTEXT
+================================================================
+{project_block}
+
+================================================================
+ANALOG COHORT — STARTING CONTEXT
+================================================================
+{analogs_block}
+
+================================================================
+OUTPUT
+================================================================
+Return ONLY a JSON object matching the schema. For gold:
+  • tonnage is Mt
+  • grade is g/t
+  • contained is Moz
+  • scalar M&I/Inferred values are P50
+  • total values are derived by the backend from M&I + Inferred
 """.strip()
 
 
@@ -6370,6 +6469,7 @@ def _output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
             "p90": range_num,
         },
     }
+
     estimate_required = ["tonnage_mt", "grade_gpt", "contained_moz"]
     if not use_mre:
         estimate_required = estimate_required + [
@@ -6503,6 +6603,53 @@ def _output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
     }
 
 
+def _rule_guided_output_schema(*, use_mre: bool = True) -> Dict[str, Any]:
+    """Schema for the second step of the project-intelligence flow.
+
+    Rule-guided predictions always emit explicit ranges and a rule-pack
+    fingerprint so persistence can prove which frozen intelligence artifact was
+    used for the model run.
+    """
+    schema = deepcopy(_output_schema(use_mre=use_mre))
+    for block_name in ("m_and_i", "inferred"):
+        block = schema["properties"][block_name]
+        required = set(block.get("required") or [])
+        required.update({"tonnage_range_mt", "grade_range_gpt", "contained_range_moz"})
+        block["required"] = sorted(required)
+    schema["required"] = list(schema["required"]) + [
+        "rule_pack_hash",
+        "rule_applications",
+        "units",
+    ]
+    str_or_empty = {"type": "string"}
+    schema["properties"]["rule_pack_hash"] = {"type": "string", "minLength": 12}
+    schema["properties"]["rule_applications"] = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["rule", "applied_to", "effect", "rationale"],
+            "properties": {
+                "rule": str_or_empty,
+                "applied_to": str_or_empty,
+                "effect": str_or_empty,
+                "rationale": str_or_empty,
+            },
+        },
+    }
+    schema["properties"]["units"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["tonnage", "grade", "contained"],
+        "properties": {
+            "tonnage": {"type": "string", "enum": ["Mt"]},
+            "grade": {"type": "string", "enum": ["g/t"]},
+            "contained": {"type": "string", "enum": ["Moz"]},
+        },
+    }
+    return schema
+
+
 # ── Parallel.ai HTTP client ──────────────────────────────────────────────────
 
 def _parallel_request(method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -6541,7 +6688,12 @@ def _parallel_request(method: str, url: str, **kwargs: Any) -> requests.Response
     raise RuntimeError(f"Parallel {method.upper()} request failed without exception: {url}")
 
 
-def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optional[Dict]:
+def _run_parallel_task(
+    *,
+    prompt: str,
+    output_schema: Dict[str, Any],
+    return_meta: bool = False,
+) -> Optional[Dict]:
     """POST a task to Parallel, poll until terminal, fetch result.
 
     Errors raise; the caller turns them into state["error"]. Returns the
@@ -6615,11 +6767,19 @@ def _run_parallel_task(*, prompt: str, output_schema: Dict[str, Any]) -> Optiona
     content = output.get("content")
     parsed_content = _parse_parallel_output_content(content)
     if parsed_content:
+        if return_meta:
+            return {"result": parsed_content, "run_id": run_id, "status": status}
         return parsed_content
     # Some processors put the dict directly on `output`.
-    if output and isinstance(output, dict) and "m_and_i" in output:
+    if output and isinstance(output, dict) and (
+        "m_and_i" in output or "project_dossier" in output
+    ):
+        if return_meta:
+            return {"result": output, "run_id": run_id, "status": status}
         return output
     logger.error(f"[parallel_gold] unexpected result shape: keys={list(payload.keys())}")
+    if return_meta:
+        return {"result": None, "run_id": run_id, "status": status}
     return None
 
 

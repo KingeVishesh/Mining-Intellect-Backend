@@ -45,6 +45,7 @@ from langgraph.graph import StateGraph, END
 
 from nodes import supabase_ops
 from nodes.parallel_gold_model import parallel_gold_model_node
+from nodes.project_intelligence import project_intelligence_node, validate_rule_guided_prediction
 from graphs.report_generator import load_project_and_analogs_node
 from graphs.model_runner import (
     fetch_drilling_evidence_node,
@@ -70,10 +71,17 @@ class GoldModelBuilderState(TypedDict, total=False):
     # Forward to fetch_drilling_evidence_node so cached evidence can be
     # bypassed when the caller wants a fresh extraction.
     fetch_recent_drill_holes: bool
+    # Cache-first rule-guided project intelligence. Defaults true; false keeps
+    # the legacy direct Parallel gold prediction path available for rollback.
+    use_intelligence_layer: bool
+    refresh_project_intelligence: bool
 
     # Loaded
     project: Optional[Dict]
     analogs: List[Dict]
+    project_intelligence: Optional[Dict]
+    intelligence_run_id: Optional[str]
+    rule_pack_hash: Optional[str]
 
     # Parallel output
     parallel_model: Optional[Dict]
@@ -109,6 +117,10 @@ def _route_after_check(state: GoldModelBuilderState) -> str:
 
 
 def _route_after_parallel(state: GoldModelBuilderState) -> str:
+    return END if state.get("error") else "validate_rule_guided_model"
+
+
+def _route_after_validation(state: GoldModelBuilderState) -> str:
     return END if state.get("error") else "save_model_run"
 
 
@@ -201,27 +213,35 @@ def _metric_range_rows(category: str, block: Dict[str, Any]) -> List[Dict[str, A
     return rows
 
 
+def validate_rule_guided_model_node(state: GoldModelBuilderState) -> GoldModelBuilderState:
+    """Fail closed when the rule-guided prediction violates the contract."""
+    if state.get("error"):
+        return {}
+    intelligence = state.get("project_intelligence") or {}
+    if not intelligence:
+        return {}
+    parallel_out = state.get("parallel_model") or {}
+    errors = validate_rule_guided_prediction(
+        parallel_out,
+        intelligence=intelligence,
+        use_mre=bool(state.get("use_mre", True)),
+    )
+    if errors:
+        return {"error": "Rule-guided prediction validation failed: " + "; ".join(errors)}
+    return {}
+
+
 def _resource_range_rows_from_parallel(parallel_out: Dict[str, Any]) -> List[Dict[str, Any]]:
-    mi_block = parallel_out.get("m_and_i") or {}
-    inf_block = parallel_out.get("inferred") or {}
-    rows = _metric_range_rows("m_and_i", mi_block)
-    rows.extend(_metric_range_rows("inferred", inf_block))
+    total_ranges = _derived_total_ranges_from_parallel(parallel_out)
+    rows = _metric_range_rows("m_and_i", parallel_out.get("m_and_i") or {})
+    rows.extend(_metric_range_rows("inferred", parallel_out.get("inferred") or {}))
 
-    mi_t = _range_value(mi_block, "tonnage_range_mt", "tonnage_mt")
-    inf_t = _range_value(inf_block, "tonnage_range_mt", "tonnage_mt")
-    mi_g = _range_value(mi_block, "grade_range_gpt", "grade_gpt")
-    inf_g = _range_value(inf_block, "grade_range_gpt", "grade_gpt")
-    mi_c = _contained_range_value(mi_block)
-    inf_c = _contained_range_value(inf_block)
-    total_t = {key: (mi_t.get(key) or 0.0) + (inf_t.get(key) or 0.0) for key in ("p10", "p50", "p90")}
-    total_c = {key: (mi_c.get(key) or 0.0) + (inf_c.get(key) or 0.0) for key in ("p10", "p50", "p90")}
-    total_g = _weighted_grade_range(mi_t, mi_g, inf_t, inf_g)
-
-    for metric, values, unit in (
-        ("tonnage_mt", total_t, "Mt"),
-        ("grade_gpt", total_g, "g/t"),
-        ("contained_moz", total_c, "Moz"),
+    for metric, key, unit in (
+        ("tonnage_mt", "tonnage_range_mt", "Mt"),
+        ("grade_gpt", "grade_range_gpt", "g/t"),
+        ("contained_moz", "contained_range_moz", "Moz"),
     ):
+        values = total_ranges.get(key) or {}
         if values.get("p50") is None:
             continue
         rows.append({
@@ -234,6 +254,25 @@ def _resource_range_rows_from_parallel(parallel_out: Dict[str, Any]) -> List[Dic
             "payload": {"source": "parallel_gold_model", "derived": True},
         })
     return rows
+
+
+def _derived_total_ranges_from_parallel(parallel_out: Dict[str, Any]) -> Dict[str, Any]:
+    mi_block = parallel_out.get("m_and_i") or {}
+    inf_block = parallel_out.get("inferred") or {}
+    mi_t = _range_value(mi_block, "tonnage_range_mt", "tonnage_mt")
+    inf_t = _range_value(inf_block, "tonnage_range_mt", "tonnage_mt")
+    mi_g = _range_value(mi_block, "grade_range_gpt", "grade_gpt")
+    inf_g = _range_value(inf_block, "grade_range_gpt", "grade_gpt")
+    mi_c = _contained_range_value(mi_block)
+    inf_c = _contained_range_value(inf_block)
+    total_t = {key: (mi_t.get(key) or 0.0) + (inf_t.get(key) or 0.0) for key in ("p10", "p50", "p90")}
+    total_c = {key: (mi_c.get(key) or 0.0) + (inf_c.get(key) or 0.0) for key in ("p10", "p50", "p90")}
+    total_g = _weighted_grade_range(mi_t, mi_g, inf_t, inf_g)
+    return {
+        "tonnage_range_mt": {key: _round(total_t.get(key), 6) for key in ("p10", "p50", "p90")},
+        "grade_range_gpt": {key: _round(total_g.get(key), 6) for key in ("p10", "p50", "p90")},
+        "contained_range_moz": {key: _round(total_c.get(key), 6) for key in ("p10", "p50", "p90")},
+    }
 
 
 def _source_url_from_text(text: str) -> Optional[str]:
@@ -453,7 +492,38 @@ def save_model_run_node(
     thread_id = cfg.get("thread_id")
     run_id = cfg.get("run_id")
 
+    parallel_out = {
+        **parallel_out,
+        "total": {
+            **_derived_total_ranges_from_parallel(parallel_out),
+            "derived": True,
+        },
+    }
     fields = _fields_from_parallel(project, parallel_out)
+    intelligence = state.get("project_intelligence") or {}
+    if intelligence:
+        signals = fields.get("signal_contributions_json")
+        if not isinstance(signals, dict):
+            signals = {"legacy_signal_contributions": signals} if signals else {}
+        signals["project_intelligence"] = {
+            "id": state.get("intelligence_run_id") or intelligence.get("id"),
+            "rule_pack_hash": state.get("rule_pack_hash") or intelligence.get("rule_pack_hash"),
+            "mode": intelligence.get("mode"),
+            "commodity": intelligence.get("commodity"),
+            "archetype": (intelligence.get("rule_pack") or {}).get("archetype"),
+        }
+        fields["signal_contributions_json"] = signals
+        parallel_out = {
+            **parallel_out,
+            "intelligence_run_id": state.get("intelligence_run_id") or intelligence.get("id"),
+            "rule_pack_hash": state.get("rule_pack_hash") or intelligence.get("rule_pack_hash"),
+            "project_intelligence_summary": {
+                "mode": intelligence.get("mode"),
+                "commodity": intelligence.get("commodity"),
+                "archetype": (intelligence.get("rule_pack") or {}).get("archetype"),
+                "evidence_gaps": intelligence.get("evidence_gaps") or [],
+            },
+        }
     model_run_id = supabase_ops.save_model_run(
         project_id=project_id,
         model_type=model_type,
@@ -488,7 +558,9 @@ builder.add_node("load_project_and_analogs", load_project_and_analogs_node)
 builder.add_node("check_analogs_present", check_analogs_or_skip_node)
 builder.add_node("fetch_drilling_evidence", fetch_drilling_evidence_node)
 builder.add_node("fetch_inferred_evidence", fetch_inferred_evidence_node)
+builder.add_node("build_project_intelligence", project_intelligence_node)
 builder.add_node("call_parallel_gold_model", parallel_gold_model_node)
+builder.add_node("validate_rule_guided_model", validate_rule_guided_model_node)
 builder.add_node("save_model_run", save_model_run_node)
 
 builder.set_entry_point("load_project_and_analogs")
@@ -498,8 +570,13 @@ builder.add_conditional_edges("check_analogs_present", _route_after_check, {
     END: END,
 })
 builder.add_edge("fetch_drilling_evidence", "fetch_inferred_evidence")
-builder.add_edge("fetch_inferred_evidence", "call_parallel_gold_model")
+builder.add_edge("fetch_inferred_evidence", "build_project_intelligence")
+builder.add_edge("build_project_intelligence", "call_parallel_gold_model")
 builder.add_conditional_edges("call_parallel_gold_model", _route_after_parallel, {
+    "validate_rule_guided_model": "validate_rule_guided_model",
+    END: END,
+})
+builder.add_conditional_edges("validate_rule_guided_model", _route_after_validation, {
     "save_model_run": "save_model_run",
     END: END,
 })

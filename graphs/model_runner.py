@@ -25,6 +25,7 @@ from langgraph.graph import StateGraph, END
 
 from nodes import supabase_ops, model_builder, drilling_extractor
 from nodes import ni_43_101_extractor, rules_engine, inferred_extractor
+from nodes.project_intelligence import project_intelligence_node
 from graphs.report_generator import (
     load_project_and_analogs_node,
     load_rules_node,
@@ -73,10 +74,16 @@ class ModelRunnerState(TypedDict, total=False):
     # When omitted or false, fetch_drilling_evidence_node uses the cache
     # unless it's stale or missing.
     fetch_recent_drill_holes: bool
+    use_mre: bool
+    use_intelligence_layer: bool
+    refresh_project_intelligence: bool
 
     # Loaded
     project: Optional[Dict]
     analogs: List[Dict]
+    project_intelligence: Optional[Dict]
+    intelligence_run_id: Optional[str]
+    rule_pack_hash: Optional[str]
     all_rules: List[Dict]
     activated_rules: List[Dict]
     rule_effects: Dict
@@ -514,11 +521,36 @@ def save_model_run_node(
 
     mre_used = bool(model.get("mre_signal_applied"))
     fields = _fields_from_model(project, model, is_post_mre=mre_used)
+    intelligence = state.get("project_intelligence") or {}
+    model_output_json = dict(model)
+    if intelligence:
+        signals = fields.get("signal_contributions_json")
+        if not isinstance(signals, dict):
+            signals = {"legacy_signal_contributions": signals} if signals else {}
+        signals["project_intelligence"] = {
+            "id": state.get("intelligence_run_id") or intelligence.get("id"),
+            "rule_pack_hash": state.get("rule_pack_hash") or intelligence.get("rule_pack_hash"),
+            "mode": intelligence.get("mode"),
+            "commodity": intelligence.get("commodity"),
+            "archetype": (intelligence.get("rule_pack") or {}).get("archetype"),
+        }
+        fields["signal_contributions_json"] = signals
+        model_output_json.update({
+            "intelligence_run_id": state.get("intelligence_run_id") or intelligence.get("id"),
+            "rule_pack_hash": state.get("rule_pack_hash") or intelligence.get("rule_pack_hash"),
+            "project_intelligence_summary": {
+                "mode": intelligence.get("mode"),
+                "commodity": intelligence.get("commodity"),
+                "archetype": (intelligence.get("rule_pack") or {}).get("archetype"),
+                "evidence_gaps": intelligence.get("evidence_gaps") or [],
+            },
+        })
+
     supabase_ops.save_model_run(
         project_id=project_id,
         model_type=("post_mre" if mre_used else "pre_mre"),
         fields=fields,
-        model_output_json=model,
+        model_output_json=model_output_json,
         thread_id=thread_id,
         run_id=run_id,
     )
@@ -533,6 +565,7 @@ builder.add_node("load_project_and_analogs", load_project_and_analogs_node)
 builder.add_node("check_analogs_present", check_analogs_present_node)
 builder.add_node("fetch_drilling_evidence", fetch_drilling_evidence_node)
 builder.add_node("fetch_inferred_evidence", fetch_inferred_evidence_node)
+builder.add_node("build_project_intelligence", project_intelligence_node)
 builder.add_node("load_rules", load_rules_node)
 builder.add_node("activate_rules", activate_rules_node)
 builder.add_node("build_model", build_model_node)
@@ -545,7 +578,8 @@ builder.add_conditional_edges("check_analogs_present", _route_after_check, {
     END: END,
 })
 builder.add_edge("fetch_drilling_evidence", "fetch_inferred_evidence")
-builder.add_edge("fetch_inferred_evidence", "load_rules")
+builder.add_edge("fetch_inferred_evidence", "build_project_intelligence")
+builder.add_edge("build_project_intelligence", "load_rules")
 builder.add_edge("load_rules", "activate_rules")
 builder.add_edge("activate_rules", "build_model")
 builder.add_edge("build_model", "save_model_run")

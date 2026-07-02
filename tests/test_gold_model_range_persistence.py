@@ -6,6 +6,7 @@ from types import SimpleNamespace
 sys.modules.setdefault("nodes.pdf_generator", SimpleNamespace())
 
 from graphs.gold_model_builder import (
+    _derived_total_ranges_from_parallel,
     _fields_from_parallel,
     _resource_range_rows_from_parallel,
     _source_rows_from_parallel,
@@ -37,6 +38,7 @@ def test_gold_parallel_ranges_feed_model_run_percentiles_and_range_rows():
 
     fields = _fields_from_parallel({"material": "gold"}, parallel_out)
     rows = _resource_range_rows_from_parallel(parallel_out)
+    total = _derived_total_ranges_from_parallel(parallel_out)
 
     assert fields["mi_tonnage_mt"] == 10
     assert fields["p10_tonnage_mt"] == 7
@@ -55,6 +57,8 @@ def test_gold_parallel_ranges_feed_model_run_percentiles_and_range_rows():
         and row["p50"] == 14
         for row in rows
     )
+    assert total["tonnage_range_mt"] == {"p10": 7, "p50": 14, "p90": 28}
+    assert total["contained_range_moz"] == {"p10": 0.25, "p50": 0.611, "p90": 1.35}
 
 
 def test_gold_range_rows_derive_tiny_positive_contained_when_parallel_rounds_to_zero():
